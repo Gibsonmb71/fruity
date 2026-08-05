@@ -1,28 +1,51 @@
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
 import React from 'react';
+
+/** How a panel pads its body. */
+export type YfCardVariant =
+  /** Padding on all sides — the default, for form fields and prose. */
+  | 'default'
+  /** Horizontal padding only — for a `SettingsList`, whose rows supply their own vertical rhythm. */
+  | 'rows'
+  /** No padding — for a full-bleed table or list that draws its own edges. */
+  | 'flush';
+
+const bodyPadding: Record<YfCardVariant, object | undefined> = {
+  default: { px: 2, py: 1.5 },
+  rows: { px: 2 },
+  flush: undefined,
+};
 
 interface IYfCardProps {
   title: React.JSX.Element | string;
+  /** Controls belonging to the panel as a whole, shown opposite the title. */
   // eslint-disable-next-line react/require-default-props
-  secondaryHeader?: React.JSX.Element;
+  actions?: React.ReactNode;
   /** Short line of explanatory text under the title. */
   // eslint-disable-next-line react/require-default-props
-  description?: string;
-  /** Remove the body padding, e.g. when the child is a full-bleed table or list. */
+  description?: React.ReactNode;
   // eslint-disable-next-line react/require-default-props
-  flush?: boolean;
+  variant?: YfCardVariant;
+  /** Fill the height of its grid/flex track, so panels sitting side by side line up. */
+  // eslint-disable-next-line react/require-default-props
+  fullHeight?: boolean;
 }
 
 /**
- * The standard bordered panel. Low-contrast 1px border, no elevation, compact header — the
- * containment comes from the border rather than from a shadow.
+ * The standard bordered panel, and the only one — every page groups its content with these rather
+ * than with per-page `sx`. Low-contrast 1px border, no elevation, compact header: the containment
+ * comes from the border, not from a shadow.
  */
 function YfCard(props: React.PropsWithChildren<IYfCardProps>) {
-  const { title, children, secondaryHeader, description, flush } = props;
+  const { title, children, actions, description, variant = 'default', fullHeight } = props;
   return (
-    <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+    <Paper
+      variant="outlined"
+      sx={{ overflow: 'hidden', ...(fullHeight ? { height: '100%', display: 'flex', flexDirection: 'column' } : {}) }}
+    >
       <Box
         sx={{
           display: 'flex',
@@ -45,9 +68,13 @@ function YfCard(props: React.PropsWithChildren<IYfCardProps>) {
             </Typography>
           )}
         </Box>
-        {secondaryHeader && <Box sx={{ flexShrink: 0 }}>{secondaryHeader}</Box>}
+        {actions && (
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexShrink: 0 }}>
+            {actions}
+          </Stack>
+        )}
       </Box>
-      <Box sx={flush ? undefined : { px: 2, py: 1.5 }}>{children}</Box>
+      <Box sx={{ ...bodyPadding[variant], ...(fullHeight ? { flexGrow: 1 } : {}) }}>{children}</Box>
     </Paper>
   );
 }

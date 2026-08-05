@@ -31,7 +31,7 @@ function MaxPlayersSettingsCard() {
   };
 
   return (
-    <YfCard title="Players">
+    <YfCard title="Players" variant="rows" fullHeight>
       <SettingsList>
         <SettingRow label="Max active per team" description={maxPlayersFieldHelpText}>
           <YfNumericField
