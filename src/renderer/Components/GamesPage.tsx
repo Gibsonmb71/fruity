@@ -13,6 +13,7 @@ import {
   TextField,
   Skeleton,
   Button,
+  Paper,
 } from '@mui/material';
 import React, { useContext, useMemo, useState } from 'react';
 import { Add, Delete, Edit, Error, ExpandMore, FileUpload, FilterAlt, Warning } from '@mui/icons-material';
@@ -26,17 +27,25 @@ import GamesViewByPool from './GamesPagePoolView';
 import { ValidationStatuses } from '../DataModel/Interfaces';
 import { Team } from '../DataModel/Team';
 import { CtrlOrCmd, trunc } from '../Utils/GeneralUtils';
-import { YfPageHeader } from '../Utils/GeneralReactUtils';
+import { YfEmptyState, YfPageHeader } from '../Utils/GeneralReactUtils';
+import { ApplicationPages } from '../Enums';
 
 // Defines the order the buttons should be in
 const viewList = ['By round', 'By pool'];
 
 const teamSelectNullOption = '';
 
-export default function GamesPage() {
+interface IGamesPageProps {
+  // eslint-disable-next-line react/require-default-props
+  onNavigate?: (page: ApplicationPages) => void;
+}
+
+export default function GamesPage(props: IGamesPageProps) {
+  const { onNavigate } = props;
   const tournManager = useContext(TournamentContext);
   const [curView] = useSubscription(tournManager.currentGamesPageView);
   const [filterTeam, setFilterTeam] = useState<Team | undefined>(undefined);
+  const hasSchedule = tournManager.tournament.phases.length > 0;
 
   return (
     <>
@@ -86,8 +95,24 @@ export default function GamesPage() {
           </Box>
         )}
       </Box>
-      {curView === 0 && <GamesViewByRound filterTeam={filterTeam} />}
-      {curView === 1 && <GamesViewByPool />}
+      {!hasSchedule ? (
+        <Paper variant="outlined">
+          <YfEmptyState
+            title="Choose a schedule before entering games"
+            description="Once the tournament has stages and rounds, games will be organized here for quick entry and review."
+            action={
+              <Button variant="contained" onClick={() => onNavigate?.(ApplicationPages.Schedule)}>
+                Open Schedule
+              </Button>
+            }
+          />
+        </Paper>
+      ) : (
+        <>
+          {curView === 0 && <GamesViewByRound filterTeam={filterTeam} />}
+          {curView === 1 && <GamesViewByPool />}
+        </>
+      )}
     </>
   );
 }

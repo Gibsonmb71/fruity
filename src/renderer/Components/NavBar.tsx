@@ -8,12 +8,13 @@ import Button from '@mui/material/Button';
 import MenuItem from '@mui/material/MenuItem';
 import { Dialog, DialogActions, DialogContent, DialogTitle, Divider, ListItemIcon, Tooltip } from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
-import { Check, DarkMode, HelpOutlined, LightMode, SettingsBrightness } from '@mui/icons-material';
+import { Check, DarkMode, HelpOutlined, LightMode, SaveOutlined, SettingsBrightness } from '@mui/icons-material';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ApplicationPages } from '../Enums';
 import { hotkeyFormat } from '../Utils/GeneralReactUtils';
 import getAppPageHelpText from './PageLevelHelpText';
 import { headerHeight, macTrafficLightWidth } from '../Theme/tokens';
+import { TournamentContext } from '../TournamentManager';
 
 // Display names for the buttons
 const pageNames = {
@@ -69,8 +70,13 @@ interface INavBarProps {
 
 function NavBar(props: INavBarProps) {
   const { activePage, setActivePage } = props;
+  const tournManager = React.useContext(TournamentContext);
   const [tipsDialogOpen, setTipsDialogOpen] = React.useState(false);
   const activeIndex = applicationPageOrder.indexOf(activePage);
+  const tournamentLabel = tournManager.tournament.name.trim() || tournManager.displayName || 'New tournament';
+  let fileStatus: 'New' | 'Unsaved' | 'Saved' = 'Saved';
+  if (tournManager.unsavedData) fileStatus = 'Unsaved';
+  else if (tournManager.filePath === null) fileStatus = 'New';
 
   const rowRef = React.useRef<HTMLDivElement | null>(null);
   const leftRef = React.useRef<HTMLDivElement | null>(null);
@@ -163,6 +169,7 @@ function NavBar(props: INavBarProps) {
             ref={leftRef}
             sx={{
               flexShrink: 0,
+              minWidth: 0,
               display: 'flex',
               alignItems: 'center',
               // The traffic lights sit at the very left of the window on macOS, so only this
@@ -171,18 +178,48 @@ function NavBar(props: INavBarProps) {
               ...(isMac ? { pl: `${macTrafficLightWidth - rowPaddingX}px` } : undefined),
             }}
           >
-            <Typography
-              noWrap
-              sx={{
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                letterSpacing: '-0.01em',
-                color: 'text.primary',
-                userSelect: 'none',
-              }}
-            >
-              YellowFruit
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0, flexShrink: 0 }}>
+              <Box
+                aria-hidden
+                sx={{
+                  width: 7,
+                  height: 7,
+                  flexShrink: 0,
+                  borderRadius: '50%',
+                  backgroundColor: 'primary.main',
+                  boxShadow: '0 0 0 3px var(--mui-palette-action-selected)',
+                }}
+              />
+              <Typography
+                noWrap
+                sx={{
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
+                  letterSpacing: '-0.01em',
+                  color: 'text.primary',
+                  userSelect: 'none',
+                }}
+              >
+                YellowFruit
+              </Typography>
+            </Box>
+            <Box aria-hidden sx={{ width: '1px', height: 16, mx: 1, flexShrink: 0, backgroundColor: 'divider' }} />
+            <Tooltip title={tournamentLabel} placement="bottom-start">
+              <Typography
+                noWrap
+                sx={{
+                  minWidth: 0,
+                  maxWidth: 190,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  color: 'text.secondary',
+                  fontSize: '0.75rem',
+                  userSelect: 'none',
+                }}
+              >
+                {tournamentLabel}
+              </Typography>
+            </Tooltip>
           </Box>
 
           <Box
@@ -264,8 +301,48 @@ function NavBar(props: INavBarProps) {
               ...(centered ? { ml: 'auto' } : undefined),
             }}
           >
+            {tournManager.unsavedData && (
+              <Tooltip title="Save your changes">
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<SaveOutlined fontSize="small" />}
+                  onClick={() => tournManager.saveCurrentTournament()}
+                  sx={{ ...noDragSx, minHeight: 28, px: 1 }}
+                >
+                  Save
+                </Button>
+              </Tooltip>
+            )}
+            <Tooltip title={`${fileStatus} file`}>
+              <Box
+                role="status"
+                aria-label={`${fileStatus} file`}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.6,
+                  px: 0.75,
+                  color: fileStatus === 'Unsaved' ? 'warning.main' : 'text.secondary',
+                  userSelect: 'none',
+                }}
+              >
+                <Box
+                  aria-hidden
+                  sx={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    backgroundColor: fileStatus === 'Unsaved' ? 'warning.main' : 'currentColor',
+                  }}
+                />
+                <Typography variant="caption" sx={{ fontSize: '0.6875rem' }}>
+                  {fileStatus}
+                </Typography>
+              </Box>
+            </Tooltip>
             <ColorModeButton />
-            <Tooltip title="Show help for this form">
+            <Tooltip title="Show help for this page">
               <IconButton size="small" onClick={() => setTipsDialogOpen(true)} sx={noDragSx}>
                 <HelpOutlined fontSize="small" />
               </IconButton>

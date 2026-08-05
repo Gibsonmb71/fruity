@@ -1,15 +1,16 @@
-import { Box, Button, Stack, Switch, TextField, Typography } from '@mui/material';
+import { Box, Button, ButtonBase, Stack, Switch, TextField, Typography } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { useContext } from 'react';
 import { DatePicker } from '@mui/x-date-pickers';
 import dayjs from 'dayjs';
-import { Delete, Restore } from '@mui/icons-material';
+import { ArrowForward, AutoAwesome, CheckCircle, Delete, Restore } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import YfCard from './YfCard';
 import { NullDate } from '../Utils/UtilTypes';
 import { YfFieldGrid, YfFieldRow, YfNotice, YfPageHeader, YfToggleGrid, YfToggleRow } from '../Utils/GeneralReactUtils';
 import { Round } from '../DataModel/Round';
+import { ApplicationPages } from '../Enums';
 
 /**
  * Beyond this many rounds the packet list would drive the page height on its own, so it scrolls
@@ -17,10 +18,18 @@ import { Round } from '../DataModel/Round';
  */
 const packetScrollAfterRounds = 8;
 
-function GeneralPage() {
+interface IGeneralPageProps {
+  // eslint-disable-next-line react/require-default-props
+  onNavigate?: (page: ApplicationPages) => void;
+}
+
+function GeneralPage(props: IGeneralPageProps) {
+  const { onNavigate } = props;
+
   return (
     <>
       <YfPageHeader title="General" description="What, where and when this tournament is, and what you track." />
+      <SetupGuide onNavigate={onNavigate} />
       <BackupRecoveryNotice />
       {/*
         Three panels in two rows, not one panel per field: the two narrow groups sit side by side and
@@ -39,6 +48,185 @@ function GeneralPage() {
         </Grid>
       </Grid>
     </>
+  );
+}
+
+interface ISetupStep {
+  number: number;
+  title: string;
+  description: string;
+  page: ApplicationPages;
+  complete: boolean;
+}
+
+/** A short first-run path that turns a blank tournament into a clear next action. */
+function SetupGuide(props: IGeneralPageProps) {
+  const { onNavigate } = props;
+  const manager = useContext(TournamentContext);
+  const { tournament } = manager;
+  const [phases] = useSubscription(tournament.phases);
+  const [numberOfTeams] = useSubscription(tournament.getNumberOfTeams());
+
+  if (tournament.hasMatchData) return null;
+
+  const steps: ISetupStep[] = [
+    {
+      number: 1,
+      title: 'Name the tournament',
+      description:
+        tournament.name.trim() === '' ? 'Add a name, location and dates.' : 'Tournament details are in place.',
+      page: ApplicationPages.General,
+      complete: tournament.name.trim() !== '',
+    },
+    {
+      number: 2,
+      title: 'Review the rules',
+      description: 'Choose a standard format, then tune the details.',
+      page: ApplicationPages.Rules,
+      complete: tournament.standardRuleSet !== undefined,
+    },
+    {
+      number: 3,
+      title: 'Build a schedule',
+      description: phases.length === 0 ? 'Start with a template for your field.' : 'Stages and rounds are ready.',
+      page: ApplicationPages.Schedule,
+      complete: phases.length > 0,
+    },
+    {
+      number: 4,
+      title: 'Add teams',
+      description:
+        numberOfTeams === 0 ? 'Register teams one by one or import them.' : `${numberOfTeams} teams are registered.`,
+      page: ApplicationPages.Teams,
+      complete: numberOfTeams > 0,
+    },
+  ];
+  const allReady = steps.every((step) => step.complete);
+
+  return (
+    <Box
+      sx={{
+        mb: 2.5,
+        p: 2,
+        border: 1,
+        borderColor: 'primary.light',
+        borderRadius: 2,
+        background:
+          'linear-gradient(135deg, var(--mui-palette-action-selected) 0%, var(--mui-palette-background-paper) 76%)',
+      }}
+    >
+      <Stack direction="row" sx={{ alignItems: 'flex-start', gap: 1.25 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            width: 32,
+            height: 32,
+            borderRadius: 1.5,
+            color: 'primary.main',
+            backgroundColor: 'background.paper',
+            border: 1,
+            borderColor: 'primary.light',
+          }}
+        >
+          <AutoAwesome fontSize="small" />
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle1">Set up your tournament</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+            Work through the essentials in any order. You can change these settings later.
+          </Typography>
+        </Box>
+      </Stack>
+
+      <Grid container spacing={1.25} sx={{ mt: 1.5 }}>
+        {steps.map((step) => (
+          <Grid key={step.title} size={{ xs: 12, sm: 6, lg: 3 }}>
+            <ButtonBase
+              component="div"
+              onClick={() => onNavigate?.(step.page)}
+              sx={{
+                display: 'block',
+                width: '100%',
+                height: '100%',
+                borderRadius: 1.5,
+                textAlign: 'left',
+              }}
+            >
+              <Box
+                sx={{
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  height: '100%',
+                  minHeight: 114,
+                  p: 1.5,
+                  border: 1,
+                  borderColor: step.complete ? 'success.main' : 'divider',
+                  borderRadius: 1.5,
+                  backgroundColor: 'background.paper',
+                  transition: 'border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease',
+                  '&:hover': {
+                    borderColor: step.complete ? 'success.main' : 'primary.main',
+                    transform: 'translateY(-1px)',
+                    boxShadow: 1,
+                  },
+                }}
+              >
+                <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 22,
+                      height: 22,
+                      borderRadius: '50%',
+                      color: step.complete ? 'success.main' : 'text.secondary',
+                      backgroundColor: step.complete ? 'success.light' : 'action.hover',
+                      fontSize: '0.6875rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {step.complete ? <CheckCircle sx={{ fontSize: 16 }} /> : step.number}
+                  </Box>
+                  {!step.complete && <ArrowForward sx={{ fontSize: 16, color: 'text.disabled' }} />}
+                </Stack>
+                <Typography variant="subtitle2" sx={{ mt: 1.25 }}>
+                  {step.title}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, pr: 0.5 }}>
+                  {step.description}
+                </Typography>
+              </Box>
+            </ButtonBase>
+          </Grid>
+        ))}
+      </Grid>
+
+      {allReady && (
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          sx={{
+            alignItems: { xs: 'stretch', sm: 'center' },
+            gap: 1.25,
+            mt: 1.5,
+            pt: 1.5,
+            borderTop: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1 }}>
+            Everything is ready. Enter the first game when you’re ready to start scoring.
+          </Typography>
+          <Button variant="contained" size="small" onClick={() => onNavigate?.(ApplicationPages.Games)}>
+            Open Games
+          </Button>
+        </Stack>
+      )}
+    </Box>
   );
 }
 

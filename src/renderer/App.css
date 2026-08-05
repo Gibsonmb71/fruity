@@ -4,7 +4,33 @@
  *
  * Surfaces, colors and typography come from the MUI theme (src/renderer/Theme). Only put
  * behavioral or layout-hack rules here.
- */
+*/
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  color: var(--mui-palette-primary-contrastText);
+  background: var(--mui-palette-primary-main);
+}
+
+/* Keep keyboard focus obvious without making mouse interactions feel noisy. */
+:focus-visible {
+  outline: 2px solid var(--mui-palette-primary-main);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
 
 .drop-target * {
   pointer-events: none;

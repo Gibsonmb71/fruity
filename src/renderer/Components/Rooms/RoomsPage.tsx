@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -56,6 +57,7 @@ import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSe
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
 import RebracketDialog from './RebracketDialog';
 import MatchInboxCard from './MatchInboxCard';
+import { YfPageHeader } from '../../Utils/GeneralReactUtils';
 import './rooms.css';
 
 const pollIntervalMs = 3000;
@@ -404,15 +406,17 @@ export default function RoomsPage() {
   return (
     <TournamentServerContext.Provider value={service}>
       <main className="rooms-operations">
-        <header className="rooms-page-header">
-          <div>
-            <h1>Rooms</h1>
-            <p>Tournament operations, room readiness, live games, and final-result review.</p>
-          </div>
-          <div className={`rooms-server-state ${service.status.running ? 'is-running' : 'is-offline'}`}>
-            Server · {service.status.running ? 'Running' : 'Offline'}
-          </div>
-        </header>
+        <YfPageHeader
+          title="Rooms"
+          description="Tournament operations, room readiness, live games, and final-result review."
+          status={
+            <Chip
+              size="small"
+              color={service.status.running ? 'success' : 'default'}
+              label={service.status.running ? 'Server running' : 'Server offline'}
+            />
+          }
+        />
 
         <div className="rooms-server-toolbar">
           <div className="rooms-server-address">

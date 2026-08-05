@@ -564,6 +564,11 @@ export class TournamentManager {
     this.saveYftFile();
   }
 
+  /** Save from a visible UI control, using the current file or opening Save As for a new tournament. */
+  saveCurrentTournament() {
+    this.saveYftFile();
+  }
+
   /** Write the current tournament to the current file */
   private saveYftFile(subsequentAction?: FileSwitchActions) {
     const fileObj = this.generateWholeFileObj();

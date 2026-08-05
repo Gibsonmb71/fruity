@@ -124,7 +124,7 @@ function TournamentEditor() {
         }}
       >
         <Box sx={{ maxWidth: 1500, mx: 'auto' }}>
-          <ActivePage whichPage={activePage} />
+          <ActivePage whichPage={activePage} onNavigate={setactivePage} />
         </Box>
       </Box>
       <GenericDialog />
@@ -144,14 +144,15 @@ function TournamentEditor() {
 
 interface IActivePageProps {
   whichPage: ApplicationPages;
+  onNavigate: (page: ApplicationPages) => void;
 }
 
 /** A switch statement for which page to show */
 function ActivePage(props: IActivePageProps) {
-  const { whichPage } = props;
+  const { whichPage, onNavigate } = props;
   switch (whichPage) {
     case ApplicationPages.General:
-      return <GeneralPage />;
+      return <GeneralPage onNavigate={onNavigate} />;
     case ApplicationPages.Rules:
       return <RulesPage />;
     case ApplicationPages.Schedule:
@@ -159,7 +160,7 @@ function ActivePage(props: IActivePageProps) {
     case ApplicationPages.Teams:
       return <TeamsPage />;
     case ApplicationPages.Games:
-      return <GamesPage />;
+      return <GamesPage onNavigate={onNavigate} />;
     case ApplicationPages.Rooms:
       return <RoomsPage />;
     case ApplicationPages.StatReport:
