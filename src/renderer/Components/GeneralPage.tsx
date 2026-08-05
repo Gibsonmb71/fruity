@@ -1,5 +1,5 @@
+import { Box, Button, Stack, Switch, TextField, Typography } from '@mui/material';
 import Grid from '@mui/material/Grid';
-import { Alert, AlertTitle, Box, Button, Divider, Stack, Switch, TextField, Typography } from '@mui/material';
 import { useContext } from 'react';
 import { DatePicker } from '@mui/x-date-pickers';
 import dayjs from 'dayjs';
@@ -8,22 +8,33 @@ import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import YfCard from './YfCard';
 import { NullDate } from '../Utils/UtilTypes';
-import { CollapsibleArea, SettingRow, SettingsList, YfPageHeader } from '../Utils/GeneralReactUtils';
+import { YfFieldGrid, YfFieldRow, YfNotice, YfPageHeader, YfToggleGrid, YfToggleRow } from '../Utils/GeneralReactUtils';
 import { Round } from '../DataModel/Round';
+
+/**
+ * Beyond this many rounds the packet list would drive the page height on its own, so it scrolls
+ * inside its panel instead.
+ */
+const packetScrollAfterRounds = 8;
 
 function GeneralPage() {
   return (
     <>
       <YfPageHeader title="General" description="What, where and when this tournament is, and what you track." />
       <BackupRecoveryNotice />
+      {/*
+        Three panels in two rows, not one panel per field: the two narrow groups sit side by side and
+        the switch grid, which is naturally wide and short, spans underneath. Collapses to a single
+        column only when there genuinely isn't room for two.
+      */}
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Stack spacing={2}>
-            <TournamentInfoPanel />
-            <QuestionSetPanel />
-          </Stack>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <TournamentPanel />
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <QuestionSetPanel />
+        </Grid>
+        <Grid size={{ xs: 12 }}>
           <TrackingPanel />
         </Grid>
       </Grid>
@@ -32,7 +43,7 @@ function GeneralPage() {
 }
 
 /** Miscellaneous what/where/when info about the tournament */
-function TournamentInfoPanel() {
+function TournamentPanel() {
   const tournManager = useContext(TournamentContext);
   const thisTournament = tournManager.tournament;
   const [tournName, setTournName] = useSubscription(thisTournament.name);
@@ -43,55 +54,63 @@ function TournamentInfoPanel() {
   const [endDate, setEndDate] = useSubscription(initialEndDateVal);
 
   return (
-    <YfCard title="Tournament">
-      <Stack spacing={2}>
-        <TextField
-          label="Tournament name"
-          spellCheck={false}
-          fullWidth
-          value={tournName}
-          onChange={(e) => setTournName(e.target.value)}
-          onBlur={() => tournManager.setTournamentName(tournName)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') tournManager.setTournamentName(tournName);
-          }}
-        />
-        <TextField
-          label="Location"
-          spellCheck={false}
-          fullWidth
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          onBlur={() => tournManager.setTournamentSiteName(location)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') tournManager.setTournamentSiteName(location);
-          }}
-        />
-        <Grid container spacing={2}>
-          <Grid size={{ xs: 12, sm: 6 }}>
+    <YfCard title="Tournament" fullHeight>
+      <YfFieldGrid>
+        <YfFieldRow label="Name">
+          <TextField
+            hiddenLabel
+            placeholder="Ninety Six Invitational"
+            spellCheck={false}
+            fullWidth
+            value={tournName}
+            onChange={(e) => setTournName(e.target.value)}
+            onBlur={() => tournManager.setTournamentName(tournName)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') tournManager.setTournamentName(tournName);
+            }}
+          />
+        </YfFieldRow>
+        <YfFieldRow label="Location">
+          <TextField
+            hiddenLabel
+            placeholder="Ninety Six High School"
+            spellCheck={false}
+            fullWidth
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            onBlur={() => tournManager.setTournamentSiteName(location)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') tournManager.setTournamentSiteName(location);
+            }}
+          />
+        </YfFieldRow>
+        <YfFieldRow label="Dates">
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
             <DatePicker
-              label="Start date"
               value={startDate}
-              slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+              slotProps={{ textField: { size: 'small', hiddenLabel: true, sx: { width: 150 } } }}
               onChange={(newValue) => {
                 setStartDate(newValue);
                 tournManager.setTournamentStartDate(newValue);
               }}
             />
-          </Grid>
-          <Grid size={{ xs: 12, sm: 6 }}>
+            <Typography variant="body2" color="text.secondary">
+              to
+            </Typography>
             <DatePicker
-              label="End date (if multi-day)"
               value={endDate}
-              slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+              slotProps={{ textField: { size: 'small', hiddenLabel: true, sx: { width: 150 } } }}
               onChange={(newValue) => {
                 setEndDate(newValue);
                 tournManager.setTournamentEndDate(newValue);
               }}
             />
-          </Grid>
-        </Grid>
-      </Stack>
+          </Stack>
+        </YfFieldRow>
+      </YfFieldGrid>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.25 }}>
+        Leave the end date empty for a single-day tournament.
+      </Typography>
     </YfCard>
   );
 }
@@ -102,67 +121,113 @@ function QuestionSetPanel() {
   const [qsetName, setQsetName] = useSubscription<string>(thisTournament.questionSet);
 
   return (
-    <YfCard title="Question set">
-      <TextField
-        label="Question set"
-        spellCheck={false}
-        fullWidth
-        value={qsetName}
-        onChange={(e) => setQsetName(e.target.value)}
-        onBlur={() => tournManager.setQuestionSetname(qsetName)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') tournManager.setQuestionSetname(qsetName);
-        }}
-      />
-      <Divider sx={{ mt: 1.5 }} />
-      <CollapsibleArea title={<Typography variant="subtitle2">Packet names</Typography>} secondaryTitle={null}>
-        <PacketNameFields />
-      </CollapsibleArea>
+    <YfCard title="Question set" fullHeight>
+      <YfFieldGrid>
+        <YfFieldRow label="Set name">
+          <TextField
+            hiddenLabel
+            placeholder="2026 NAQT IS-A"
+            spellCheck={false}
+            fullWidth
+            value={qsetName}
+            onChange={(e) => setQsetName(e.target.value)}
+            onBlur={() => tournManager.setQuestionSetname(qsetName)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') tournManager.setQuestionSetname(qsetName);
+            }}
+          />
+        </YfFieldRow>
+      </YfFieldGrid>
+      <PacketNames />
     </YfCard>
   );
 }
 
-function PacketNameFields() {
-  const tournManager = useContext(TournamentContext);
-  const thisTournament = tournManager.tournament;
+/** Packet name per round, as a compact two-column grid rather than another run of labelled fields. */
+function PacketNames() {
+  const thisTournament = useContext(TournamentContext).tournament;
+  const [phases] = useSubscription(thisTournament.phases);
 
-  if (thisTournament.phases.length === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary" sx={{ pb: 1 }}>
-        Pick a schedule first and its rounds will show up here.
-      </Typography>
-    );
-  }
+  const totalRounds = phases.reduce((sum, ph) => sum + ph.rounds.length, 0);
+  const scrolls = totalRounds > packetScrollAfterRounds;
 
-  return thisTournament.phases.map((ph) => (
-    <Box key={ph.name} sx={{ pb: 1 }}>
-      <Typography variant="overline" color="text.secondary" sx={{ display: 'block', pt: 1 }}>
-        {ph.name}
+  return (
+    <Box sx={{ mt: 2, pt: 1.5, borderTop: 1, borderColor: 'divider' }}>
+      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+        Packet names
       </Typography>
-      <SettingsList>
-        {ph.rounds.map((round) => (
-          <PacketNameField key={round.name} round={round} />
-        ))}
-      </SettingsList>
+      {phases.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Rounds appear here once this tournament has a schedule. Pick one on the Schedule page.
+        </Typography>
+      ) : (
+        <Box
+          sx={{
+            // A 14-round schedule would otherwise set the height of the whole page.
+            ...(scrolls ? { maxHeight: 232, overflowY: 'auto', pr: 0.5 } : {}),
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, auto) minmax(0, 1fr)',
+            alignItems: 'center',
+            columnGap: 1.5,
+            rowGap: 0.75,
+          }}
+        >
+          <Typography variant="overline" color="text.secondary">
+            Round
+          </Typography>
+          <Typography variant="overline" color="text.secondary">
+            Packet
+          </Typography>
+          {phases.map((ph) => (
+            <PacketPhaseRows key={ph.name} phaseName={ph.name} rounds={ph.rounds} showPhaseName={phases.length > 1} />
+          ))}
+        </Box>
+      )}
     </Box>
-  ));
+  );
 }
 
-interface IPacketNameFieldProps {
+interface IPacketPhaseRowsProps {
+  phaseName: string;
+  rounds: Round[];
+  showPhaseName: boolean;
+}
+
+function PacketPhaseRows(props: IPacketPhaseRowsProps) {
+  const { phaseName, rounds, showPhaseName } = props;
+
+  return (
+    <>
+      {showPhaseName && (
+        <Typography variant="caption" color="text.secondary" sx={{ gridColumn: '1 / -1', pt: 0.5 }}>
+          {phaseName}
+        </Typography>
+      )}
+      {rounds.map((round) => (
+        <PacketNameRow key={round.name} round={round} />
+      ))}
+    </>
+  );
+}
+
+interface IPacketNameRowProps {
   round: Round;
 }
 
-function PacketNameField(props: IPacketNameFieldProps) {
+function PacketNameRow(props: IPacketNameRowProps) {
   const { round } = props;
   const tournManager = useContext(TournamentContext);
   const { packet } = round;
   const [packetName, setPacketName] = useSubscription(packet.name);
 
   return (
-    <SettingRow label={round.displayName()}>
+    <>
+      <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+        {round.displayName()}
+      </Typography>
       <TextField
         hiddenLabel
-        sx={{ width: 220 }}
+        fullWidth
         value={packetName}
         onChange={(e) => setPacketName(e.target.value)}
         onBlur={() => tournManager.setPacketName(round, packetName)}
@@ -170,7 +235,7 @@ function PacketNameField(props: IPacketNameFieldProps) {
           if (e.key === 'Enter') tournManager.setPacketName(round, packetName);
         }}
       />
-    </SettingRow>
+    </>
   );
 }
 
@@ -209,27 +274,27 @@ function TrackingPanel() {
   };
 
   return (
-    <YfCard title="Tracking" description="Extra attributes to record for teams and players.">
-      <SettingsList>
-        <SettingRow
-          label="Track player year/grade"
-          description="Adds a year field to each player and to the stat report."
-        >
+    <YfCard
+      title="Tracking"
+      description="Each of these adds a field when you enter teams and players, and a section to the stat report."
+    >
+      <YfToggleGrid>
+        <YfToggleRow label="Player year or grade">
           <Switch checked={trackPlayerYear} onChange={(e) => handleTrackYearChange(e.target.checked)} />
-        </SettingRow>
-        <SettingRow label="Track small school">
+        </YfToggleRow>
+        <YfToggleRow label="Small school" hint="Set per organization, not per team">
           <Switch checked={trackSS} onChange={(e) => handleTrackSS(e.target.checked)} />
-        </SettingRow>
-        <SettingRow label="Track junior varsity">
+        </YfToggleRow>
+        <YfToggleRow label="Junior varsity">
           <Switch checked={trackJV} onChange={(e) => handleTrackJV(e.target.checked)} />
-        </SettingRow>
-        <SettingRow label="Track undergrad">
+        </YfToggleRow>
+        <YfToggleRow label="Undergraduate" hint="Set per team and per player">
           <Switch checked={trackUG} onChange={(e) => handleTrackUG(e.target.checked)} />
-        </SettingRow>
-        <SettingRow label="Track division 2">
+        </YfToggleRow>
+        <YfToggleRow label="Division 2" hint="Set per team and per player">
           <Switch checked={trackD2} onChange={(e) => handleTrackD2(e.target.checked)} />
-        </SettingRow>
-      </SettingsList>
+        </YfToggleRow>
+      </YfToggleGrid>
     </YfCard>
   );
 }
@@ -240,38 +305,39 @@ function BackupRecoveryNotice() {
 
   if (!recoveredBackup) return null;
 
-  const firstLine = "YellowFruit didn't shut down correctly. The following file is available to recover:"; // IDE gets mad about the unescaped apostrophe if I put this in raw
+  const firstLine = "YellowFruit didn't shut down correctly, so this file was recovered from its last autosave."; // IDE gets mad about the unescaped apostrophe if I put this in raw
   return (
-    <Alert
-      severity="info"
-      sx={{ mb: 2, alignItems: 'flex-start' }}
-      action={
-        <Stack direction="row" sx={{ gap: 1, pt: 0.5 }}>
-          <Button size="small" startIcon={<Restore />} onClick={() => tournManager.useRecoveredBackup()}>
-            Restore file
-          </Button>
-          <Button
-            size="small"
-            color="inherit"
-            startIcon={<Delete />}
-            onClick={() => tournManager.discardRecoveredBackup()}
-          >
-            Discard
-          </Button>
-        </Stack>
-      }
-    >
-      <AlertTitle>Unsaved work recovered</AlertTitle>
-      <Typography variant="body2" color="text.secondary">
-        {firstLine}
-      </Typography>
-      <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 500 }}>
-        {recoveredBackup.filePath || '(New file)'}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
-        {`Saved at ${recoveredBackup.savedAtTime}`}
-      </Typography>
-    </Alert>
+    <Box sx={{ mb: 2 }}>
+      <YfNotice
+        tone="warning"
+        icon={<Restore fontSize="small" />}
+        title="Unsaved work recovered"
+        description={
+          <>
+            {firstLine}
+            <Box component="span" sx={{ display: 'block', mt: 0.5, fontWeight: 500, color: 'text.primary' }}>
+              {recoveredBackup.filePath || '(New file)'}
+            </Box>
+            {`Autosaved at ${recoveredBackup.savedAtTime}`}
+          </>
+        }
+        action={
+          <Stack direction="row" sx={{ gap: 1 }}>
+            <Button size="small" variant="contained" onClick={() => tournManager.useRecoveredBackup()}>
+              Restore
+            </Button>
+            <Button
+              size="small"
+              color="inherit"
+              startIcon={<Delete fontSize="small" />}
+              onClick={() => tournManager.discardRecoveredBackup()}
+            >
+              Discard
+            </Button>
+          </Stack>
+        }
+      />
+    </Box>
   );
 }
 

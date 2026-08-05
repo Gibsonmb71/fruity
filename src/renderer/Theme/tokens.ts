@@ -77,11 +77,18 @@ export const controlHeight = {
   medium: 36,
 };
 
-/** Height of the top navigation strip, in px. */
+/**
+ * Height of the top navigation strip, in px. One value for every platform: this is what the header
+ * actually renders as *and* what the main content area subtracts from the viewport, so the two can
+ * never disagree.
+ */
 export const headerHeight = 44;
 
-/** Extra top padding needed on macOS so content clears the native traffic lights. */
-export const macTitlebarInset = {
-  paddingTop: 24,
-  paddingLeft: 84,
-};
+/**
+ * Horizontal space the macOS traffic lights occupy with `titleBarStyle: 'hiddenInset'`.
+ *
+ * The buttons are vertically centered in a short band at the top of the window, so they fit inside
+ * a 44px header row without any extra height — only horizontal room has to be reserved, and only
+ * for whatever sits at the far left of the header.
+ */
+export const macTrafficLightWidth = 78;
