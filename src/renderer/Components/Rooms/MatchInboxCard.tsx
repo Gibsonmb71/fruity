@@ -135,7 +135,13 @@ function InboxRow({ item }: { item: IInboxItem }) {
   );
 }
 
-export default function MatchInboxCard({ navigation }: { navigation?: INavigationIntent }) {
+export default function MatchInboxCard({
+  navigation,
+  onNavigationHandled,
+}: {
+  navigation?: INavigationIntent;
+  onNavigationHandled?: () => void;
+}) {
   const service = useContext(TournamentServerContext);
   const cardRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -146,7 +152,8 @@ export default function MatchInboxCard({ navigation }: { navigation?: INavigatio
     const target = cardRef.current.querySelector<HTMLElement>(selector) ?? cardRef.current.querySelector<HTMLElement>('button');
     target?.scrollIntoView({ block: 'center' });
     target?.focus({ preventScroll: true });
-  }, [navigation, service?.inbox.length]);
+    onNavigationHandled?.();
+  }, [navigation, onNavigationHandled, service?.inbox.length]);
   if (!service) return null;
 
   return (

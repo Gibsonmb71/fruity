@@ -47,13 +47,16 @@ import {
   validateSchedule,
 } from '../../Services/ScheduleService';
 import {
+  IRoomAssignmentSnapshot,
   IRebalancePlan,
   applyRebalance,
   applySwapPlan,
   assignRoom,
+  captureRoomAssignmentSnapshot,
   planAutoAssignUnassigned,
   planRebalance,
   planSwap,
+  restoreRoomAssignmentSnapshot,
 } from '../../Services/RoomAllocationService';
 import { resolveTournamentReadiness } from '../../Services/TournamentReadiness';
 import { createNavigationIntent, INavigationIntent } from '../../Services/Navigation';
@@ -183,6 +186,7 @@ export default function RoomsPage({
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<IConfirmState | null>(null);
   const [bulkPlan, setBulkPlan] = useState<{ mode: 'auto' | 'rebalance'; plan: IRebalancePlan } | null>(null);
+  const [assignmentUndo, setAssignmentUndo] = useState<{ snapshot: IRoomAssignmentSnapshot; label: string } | null>(null);
   const [scheduleError, setScheduleError] = useState('');
   const [roomMenu, setRoomMenu] = useState<{ room: TournamentRoom; anchor: HTMLElement } | null>(null);
   const [uncontrolledTab, setUncontrolledTab] = useState(ControlPages.Live);
@@ -202,6 +206,7 @@ export default function RoomsPage({
 
   useEffect(() => {
     if (!navigation) return;
+    if (navigation.target === 'control:match-plan' || navigation.focus === 'result-inbox') return;
     const timer = window.setTimeout(() => onNavigationHandled(), 0);
     return () => window.clearTimeout(timer);
   }, [navigation, onNavigationHandled]);
@@ -345,14 +350,36 @@ export default function RoomsPage({
     });
   };
 
+  const rememberAssignmentUndo = (snapshot: IRoomAssignmentSnapshot, changeCount: number) => {
+    if (changeCount > 0 && snapshot.entries.length > 0) {
+      setAssignmentUndo({
+        snapshot,
+        label: `${changeCount} room assignment${changeCount === 1 ? '' : 's'} updated`,
+      });
+    }
+  };
+
+  const undoAssignment = () => {
+    if (!assignmentUndo) return;
+    const issues = restoreRoomAssignmentSnapshot(tournament, assignmentUndo.snapshot);
+    if (hasBlockingIssue(issues)) {
+      setScheduleError(issues.map((issue) => issue.message).join(' '));
+      return;
+    }
+    setAssignmentUndo(null);
+    manager.markTournamentDataChanged();
+  };
+
   const moveRoomAssignment = (match: ScheduledMatch, nextRoomId: string) => {
     setScheduleError('');
     if (nextRoomId === '') {
+      const snapshot = captureRoomAssignmentSnapshot(tournament, [match.id]);
       const issues = assignRoom(tournament, match.id, undefined, { source: 'manual' });
       if (hasBlockingIssue(issues)) {
         setScheduleError(issues.map((issue) => issue.message).join(' '));
         return;
       }
+      rememberAssignmentUndo(snapshot, 1);
       manager.markTournamentDataChanged();
       return;
     }
@@ -363,11 +390,16 @@ export default function RoomsPage({
       return;
     }
     if (plan.kind === 'move') {
+      const snapshot = captureRoomAssignmentSnapshot(
+        tournament,
+        plan.changes.map((change) => change.matchId),
+      );
       const issues = applySwapPlan(tournament, plan);
       if (hasBlockingIssue(issues)) {
         setScheduleError(issues.map((issue) => issue.message).join(' '));
         return;
       }
+      rememberAssignmentUndo(snapshot, plan.changes.length);
       manager.markTournamentDataChanged();
       return;
     }
@@ -383,9 +415,16 @@ export default function RoomsPage({
       }.`,
       confirmLabel: 'Swap',
       onConfirm: () => {
+        const snapshot = captureRoomAssignmentSnapshot(
+          tournament,
+          plan.changes.map((change) => change.matchId),
+        );
         const issues = applySwapPlan(tournament, plan);
         if (hasBlockingIssue(issues)) setScheduleError(issues.map((issue) => issue.message).join(' '));
-        else manager.markTournamentDataChanged();
+        else {
+          rememberAssignmentUndo(snapshot, plan.changes.length);
+          manager.markTournamentDataChanged();
+        }
         setConfirmState(null);
       },
     });
@@ -406,7 +445,12 @@ export default function RoomsPage({
   };
 
   const applyBulkPlan = (plan: IRebalancePlan) => {
+    const snapshot = captureRoomAssignmentSnapshot(
+      tournament,
+      plan.changes.map((change) => change.matchId),
+    );
     applyRebalance(tournament, plan);
+    rememberAssignmentUndo(snapshot, plan.changes.length);
     manager.markTournamentDataChanged();
     setBulkPlan(null);
   };
@@ -419,8 +463,10 @@ export default function RoomsPage({
       match.status === ScheduledMatchStatus.Accepted
     )
       return;
+    const snapshot = captureRoomAssignmentSnapshot(tournament, [match.id]);
     match.roomAssignmentLocked = match.roomAssignmentLocked ? undefined : true;
     match.roomAssignmentSource = 'manual';
+    rememberAssignmentUndo(snapshot, 1);
     manager.markTournamentDataChanged();
   };
 
@@ -785,6 +831,8 @@ export default function RoomsPage({
               </Alert>
             )}
             <MatchPlanWorkspace
+              tournament={tournament}
+              phases={tournament.phases}
               matches={matches}
               rooms={rooms}
               currentRoundNumber={currentRound}
@@ -793,11 +841,16 @@ export default function RoomsPage({
               onCancel={cancelMatch}
               onToggleLock={toggleRoomAssignmentLock}
               navigation={navigation}
+              onNavigationHandled={onNavigationHandled}
+              undoLabel={assignmentUndo?.label}
+              onUndo={assignmentUndo ? undoAssignment : undefined}
             />
           </section>
         )}
 
-        {activeTab === ControlPages.Live && service.inbox.length > 0 && <MatchInboxCard navigation={navigation} />}
+        {activeTab === ControlPages.Live && (service.inbox.length > 0 || navigation?.focus === 'result-inbox') && (
+          <MatchInboxCard navigation={navigation} onNavigationHandled={onNavigationHandled} />
+        )}
 
         <RoomEditorDialog
           open={roomEditor !== undefined}
