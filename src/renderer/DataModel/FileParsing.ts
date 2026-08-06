@@ -3,6 +3,7 @@
 
 import stringSimilarity from 'string-similarity-js';
 import { versionLt } from '../Utils/GeneralUtils';
+import { ILiveDisplaySettings, LiveDisplayTheme, makeDefaultLiveDisplaySettings } from '../../shared/LiveTypes';
 import AnswerType, { IQbjAnswerType, sortAnswerTypes } from './AnswerType';
 import { IIndeterminateQbj, IQbjObject, IQbjRefPointer, IRefTargetDict, IYftDataModelObject } from './Interfaces';
 import { IQbjMatch, IYftFileMatch, Match } from './Match';
@@ -177,6 +178,7 @@ export default class FileParser {
       this.tourn.rebracketedPhaseCodes = Array.isArray(yfExtraData.rebracketedPhaseCodes)
         ? yfExtraData.rebracketedPhaseCodes.filter((code): code is string => typeof code === 'string')
         : [];
+      this.tourn.liveDisplaySettings = FileParser.parseLiveDisplaySettings(yfExtraData.liveDisplay);
     } else {
       this.tourn.inferCarryoverStatus();
     }
@@ -200,6 +202,37 @@ export default class FileParser {
       if (room) rooms.push(room);
     });
     return rooms.sort(TournamentRoom.compare);
+  }
+
+  /** Read public display settings defensively so damaged or newer metadata cannot stop a .yft opening. */
+  static parseLiveDisplaySettings(source: unknown): ILiveDisplaySettings {
+    const settings = makeDefaultLiveDisplaySettings();
+    if (typeof source !== 'object' || source === null) return settings;
+
+    const candidate = source as Partial<ILiveDisplaySettings> & {
+      slides?: Partial<ILiveDisplaySettings['slides']>;
+    };
+    settings.enabled = candidate.enabled === true;
+    if (candidate.slides && typeof candidate.slides === 'object') {
+      for (const key of Object.keys(settings.slides) as (keyof ILiveDisplaySettings['slides'])[]) {
+        if (typeof candidate.slides[key] === 'boolean') settings.slides[key] = candidate.slides[key] as boolean;
+      }
+    }
+    const validDurations = [5, 10, 15, 20, 30] as const;
+    if (
+      typeof candidate.slideDurationSeconds === 'number' &&
+      validDurations.includes(candidate.slideDurationSeconds as (typeof validDurations)[number])
+    ) {
+      settings.slideDurationSeconds = candidate.slideDurationSeconds as ILiveDisplaySettings['slideDurationSeconds'];
+    }
+    if (typeof candidate.rowsPerSlide === 'number' && Number.isFinite(candidate.rowsPerSlide)) {
+      settings.rowsPerSlide = Math.max(1, Math.min(50, Math.round(candidate.rowsPerSlide)));
+    }
+    if (candidate.theme === 'system' || candidate.theme === 'light' || candidate.theme === 'dark') {
+      settings.theme = candidate.theme as LiveDisplayTheme;
+    }
+    settings.showLastUpdated = candidate.showLastUpdated !== false;
+    return settings;
   }
 
   /** Read the tournament's scheduled matches back. Unreadable entries are skipped, as with rooms. */

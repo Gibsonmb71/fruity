@@ -19,6 +19,7 @@ import { Team } from './Team';
 import { IQbjTournamentSite, TournamentSite } from './TournamentSite';
 import { IYftFileScheduledMatch, ScheduledMatch } from './ScheduledMatch';
 import { IYftFileRoom, TournamentRoom } from './TournamentRoom';
+import { ILiveDisplaySettings, makeDefaultLiveDisplaySettings } from '../../shared/LiveTypes';
 
 /**
  * Represents the data for a tournament.
@@ -85,6 +86,8 @@ interface ITournamentExtraData {
   autoReleaseNextRound?: boolean;
   /** Full phases whose advancement checkpoint has already been confirmed */
   rebracketedPhaseCodes?: string[];
+  /** Public audience/display settings. Browser slideshow position is intentionally not persisted. */
+  liveDisplay?: ILiveDisplaySettings;
 }
 
 /** YellowFruit implementation of the Tournament object */
@@ -167,6 +170,9 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
   /** Explicit confirmation history for phase boundaries; never inferred from generated schedules. */
   rebracketedPhaseCodes: string[] = [];
 
+  /** Settings for the optional read-only public live site and display. */
+  liveDisplaySettings: ILiveDisplaySettings;
+
   htmlGenerator: HtmlReportGenerator;
 
   appVersion: string = '';
@@ -181,6 +187,7 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
     this.tournamentSite = new TournamentSite();
     this.scoringRules = new ScoringRules();
     this.htmlGenerator = new HtmlReportGenerator(this);
+    this.liveDisplaySettings = makeDefaultLiveDisplaySettings();
   }
 
   toFileObject(qbjOnly = false, isTopLevel = true, isReferenced = false): IQbjTournament {
@@ -220,6 +227,7 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
       releasedRoundNumber: this.releasedRoundNumber ?? undefined,
       autoReleaseNextRound: this.autoReleaseNextRound || undefined,
       rebracketedPhaseCodes: this.rebracketedPhaseCodes.length > 0 ? this.rebracketedPhaseCodes : undefined,
+      liveDisplay: this.liveDisplaySettings,
     };
     const yftFileObj = { YfData: metadata, ...qbjObject };
 

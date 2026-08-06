@@ -11,6 +11,7 @@ import {
   roomTokenHeader,
   sessionTokenHeader,
 } from './ServerTypes';
+import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
 
 /** A parsed request body, or the reason it was refused */
 type BodyResult = { ok: true; body: unknown } | { ok: false; status: number; message: string };
@@ -38,6 +39,8 @@ export interface IRouterHost {
   onSessionChanged?: () => void;
   /** Serve the browser room application for non-API routes */
   serveStatic: (req: IncomingMessage, res: ServerResponse, pathname: string) => void;
+  /** Return the deliberately reduced public projection, or null while Live Display is disabled */
+  getPublicLiveSnapshot: () => IPublicLiveSnapshot | null;
 }
 
 /** Longest URL we'll even look at, to avoid pathological parsing */
@@ -243,6 +246,19 @@ export default class Router {
 
     const route = pathname.slice(apiPrefix.length);
     const segments = route.split('/').filter((s) => s !== '');
+
+    // GET /api/v1/public/snapshot
+    if (segments.length === 2 && segments[0] === 'public' && segments[1] === 'snapshot') {
+      this.requireMethod(req, res, 'GET', () => {
+        const snapshot = this.host.getPublicLiveSnapshot();
+        if (!snapshot) {
+          sendError(res, 404, 'Live Display is disabled for this tournament.');
+          return;
+        }
+        sendJson(res, 200, snapshot);
+      });
+      return;
+    }
 
     // GET /api/v1/status
     if (segments.length === 1 && segments[0] === 'status') {

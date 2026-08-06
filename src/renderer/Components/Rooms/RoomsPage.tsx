@@ -53,10 +53,12 @@ import {
   validateDraft,
   validateSchedule,
 } from '../../Services/ScheduleService';
+import { assignRoom } from '../../Services/RoomAllocationService';
 import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSetupDialog } from './RoomDialogs';
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
 import RebracketDialog from './RebracketDialog';
 import MatchInboxCard from './MatchInboxCard';
+import LiveDisplaySettingsCard from './LiveDisplaySettingsCard';
 import { YfPageHeader } from '../../Utils/GeneralReactUtils';
 import './rooms.css';
 
@@ -316,9 +318,14 @@ export default function RoomsPage() {
       confirmLabel: 'Delete room',
       destructive: true,
       onConfirm: () => {
-        tournament.scheduledMatches.forEach((match) => {
-          if (match.roomId === room.id && check.affectedScheduledMatchIds.includes(match.id)) match.roomId = undefined;
-        });
+        const unassignmentIssues = check.affectedScheduledMatchIds.flatMap((matchId) =>
+          assignRoom(tournament, matchId, undefined, { source: 'auto', unlock: true }),
+        );
+        if (hasBlockingIssue(unassignmentIssues)) {
+          setScheduleError(unassignmentIssues.map((issue) => issue.message).join(' '));
+          setConfirmState(null);
+          return;
+        }
         tournament.rooms = normalizeRoomOrder(tournament.rooms.filter((candidate) => candidate.id !== room.id));
         manager.markTournamentDataChanged();
         setRoomDetail(null);
@@ -363,7 +370,11 @@ export default function RoomsPage() {
       setScheduleError(issues.map((issue) => issue.message).join(' '));
       return;
     }
-    match.roomId = nextRoomId || undefined;
+    const assignmentIssues = assignRoom(tournament, match.id, nextRoomId || undefined, { source: 'manual' });
+    if (hasBlockingIssue(assignmentIssues)) {
+      setScheduleError(assignmentIssues.map((issue) => issue.message).join(' '));
+      return;
+    }
     manager.markTournamentDataChanged();
   };
 
@@ -461,6 +472,8 @@ export default function RoomsPage() {
           />
           <SummaryItem label="Next rebracket" value={rebracketBoundary ? `After ${rebracketBoundary.name}` : '—'} />
         </div>
+
+        <LiveDisplaySettingsCard />
 
         {rebracketBoundary && (
           <section className="rooms-panel">
