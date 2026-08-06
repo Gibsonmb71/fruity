@@ -743,26 +743,29 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
           </MenuItem>
         </Menu>
 
-        {activeTab === ControlPages.Live && (
-          <section className="rooms-panel" aria-labelledby="attention-heading">
-            <div className="rooms-panel-header">
-              <div>
-                <h2 id="attention-heading">Needs attention</h2>
-                <p>Issues that can block the next operational step.</p>
+        {activeTab === ControlPages.Live &&
+          readiness.state !== 'setup' &&
+          readiness.state !== 'rooms-not-configured' &&
+          readiness.state !== 'match-plan-missing' && (
+            <section className="rooms-panel" aria-labelledby="attention-heading">
+              <div className="rooms-panel-header">
+                <div>
+                  <h2 id="attention-heading">Needs attention</h2>
+                  <p>Issues that can block the next operational step.</p>
+                </div>
               </div>
-            </div>
-            <AttentionList
-              service={service}
-              rooms={rooms}
-              scheduleIssues={scheduleIssues}
-              nextRelease={nextRelease}
-              releaseBlocked={releaseBlocked}
-              disabledRoomAssignments={disabledRoomAssignments}
-            />
-          </section>
-        )}
+              <AttentionList
+                service={service}
+                rooms={rooms}
+                scheduleIssues={scheduleIssues}
+                nextRelease={nextRelease}
+                releaseBlocked={releaseBlocked}
+                disabledRoomAssignments={disabledRoomAssignments}
+              />
+            </section>
+          )}
 
-        {activeTab === ControlPages.Live && (
+        {activeTab === ControlPages.Live && roundNumbers.length > 0 && (
           <section className="rooms-panel" aria-labelledby="release-heading">
             <div className="rooms-panel-header">
               <div>
@@ -862,7 +865,9 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
           </section>
         )}
 
-        {activeTab === ControlPages.Live && <MatchInboxCard />}
+        {activeTab === ControlPages.Live && (service.inbox.length > 0 || service.currentRoundNumber !== null) && (
+          <MatchInboxCard />
+        )}
 
         <RoomEditorDialog
           open={roomEditor !== undefined}

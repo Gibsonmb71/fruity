@@ -135,7 +135,7 @@ function SetupStatus({ section, onSectionChange }: Pick<ISetupPageProps, 'sectio
 
 export default function SetupPage({ section, onSectionChange }: ISetupPageProps) {
   return (
-    <Box sx={{ height: '100%', minHeight: 0, overflow: 'auto', pr: 0.5 }}>
+    <Box sx={{ minHeight: '100%' }}>
       <YfPageHeader title="Setup" description="Configure the tournament before game-day operations." />
       <SetupStatus section={section} onSectionChange={onSectionChange} />
       <Box sx={{ mt: 2 }}>

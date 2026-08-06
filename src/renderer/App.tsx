@@ -205,18 +205,29 @@ function TournamentEditor() {
             flexDirection: 'column',
           }}
         >
-          <ActivePage
-            whichPage={activePage}
-            setupSection={setupSection}
-            controlSection={controlSection}
-            onOpenSetup={openSetupSection}
-            onOpenControl={openControlSection}
-            onNavigateTarget={openReadinessTarget}
-            onNavigate={(page, section) => {
-              if (section !== undefined) setSetupSection(section);
-              setactivePage(page);
+          <Box
+            sx={{
+              height: '100%',
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              scrollbarGutter: 'stable',
+              pr: 0.5,
             }}
-          />
+          >
+            <ActivePage
+              whichPage={activePage}
+              setupSection={setupSection}
+              controlSection={controlSection}
+              onOpenSetup={openSetupSection}
+              onOpenControl={openControlSection}
+              onNavigateTarget={openReadinessTarget}
+              onNavigate={(page, section) => {
+                if (section !== undefined) setSetupSection(section);
+                setactivePage(page);
+              }}
+            />
+          </Box>
         </Box>
       </Box>
       <GenericDialog />

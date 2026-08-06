@@ -127,39 +127,41 @@ function RegistrationView() {
             {teamCountCaption(numberOfTeams, expectedNumTeams)}
           </Typography>
         </Stack>
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          {showSearch && (
-            <TextField
-              hiddenLabel
-              placeholder="Search teams"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ width: 220 }}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Search fontSize="small" />
-                    </InputAdornment>
-                  ),
-                },
-              }}
-            />
-          )}
-          <ImportMenuButton disabled={cantAddMoreTeams} />
-          <Tooltip title={cantAddMoreTeams ? scheduleFullReason(expectedNumTeams) : ''}>
-            <span>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                disabled={cantAddMoreTeams}
-                onClick={() => tournManager.openTeamEditModalNewTeam()}
-              >
-                Add team
-              </Button>
-            </span>
-          </Tooltip>
-        </Stack>
+        {numberOfTeams > 0 && (
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            {showSearch && (
+              <TextField
+                hiddenLabel
+                placeholder="Search teams"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                sx={{ width: 220 }}
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Search fontSize="small" />
+                      </InputAdornment>
+                    ),
+                  },
+                }}
+              />
+            )}
+            <ImportMenuButton disabled={cantAddMoreTeams} />
+            <Tooltip title={cantAddMoreTeams ? scheduleFullReason(expectedNumTeams) : ''}>
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Add />}
+                  disabled={cantAddMoreTeams}
+                  onClick={() => tournManager.openTeamEditModalNewTeam()}
+                >
+                  Add team
+                </Button>
+              </span>
+            </Tooltip>
+          </Stack>
+        )}
       </Box>
 
       {numberOfTeams === 0 ? (

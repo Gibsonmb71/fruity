@@ -82,12 +82,31 @@ export default function SchedulePickerCard({ forceOpen = false, onApplied }: ISc
           <Select
             label="Format"
             value={selectedTemplateName}
+            renderValue={(selected) => {
+              const selectedTemplate = getTemplateList(size).find((template) => template.shortName === selected);
+              if (!selectedTemplate) return '';
+              return (
+                <Box sx={{ minWidth: 0, overflow: 'hidden' }}>
+                  <Typography variant="body2" noWrap>
+                    {selectedTemplate.shortName}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {formatTemplateDescription(selectedTemplate.fullName)}
+                  </Typography>
+                </Box>
+              );
+            }}
             disabled={size === '' || readOnly}
             onChange={(event) => handleTemplateChange(event.target.value)}
           >
             {getTemplateList(size).map((template) => (
-              <MenuItem key={template.shortName} value={template.shortName}>
-                {template.shortName}
+              <MenuItem key={template.shortName} value={template.shortName} sx={{ alignItems: 'flex-start' }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2">{template.shortName}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatTemplateDescription(template.fullName)}
+                  </Typography>
+                </Box>
               </MenuItem>
             ))}
           </Select>
@@ -188,4 +207,8 @@ function SummaryValue({ text }: { text: string }) {
 function rebracketRoundList(schedule: StandardSchedule) {
   if (schedule.rebracketAfter.length === 0) return 'None';
   return schedule.rebracketAfter.map((round) => `Round ${round}`).join(', ');
+}
+
+function formatTemplateDescription(fullName: string) {
+  return fullName.replace(/^\d+ Teams\s*-\s*/, '');
 }
