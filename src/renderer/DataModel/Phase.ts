@@ -73,13 +73,14 @@ export interface IYftFilePhase extends IQbjPhase, IYftFileObject {
 }
 
 /** Additional info not in qbj but needed for a .yft file */
-interface IPhaseExtraData {
+export interface IPhaseExtraData {
   phaseType: PhaseTypes;
   code: string;
   wildCardAdvancementRules?: IWildCardAdvancementRule[];
   wildCardRankingMethod?: WildCardRankingMethod;
   topWildCardSeed?: number;
   forceNumericRounds?: boolean;
+  roomIds?: string[];
 }
 
 export class Phase implements IQbjPhase, IYftDataModelObject {
@@ -102,6 +103,9 @@ export class Phase implements IQbjPhase, IYftDataModelObject {
    *  playoffs started round 6, this property would be false and the tiebreaker round would be non-numeric.
    */
   forceNumericRounds?: boolean;
+
+  /** Enabled room ids available to this stage; absent means every enabled room. */
+  roomIds?: string[];
 
   /** How do we use wild cards to populate different tiers in the next phase? Empty array means no wildcards. */
   wildCardAdvancementRules: IWildCardAdvancementRule[] = [];
@@ -144,6 +148,7 @@ export class Phase implements IQbjPhase, IYftDataModelObject {
       wildCardAdvancementRules: this.wildCardAdvancementRules,
       wildCardRankingMethod: this.wildCardRankingMethod,
       forceNumericRounds: this.forceNumericRounds,
+      roomIds: this.roomIds || undefined,
     };
     const yftFileObj = { YfData: yfData, ...qbjObject };
 

@@ -592,6 +592,9 @@ export default class FileParser {
     if (yfExtraData) yftPhase.forceNumericRounds = yfExtraData.forceNumericRounds;
     if (yfExtraData?.wildCardRankingMethod) yftPhase.wildCardRankingMethod = yfExtraData.wildCardRankingMethod;
     yftPhase.wildCardAdvancementRules = yfExtraData?.wildCardAdvancementRules ?? [];
+    if (Array.isArray(yfExtraData?.roomIds)) {
+      yftPhase.roomIds = yfExtraData.roomIds.filter((roomId): roomId is string => typeof roomId === 'string');
+    }
 
     this.addRoundsFromFile(yftPhase, rounds, firstRound, lastRound);
     yftPhase.pools = this.parsePhasePools(qbjPhase);
@@ -679,6 +682,12 @@ export default class FileParser {
       yftPool.seeds = yfExtraData.seeds;
       yftPool.hasCarryover = yfExtraData.hasCarryover;
       yftPool.autoAdvanceRules = yfExtraData.autoAdvanceRules;
+      if (Array.isArray(yfExtraData.preferredRoomIds)) {
+        yftPool.preferredRoomIds = yfExtraData.preferredRoomIds.filter(
+          (roomId): roomId is string => typeof roomId === 'string',
+        );
+      }
+      if (yfExtraData.poolRoomsLocked === true) yftPool.poolRoomsLocked = true;
     }
 
     return yftPool;
@@ -732,6 +741,9 @@ export default class FileParser {
     if (packetFromFile) yftRound.packet = packetFromFile;
 
     if (yfExtraData?.nonNumericName) yftRound.name = yfExtraData.nonNumericName;
+    if (Array.isArray(yfExtraData?.roomIds)) {
+      yftRound.roomIds = yfExtraData.roomIds.filter((roomId): roomId is string => typeof roomId === 'string');
+    }
     yftRound.matches = this.parseRoundMatches(qbjRound);
     return yftRound;
   }

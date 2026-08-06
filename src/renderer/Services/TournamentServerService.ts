@@ -497,6 +497,9 @@ export default class TournamentServerService {
     if (scheduled) {
       scheduled.status = ScheduledMatchStatus.Accepted;
       scheduled.resultMatchId = match.id;
+      if (scheduled.roomId) {
+        scheduled.roomNameAtPlay = this.tournament.rooms.find((room) => room.id === scheduled.roomId)?.name;
+      }
     }
 
     this.inbox = this.inbox.filter((i) => i.sessionId !== sessionId);

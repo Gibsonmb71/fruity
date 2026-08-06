@@ -28,9 +28,10 @@ export interface IYftFileRound extends IQbjRound, IYftFileObject {
 }
 
 /** Additional info not in qbj but needed for a .yft file */
-interface IRoundExtraData {
+export interface IRoundExtraData {
   number: number;
   nonNumericName?: string;
+  roomIds?: string[];
 }
 
 /** One round of games */
@@ -50,6 +51,9 @@ export class Round implements IQbjRound, IYftDataModelObject {
   }
 
   description?: string;
+
+  /** Room ids used for this round; absent means inherit the owning phase's set. */
+  roomIds?: string[];
 
   /** Packet used for the round. YF only supports one packet per round. */
   packet: Packet;
@@ -81,7 +85,11 @@ export class Round implements IQbjRound, IYftDataModelObject {
 
     if (qbjOnly) return qbjObject;
 
-    const yfData: IRoundExtraData = { number: this.number, nonNumericName: this._name };
+    const yfData: IRoundExtraData = {
+      number: this.number,
+      nonNumericName: this._name,
+      roomIds: this.roomIds || undefined,
+    };
     const yftFileObj = { YfData: yfData, ...qbjObject };
 
     return yftFileObj;
