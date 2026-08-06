@@ -1,9 +1,20 @@
-import { ArrowForward, Check } from '@mui/icons-material';
-import { Box, Button, Tab, Tabs, Typography } from '@mui/material';
-import { useContext } from 'react';
+import { ArrowForward, Check, WarningAmber } from '@mui/icons-material';
+import {
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  Tab,
+  Tabs,
+  Typography,
+} from '@mui/material';
+import { useContext, useState } from 'react';
 import { SetupPages } from '../Enums';
 import { TournamentContext } from '../TournamentManager';
-import { resolveTournamentReadiness } from '../Services/TournamentReadiness';
+import { ReadinessTarget, resolveTournamentReadiness } from '../Services/TournamentReadiness';
 import { YfPageHeader } from '../Utils/GeneralReactUtils';
 import GeneralPage from './GeneralPage';
 import RulesPage from './RulesPage';
@@ -13,6 +24,7 @@ import SchedulePage from './SchedulePage';
 interface ISetupPageProps {
   section: SetupPages;
   onSectionChange: (section: SetupPages) => void;
+  onNavigateTarget: (target: ReadinessTarget) => void;
 }
 
 const setupTabs = [
@@ -58,9 +70,18 @@ function setupTabReady(section: SetupPages, readiness: ReturnType<typeof resolve
   }
 }
 
-function SetupStatus({ section, onSectionChange }: Pick<ISetupPageProps, 'section' | 'onSectionChange'>) {
+function SetupStatus({ section, onSectionChange, onNavigateTarget }: ISetupPageProps) {
   const tournManager = useContext(TournamentContext);
-  const readiness = resolveTournamentReadiness(tournManager.tournament);
+  const service = tournManager.tournamentServerService;
+  const readiness = resolveTournamentReadiness(tournManager.tournament, {
+    running: service.status.running,
+    currentRoundNumber: service.currentRoundNumber,
+    releasedRoundNumber: service.releasedRoundNumber,
+    inboxCount: service.inbox.length,
+    conflictCount: service.conflicts.length,
+    sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
+    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
+  });
   const { setup } = readiness;
 
   const nextSetupAction = setupActionFor(readiness);
@@ -129,15 +150,182 @@ function SetupStatus({ section, onSectionChange }: Pick<ISetupPageProps, 'sectio
           </Button>
         </Box>
       )}
+      <SetupPreflight readiness={readiness} onSectionChange={onSectionChange} onNavigateTarget={onNavigateTarget} />
     </>
   );
 }
 
-export default function SetupPage({ section, onSectionChange }: ISetupPageProps) {
+function SetupPreflight({
+  readiness,
+  onSectionChange,
+  onNavigateTarget,
+}: {
+  readiness: ReturnType<typeof resolveTournamentReadiness>;
+  onSectionChange: (section: SetupPages) => void;
+  onNavigateTarget: (target: ReadinessTarget) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const coreChecks = [
+    { label: 'Tournament details', ready: readiness.setup.tournamentReady, target: 'setup:tournament' as const },
+    { label: 'Ruleset', ready: readiness.setup.rulesReady, target: 'setup:rules' as const },
+    { label: 'Teams', ready: readiness.setup.teamsReady, target: 'setup:teams' as const },
+    { label: 'Format', ready: readiness.setup.formatReady, target: 'setup:format' as const },
+  ];
+  let statusMessage = 'Run a preflight to see the next fix.';
+  if (readiness.coreReady) {
+    statusMessage = readiness.roomOperationsEnabled
+      ? 'Core setup is ready; room operations are checked separately.'
+      : 'Ready for traditional manual game entry.';
+  }
+
+  const openTarget = (target: ReadinessTarget) => {
+    setOpen(false);
+    if (target.startsWith('setup:')) {
+      const section = setupSectionForTarget(target);
+      onSectionChange(section);
+      return;
+    }
+    onNavigateTarget(target);
+  };
+
+  return (
+    <>
+      <Box
+        sx={{
+          mt: 1,
+          px: 1.5,
+          py: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 2,
+          border: 1,
+          borderColor: readiness.coreReady ? 'success.light' : 'divider',
+          borderRadius: 1.5,
+          backgroundColor: 'background.paper',
+        }}
+      >
+        <Box>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {readiness.coreReady ? 'Setup ready' : 'Setup needs attention'}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {statusMessage}
+          </Typography>
+        </Box>
+        <Button size="small" variant="outlined" onClick={() => setOpen(true)}>
+          Run preflight
+        </Button>
+      </Box>
+      <Dialog fullWidth maxWidth="sm" open={open} onClose={() => setOpen(false)}>
+        <DialogTitle>Setup preflight</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
+            Core setup is required for every tournament. Room operations are optional and only appear when configured.
+          </Typography>
+          {coreChecks.map((check) => (
+            <PreflightRow
+              key={check.label}
+              label={check.label}
+              ready={check.ready}
+              neutral={false}
+              actionLabel={check.ready ? undefined : 'Fix'}
+              onAction={() => openTarget(check.target)}
+            />
+          ))}
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            {readiness.roomOperationsEnabled ? 'Room operations' : 'Traditional manual entry'}
+          </Typography>
+          {readiness.roomOperationsEnabled ? (
+            <>
+              <PreflightRow
+                label="Rooms configured"
+                ready={readiness.roomOperations.roomsConfigured}
+                neutral={false}
+                actionLabel={readiness.roomOperations.roomsConfigured ? undefined : 'Set up rooms'}
+                onAction={() => openTarget('control:rooms')}
+              />
+              <PreflightRow
+                label="Match Plan configured"
+                ready={readiness.roomOperations.matchPlanConfigured}
+                neutral={false}
+                actionLabel={readiness.roomOperations.matchPlanConfigured ? undefined : 'Open Match Plan'}
+                onAction={() => openTarget('control:match-plan')}
+              />
+              <PreflightRow
+                label="Tournament Server running"
+                ready={readiness.roomOperations.serverRunning}
+                neutral={false}
+                actionLabel={readiness.roomOperations.serverRunning ? undefined : 'Start server'}
+                onAction={() => openTarget('control:live')}
+              />
+              <PreflightRow
+                label="Current assignments valid"
+                ready={readiness.roomOperations.currentAssignmentsValid}
+                neutral={false}
+                actionLabel={readiness.roomOperations.currentAssignmentsValid ? undefined : 'Review Match Plan'}
+                onAction={() => openTarget('control:match-plan')}
+              />
+            </>
+          ) : (
+            <PreflightRow
+              label="Browser room scoring"
+              ready={false}
+              neutral
+              actionLabel="Optional"
+              onAction={() => openTarget('control:rooms')}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          {readiness.coreReady && !readiness.roomOperationsEnabled && (
+            <Button onClick={() => openTarget('games')}>Open Games</Button>
+          )}
+          <Button onClick={() => setOpen(false)}>Done</Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
+function PreflightRow({
+  label,
+  ready,
+  neutral = false,
+  actionLabel,
+  onAction,
+}: {
+  label: string;
+  ready: boolean;
+  neutral: boolean;
+  actionLabel: string | undefined;
+  onAction: () => void;
+}) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minHeight: 36 }}>
+      <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+        {ready ? (
+          <Check color="success" fontSize="small" />
+        ) : (
+          <WarningAmber color={neutral ? 'disabled' : 'warning'} fontSize="small" />
+        )}
+        {label}
+      </Typography>
+      {actionLabel && (
+        <Button size="small" onClick={onAction}>
+          {actionLabel}
+        </Button>
+      )}
+    </Box>
+  );
+}
+
+export default function SetupPage({ section, onSectionChange, onNavigateTarget }: ISetupPageProps) {
   return (
     <Box sx={{ minHeight: '100%' }}>
       <YfPageHeader title="Setup" description="Configure the tournament before game-day operations." />
-      <SetupStatus section={section} onSectionChange={onSectionChange} />
+      <SetupStatus section={section} onSectionChange={onSectionChange} onNavigateTarget={onNavigateTarget} />
       <Box sx={{ mt: 2 }}>
         {section === SetupPages.Tournament && <GeneralPage showPageHeader={false} />}
         {section === SetupPages.Rules && <RulesPage showPageHeader={false} />}

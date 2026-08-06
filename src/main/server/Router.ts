@@ -119,6 +119,37 @@ function sendError(res: ServerResponse, status: number, message: string) {
   sendJson(res, status, { error: message });
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return entities[character];
+  });
+}
+
+function sendConnectionPage(req: IncomingMessage, res: ServerResponse, tournamentName: string) {
+  const host = typeof req.headers.host === 'string' ? req.headers.host : 'this server';
+  const body = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YellowFruit connection test</title></head><body style="font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.5rem"><h1>YellowFruit server is reachable</h1><p>Connected to <strong>${escapeHtml(
+    tournamentName || 'the tournament',
+  )}</strong>.</p><p>Server: ${escapeHtml(
+    host,
+  )}</p><p>This endpoint is only a connectivity check; no room credentials or scores are exposed.</p></body></html>`;
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  if ((req.method ?? 'GET') === 'HEAD') res.end();
+  else res.end(body);
+}
+
 /** Map a session write failure onto an HTTP response */
 function sendSessionWriteError(res: ServerResponse, result: { error: SessionWriteError }) {
   switch (result.error) {
@@ -237,6 +268,12 @@ export default class Router {
     }
 
     const method = req.method ?? 'GET';
+
+    // A deliberately credential-free endpoint for the desktop to test the selected LAN address.
+    if (pathname === '/connect') {
+      this.requireMethod(req, res, 'GET', () => sendConnectionPage(req, res, this.host.getSnapshot().name));
+      return;
+    }
 
     if (!pathname.startsWith(apiPrefix)) {
       // Anything that isn't the API is the browser room application.

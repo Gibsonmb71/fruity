@@ -78,7 +78,7 @@ function getServer(): TournamentServer {
 }
 
 function offlineStatus(): IServerStatus {
-  return { running: false, port: defaultServerPort, addresses: [] };
+  return { running: false, port: defaultServerPort, addresses: [], networkAddresses: [] };
 }
 
 /**

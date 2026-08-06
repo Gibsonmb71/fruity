@@ -9,6 +9,7 @@ import buildPublicLiveSnapshot from './PublicLiveSnapshot';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
 import {
   IMatchSubmission,
+  INetworkAddress,
   IRoomPresence,
   IServerStatus,
   ISessionSummary,
@@ -56,7 +57,9 @@ export interface IMatchSubmissionConflict {
  * and are never added to the tournament without an explicit accept.
  */
 export default class TournamentServerService {
-  status: IServerStatus = { running: false, port: defaultServerPort, addresses: [] };
+  status: IServerStatus = { running: false, port: defaultServerPort, addresses: [], networkAddresses: [] };
+
+  private preferredNetworkAddress: string | null = TournamentServerService.readPreferredNetworkAddress();
 
   /** Port the user wants to use next time they start the server */
   requestedPort: number = defaultServerPort;
@@ -99,6 +102,36 @@ export default class TournamentServerService {
     this.dataChangedReactCallback = () => {};
     this.onMatchAccepted = () => {};
     this.onScheduleChanged = () => {};
+  }
+
+  private static readonly preferredNetworkAddressStorageKey = 'yellowfruit.preferred-network-address';
+
+  private static readPreferredNetworkAddress(): string | null {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(TournamentServerService.preferredNetworkAddressStorageKey);
+  }
+
+  private static writePreferredNetworkAddress(address: string | null) {
+    if (typeof localStorage === 'undefined') return;
+    if (address) localStorage.setItem(TournamentServerService.preferredNetworkAddressStorageKey, address);
+    else localStorage.removeItem(TournamentServerService.preferredNetworkAddressStorageKey);
+  }
+
+  get networkAddresses(): INetworkAddress[] {
+    if (this.status.networkAddresses && this.status.networkAddresses.length > 0) return this.status.networkAddresses;
+    return this.status.addresses.map((url) => ({ interfaceName: 'Network', address: url, url }));
+  }
+
+  get selectedAddress(): string {
+    const preferred = this.networkAddresses.find((address) => address.url === this.preferredNetworkAddress);
+    return preferred?.url ?? this.networkAddresses[0]?.url ?? '';
+  }
+
+  setPreferredNetworkAddress(address: string | null) {
+    const valid = address && this.networkAddresses.some((entry) => entry.url === address) ? address : null;
+    this.preferredNetworkAddress = valid;
+    TournamentServerService.writePreferredNetworkAddress(valid);
+    this.dataChangedReactCallback();
   }
 
   setTournament(tournament: Tournament) {

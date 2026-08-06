@@ -1,4 +1,5 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
+import { AddressInfo } from 'net';
 import { networkInterfaces } from 'os';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
@@ -6,6 +7,7 @@ import Router, { IRouterHost } from './Router';
 import SessionStore from './SessionStore';
 import {
   IMatchSubmission,
+  INetworkAddress,
   IRoomPresence,
   IServerStatus,
   ISessionSummary,
@@ -184,6 +186,8 @@ export default class TournamentServer {
           this.lastErrorMessage = err.message;
         });
         this.server = server;
+        const address = server.address();
+        if (address && typeof address !== 'string') this.port = (address as AddressInfo).port;
         resolve(this.getStatus());
       });
     });
@@ -207,10 +211,12 @@ export default class TournamentServer {
   }
 
   getStatus(): IServerStatus {
+    const networkAddresses = this.isRunning() ? TournamentServer.getLanNetworkAddresses(this.port) : [];
     return {
       running: this.isRunning(),
       port: this.port,
-      addresses: this.isRunning() ? TournamentServer.getLanAddresses(this.port) : [],
+      addresses: networkAddresses.map((entry) => entry.url),
+      networkAddresses,
       errorMessage: this.lastErrorMessage,
     };
   }
@@ -259,7 +265,11 @@ export default class TournamentServer {
    * see. Loopback and link-local addresses are excluded because no other device can reach them.
    */
   static getLanAddresses(port: number): string[] {
-    const addresses: string[] = [];
+    return TournamentServer.getLanNetworkAddresses(port).map((entry) => entry.url);
+  }
+
+  static getLanNetworkAddresses(port: number): INetworkAddress[] {
+    const addresses: INetworkAddress[] = [];
     const interfaces = networkInterfaces();
     for (const name of Object.keys(interfaces)) {
       for (const iface of interfaces[name] ?? []) {
@@ -267,7 +277,11 @@ export default class TournamentServer {
         const isIpv4 = iface.family === 'IPv4' || (iface.family as unknown as number) === 4;
         if (!isIpv4 || iface.internal) continue;
         if (iface.address.startsWith('169.254.')) continue; // link-local, not routable
-        addresses.push(`http://${iface.address}:${port}`);
+        addresses.push({
+          interfaceName: name,
+          address: iface.address,
+          url: `http://${iface.address}:${port}`,
+        });
       }
     }
     return addresses;

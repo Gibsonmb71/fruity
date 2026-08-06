@@ -20,6 +20,7 @@ import {
   ITournamentSnapshot,
   RoomBlockedReason,
 } from './ServerTypes';
+import { selectRoomAssignments } from '../../shared/RoomAssignmentState';
 
 /** Why a room lookup failed */
 export enum RoomAuthError {
@@ -87,39 +88,12 @@ function findTeam(snapshot: ITournamentSnapshot, name: string): IRoomTeam {
  * self-advancing: as soon as tournament control accepts round 4's result, round 5 becomes current
  * and the Chromebook picks it up on its next poll with no action from the scorekeeper.
  */
-export function pickCurrentAssignment(assignments: IAssignmentDescriptor[]): IAssignmentDescriptor | null {
-  const unresolved = assignments.find(
-    (assignment) =>
-      assignment.status !== ScheduledMatchStatus.Accepted && assignment.status !== ScheduledMatchStatus.Cancelled,
-  );
-  return unresolved ?? null;
-}
-
-/** The most recent finished game in this room, for the "Previous" line */
-function pickPreviousAssignment(
+export function pickCurrentAssignment(
   assignments: IAssignmentDescriptor[],
-  current: IAssignmentDescriptor | null,
+  releasedRoundNumber?: number | null,
+  currentRoundNumber?: number | null,
 ): IAssignmentDescriptor | null {
-  const finished = assignments.filter(
-    (assignment) =>
-      assignment.status === ScheduledMatchStatus.Accepted &&
-      (current === null || assignment.roundNumber < current.roundNumber),
-  );
-  return finished.length > 0 ? finished[finished.length - 1] : null;
-}
-
-/** The game after the current one, for the "Next" line */
-function pickNextAssignment(
-  assignments: IAssignmentDescriptor[],
-  current: IAssignmentDescriptor | null,
-): IAssignmentDescriptor | null {
-  if (current === null) return null;
-  return (
-    assignments.find(
-      (assignment) =>
-        assignment.roundNumber > current.roundNumber && assignment.status !== ScheduledMatchStatus.Cancelled,
-    ) ?? null
-  );
+  return selectRoomAssignments(assignments, releasedRoundNumber, currentRoundNumber).current;
 }
 
 function toMatchup(snapshot: ITournamentSnapshot, assignment: IAssignmentDescriptor): IRoomMatchup {
@@ -209,22 +183,22 @@ export function buildAssignmentResponse(
   room: IRoomDescriptor,
 ): Omit<IRoomAssignmentResponse, 'session'> {
   const assignments = assignmentsForRoom(snapshot, room.id);
-  const current = pickCurrentAssignment(assignments);
-  const block = current ? checkCanStart(snapshot, room, current) : null;
+  const { current, previous, next } = selectRoomAssignments(
+    assignments,
+    snapshot.releasedRoundNumber,
+    snapshot.currentRoundNumber,
+  );
+  let block = null;
+  if (current) block = checkCanStart(snapshot, room, current);
+  else if (next) block = checkCanStart(snapshot, room, next);
 
   return {
     roomId: room.id,
     roomName: room.name,
     tournamentName: snapshot.name,
     current: current ? toMatchup(snapshot, current) : null,
-    previous: (() => {
-      const previous = pickPreviousAssignment(assignments, current);
-      return previous ? toSummary(previous) : null;
-    })(),
-    next: (() => {
-      const next = pickNextAssignment(assignments, current);
-      return next ? toSummary(next) : null;
-    })(),
+    previous: previous ? toSummary(previous) : null,
+    next: next ? toSummary(next) : null,
     blockedReason: block?.reason,
     blockedMessage: block?.message,
     gameFormat: snapshot.gameFormat,

@@ -361,11 +361,22 @@ export interface ITournamentServerRecovery {
 // #region Main <-> renderer messages
 
 /** Current state of the HTTP server, reported to the renderer */
+export interface INetworkAddress {
+  /** OS interface label, e.g. Wi-Fi or en0 */
+  interfaceName: string;
+  /** IPv4 address without the protocol or port */
+  address: string;
+  /** URL a room Chromebook can open */
+  url: string;
+}
+
 export interface IServerStatus {
   running: boolean;
   port: number;
   /** Every usable LAN address a Chromebook could open, e.g. http://192.168.1.50:4732 */
   addresses: string[];
+  /** Structured addresses so the director can choose the correct Wi-Fi/Ethernet/VPN interface. */
+  networkAddresses?: INetworkAddress[];
   /** Set when the last start attempt failed */
   errorMessage?: string;
 }

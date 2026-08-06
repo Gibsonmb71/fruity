@@ -2,7 +2,14 @@ import { describe, expect, test } from 'vitest';
 import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
-import { allocateRound, planRebalance, resolveEligibleRooms } from '../renderer/Services/RoomAllocationService';
+import {
+  allocateRound,
+  applySwapPlan,
+  planAutoAssignUnassigned,
+  planRebalance,
+  planSwap,
+  resolveEligibleRooms,
+} from '../renderer/Services/RoomAllocationService';
 
 function makeRooms(names: string[]): TournamentRoom[] {
   return names.map((name, index) => new TournamentRoom(name, index, `room-${name}`));
@@ -131,5 +138,51 @@ describe('room allocation', () => {
     const second = allocateRound(matches, eligible);
 
     expect(second).toEqual(first);
+  });
+
+  test('auto-assign fills only unassigned future games and preserves manual choices', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101', '102', '103']);
+    const kept = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], 'room-103');
+    kept.roomAssignmentSource = 'manual';
+    const unassigned = makeMatch(tournament, 1, testTeamNames[2], testTeamNames[3]);
+    tournament.scheduledMatches = [kept, unassigned];
+
+    const plan = planAutoAssignUnassigned(tournament, [1]);
+
+    expect(plan.moved).toEqual([]);
+    expect(plan.newlyAssigned).toMatchObject([{ matchId: unassigned.id, toRoomId: 'room-101' }]);
+    expect(kept.roomId).toBe('room-103');
+  });
+
+  test('moves into an occupied room by swapping atomically', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101', '102']);
+    const first = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], 'room-101');
+    const second = makeMatch(tournament, 1, testTeamNames[2], testTeamNames[3], 'room-102');
+    tournament.scheduledMatches = [first, second];
+
+    const plan = planSwap(tournament, first.id, 'room-102');
+    expect(plan.kind).toBe('swap');
+    expect(applySwapPlan(tournament, plan)).toEqual([]);
+    expect(first.roomId).toBe('room-102');
+    expect(second.roomId).toBe('room-101');
+  });
+
+  test('does not unassign a locked game through the shared move path', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101']);
+    const locked = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], 'room-101');
+    locked.roomAssignmentLocked = true;
+    tournament.scheduledMatches = [locked];
+
+    const issues = applySwapPlan(tournament, {
+      kind: 'move',
+      issues: [],
+      changes: [{ matchId: locked.id, fromRoomId: 'room-101', toRoomId: undefined }],
+    });
+
+    expect(issues[0]?.message).toContain('locked');
+    expect(locked.roomId).toBe('room-101');
   });
 });

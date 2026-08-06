@@ -7,9 +7,22 @@ import { ThemeProvider } from '@mui/material/styles';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import Box from '@mui/material/Box';
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { Alert, AlertColor, IconButton, Snackbar, Tooltip } from '@mui/material';
+import {
+  Alert,
+  AlertColor,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  List,
+  ListItemButton,
+  ListItemText,
+  Snackbar,
+  TextField,
+  Tooltip,
+} from '@mui/material';
 import { Close, Launch } from '@mui/icons-material';
 import NavBar, { applicationPageOrder } from './Components/NavBar';
 import { TournamentManager, TournamentContext } from './TournamentManager';
@@ -32,6 +45,13 @@ import ControlPage from './Components/ControlPage';
 import yfTheme from './Theme/yfTheme';
 import { headerHeight } from './Theme/tokens';
 import { ReadinessTarget, resolveTournamentReadiness } from './Services/TournamentReadiness';
+import {
+  fallbackNavigationPreferences,
+  readNavigationPreferences,
+  writeNavigationPreferences,
+} from './Services/NavigationPreferences';
+import { buildQuickFindItems, filterQuickFindItems } from './Services/QuickFind';
+import type { IQuickFindItem } from './Services/QuickFind';
 
 window.onerror = () => window.electron.ipcRenderer.sendMessage(IpcRendToMain.WebPageCrashed);
 window.electron.ipcRenderer.removeAllListeners(); // needed in dev environemnt so that you don't end up with duplicate listers when the app reloads
@@ -75,6 +95,51 @@ function TournamentEditor() {
   const [activePage, setactivePage] = useState(ApplicationPages.Setup);
   const [setupSection, setSetupSection] = useState(SetupPages.Tournament);
   const [controlSection, setControlSection] = useState(ControlPages.Live);
+  const [quickFindOpen, setQuickFindOpen] = useState(false);
+  const navigationIdentity = mgr.filePath || 'new-tournament';
+  const restoredIdentity = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (restoredIdentity.current === navigationIdentity) return;
+    const saved = readNavigationPreferences(navigationIdentity);
+    const fallback = resolveTournamentReadiness(mgr.tournament, {
+      running: mgr.tournamentServerService.status.running,
+      currentRoundNumber: mgr.tournamentServerService.currentRoundNumber,
+      releasedRoundNumber: mgr.tournamentServerService.releasedRoundNumber,
+      inboxCount: mgr.tournamentServerService.inbox.length,
+      conflictCount: mgr.tournamentServerService.conflicts.length,
+    });
+    const next =
+      saved ??
+      fallbackNavigationPreferences({
+        coreReady: fallback.coreReady,
+        roomOperationsEnabled: fallback.roomOperationsEnabled,
+        currentRoundNumber: fallback.currentRoundNumber,
+        hasMatches:
+          mgr.tournament.hasMatchData ||
+          mgr.tournament.phases.some((phase) => phase.rounds.some((round) => round.matches.length > 0)),
+        hasScheduledMatches: mgr.tournament.scheduledMatches.length > 0,
+        tournamentComplete: fallback.state === 'tournament-complete',
+      });
+    restoredIdentity.current = navigationIdentity;
+    setactivePage(next.activePage);
+    setSetupSection(next.setupSection);
+    setControlSection(next.controlSection);
+  }, [mgr, mgr.filePath, mgr.tournament, navigationIdentity]);
+
+  useEffect(() => {
+    if (restoredIdentity.current !== navigationIdentity) return;
+    writeNavigationPreferences(navigationIdentity, { activePage, setupSection, controlSection });
+  }, [activePage, controlSection, navigationIdentity, setupSection]);
+
+  useHotkeys(
+    'mod+k',
+    (event) => {
+      event.preventDefault();
+      setQuickFindOpen(true);
+    },
+    { enableOnFormTags: true },
+  );
 
   useEffect(() => {
     if (activePage === ApplicationPages.Reports) {
@@ -179,6 +244,7 @@ function TournamentEditor() {
         setActivePage={changePage}
         readiness={readiness}
         onNavigateTarget={openReadinessTarget}
+        onOpenQuickFind={() => setQuickFindOpen(true)}
       />
       <Box
         component="main"
@@ -240,6 +306,7 @@ function TournamentEditor() {
       <MatchImportResultDialog />
       <SqbsExportDialog />
       <AboutYfDialog />
+      <QuickFindDialog open={quickFindOpen} onClose={() => setQuickFindOpen(false)} onNavigate={openReadinessTarget} />
       <GenericToast />
     </>
   );
@@ -260,7 +327,7 @@ function ActivePage(props: IActivePageProps) {
   const { whichPage, setupSection, controlSection, onOpenSetup, onOpenControl, onNavigateTarget, onNavigate } = props;
   switch (whichPage) {
     case ApplicationPages.Setup:
-      return <SetupPage section={setupSection} onSectionChange={onOpenSetup} />;
+      return <SetupPage section={setupSection} onSectionChange={onOpenSetup} onNavigateTarget={onNavigateTarget} />;
     case ApplicationPages.Games:
       return <GamesPage onNavigate={onNavigate} />;
     case ApplicationPages.Control:
@@ -276,6 +343,91 @@ function ActivePage(props: IActivePageProps) {
     default:
       return null;
   }
+}
+
+function QuickFindDialog({
+  open,
+  onClose,
+  onNavigate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onNavigate: (target: ReadinessTarget) => void;
+}) {
+  const mgr = useContext(TournamentContext);
+  const [query, setQuery] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const items = useMemo(() => buildQuickFindItems(mgr.tournament), [mgr.tournament]);
+  const results = useMemo(() => filterQuickFindItems(items, query), [items, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setSelectedIndex(0);
+  }, [open]);
+
+  useEffect(() => {
+    setSelectedIndex((index) => Math.min(index, Math.max(results.length - 1, 0)));
+  }, [results.length]);
+
+  const choose = (item: IQuickFindItem | undefined) => {
+    if (!item) return;
+    onClose();
+    onNavigate(item.target);
+  };
+
+  return (
+    <Dialog fullWidth maxWidth="sm" open={open} onClose={onClose} aria-labelledby="quick-find-title">
+      <DialogTitle id="quick-find-title" sx={{ pb: 1 }}>
+        Quick Find
+      </DialogTitle>
+      <DialogContent sx={{ pt: '8px !important' }}>
+        <TextField
+          autoFocus
+          fullWidth
+          size="small"
+          placeholder="Find a team, game, round, room, or action"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setSelectedIndex(0);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setSelectedIndex((index) => Math.min(index + 1, Math.max(results.length - 1, 0)));
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setSelectedIndex((index) => Math.max(index - 1, 0));
+            } else if (event.key === 'Enter') {
+              event.preventDefault();
+              choose(results[selectedIndex]);
+            }
+          }}
+          slotProps={{ htmlInput: { 'aria-label': 'Quick Find search' } }}
+        />
+        <List dense sx={{ mt: 1, mx: -1 }}>
+          {results.map((item, index) => (
+            <ListItemButton
+              key={item.id}
+              selected={index === selectedIndex}
+              onMouseEnter={() => setSelectedIndex(index)}
+              onClick={() => choose(item)}
+            >
+              <ListItemText primary={item.label} secondary={item.detail} />
+            </ListItemButton>
+          ))}
+          {results.length === 0 && (
+            <ListItemText
+              sx={{ px: 1.5, py: 1 }}
+              primary="No matching items"
+              secondary="Try a team name or round number."
+            />
+          )}
+        </List>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /** Toast message that the TournamentManager can invoke imperatively */

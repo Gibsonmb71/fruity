@@ -29,7 +29,12 @@ export class AggregateStandings {
 
   scoringRules: ScoringRules;
 
-  constructor(teams: Team[], phases: Phase[], scoringRules: ScoringRules) {
+  constructor(
+    teams: Team[],
+    phases: Phase[],
+    scoringRules: ScoringRules,
+    additionalMatches: Array<{ match: Match; round: Round; phase: Phase }> = [],
+  ) {
     this.teamStats = teams.map((tm) => new PoolTeamStats(new PoolTeam(tm), scoringRules));
     this.scoringRules = scoringRules;
     this.roundReportTotalStats = new RoundStats(new Round(-1), scoringRules);
@@ -50,6 +55,22 @@ export class AggregateStandings {
         }
         if (roundStats.games > 0) this.rounds.push(roundStats);
       }
+    }
+    for (const additional of additionalMatches) {
+      if (additional.match.statsValidity === StatsValidity.omit) continue;
+      this.addMatchToTeamStats(additional.match, additional.round, additional.phase);
+      this.addMatchTeamToIndividualStats(additional.match, 'left', additional.round, additional.phase);
+      this.addMatchTeamToIndividualStats(additional.match, 'right', additional.round, additional.phase);
+      let roundStats = this.rounds.find(
+        (currentRoundStats) =>
+          currentRoundStats.round === additional.round && currentRoundStats.phase === additional.phase,
+      );
+      if (!roundStats) {
+        roundStats = new RoundStats(additional.round, scoringRules, additional.phase);
+        this.rounds.push(roundStats);
+      }
+      roundStats.addMatch(additional.match);
+      this.roundReportTotalStats.addMatch(additional.match);
     }
     this.calcAnyTiesExist();
     this.sortPlayersByPptuh();

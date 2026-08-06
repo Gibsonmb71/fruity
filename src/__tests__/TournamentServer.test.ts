@@ -164,6 +164,15 @@ describe('start and stop', () => {
       expect(address).not.toContain('169.254.');
     }
   });
+
+  test('structured LAN addresses retain the interface label', () => {
+    const addresses = TournamentServer.getLanNetworkAddresses(4732);
+
+    for (const address of addresses) {
+      expect(address.interfaceName).not.toBe('');
+      expect(address.url).toBe(`http://${address.address}:4732`);
+    }
+  });
 });
 
 describe('health endpoint', () => {
@@ -188,6 +197,16 @@ describe('health endpoint', () => {
 });
 
 describe('read-only tournament endpoints', () => {
+  test('GET /connect is a credential-free connectivity check', async () => {
+    const res = await fetch(`${baseUrl}/connect`);
+    const body = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(body).toContain('YellowFruit server is reachable');
+    expect(body).toContain('Test Tournament');
+    expect(body).not.toMatch(/token|session|points/i);
+  });
+
   test('GET /api/v1/tournament exposes only what a room needs', async () => {
     const res = await fetch(`${baseUrl}/api/v1/tournament`);
     const body = await res.json();
