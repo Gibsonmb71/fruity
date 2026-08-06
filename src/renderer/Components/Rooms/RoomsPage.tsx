@@ -4,16 +4,17 @@ import {
   Alert,
   Box,
   Button,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControlLabel,
+  FormControl,
   IconButton,
+  InputLabel,
   Menu,
   MenuItem,
+  Select,
   Stack,
   Tab,
   Tabs,
@@ -32,6 +33,7 @@ import {
 } from '../../../main/server/ServerTypes';
 import { ScheduledMatch, ScheduledMatchStatus } from '../../DataModel/ScheduledMatch';
 import { TournamentRoom } from '../../DataModel/TournamentRoom';
+import Tournament from '../../DataModel/Tournament';
 import {
   ScheduleIssueSeverity,
   checkRoomDeletion,
@@ -42,10 +44,17 @@ import {
   roundsWithGames,
   summarizeRound,
   validatePhaseScheduleCompleteness,
-  validateDraft,
   validateSchedule,
 } from '../../Services/ScheduleService';
-import { assignRoom } from '../../Services/RoomAllocationService';
+import {
+  IRebalancePlan,
+  applyRebalance,
+  applySwapPlan,
+  assignRoom,
+  planAutoAssignUnassigned,
+  planRebalance,
+  planSwap,
+} from '../../Services/RoomAllocationService';
 import { ReadinessTarget, resolveTournamentReadiness } from '../../Services/TournamentReadiness';
 import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSetupDialog } from './RoomDialogs';
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
@@ -54,6 +63,7 @@ import RebracketDialog from './RebracketDialog';
 import MatchInboxCard from './MatchInboxCard';
 import LiveDisplaySettingsCard from './LiveDisplaySettingsCard';
 import { YfPageHeader } from '../../Utils/GeneralReactUtils';
+import { selectRoomAssignments } from '../../../shared/RoomAssignmentState';
 import './rooms.css';
 
 const pollIntervalMs = 3000;
@@ -97,15 +107,23 @@ function sessionForRoom(room: TournamentRoom, sessions: ISessionSummary[]): ISes
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
-function currentMatchForRoom(room: TournamentRoom, matches: ScheduledMatch[]): ScheduledMatch | undefined {
-  return matches
-    .filter((match) => match.roomId === room.id && !match.isResolved())
-    .sort((a, b) => a.roundNumber - b.roundNumber)[0];
+function roomAssignmentsForRoom(
+  room: TournamentRoom,
+  matches: ScheduledMatch[],
+  releasedRoundNumber: number | null,
+  currentRoundNumber: number | null,
+) {
+  return selectRoomAssignments(
+    matches.filter((match) => match.roomId === room.id),
+    releasedRoundNumber,
+    currentRoundNumber,
+  );
 }
 
 function roomState(
   room: TournamentRoom,
   match: ScheduledMatch | undefined,
+  nextMatch: ScheduledMatch | undefined,
   session: ISessionSummary | undefined,
   connected: boolean,
   serverRunning: boolean,
@@ -116,7 +134,10 @@ function roomState(
   if (session?.displayState === SessionDisplayState.Live) return { label: 'Playing', className: 'is-playing' };
   if (match?.status === ScheduledMatchStatus.NeedsAttention)
     return { label: 'Needs attention', className: 'is-warning' };
-  if (connected) return { label: match ? 'Waiting' : 'Connected', className: 'is-connected' };
+  if (connected) {
+    if (nextMatch && !match) return { label: 'Waiting for release', className: 'is-connected' };
+    return { label: match ? 'Waiting' : 'Connected', className: 'is-connected' };
+  }
   if (!serverRunning) return { label: 'Server offline', className: 'is-offline' };
   return { label: 'Offline', className: 'is-offline' };
 }
@@ -127,20 +148,6 @@ function sessionProgress(session: ISessionSummary | undefined, match: ScheduledM
     return 'Final';
   if (match?.status === ScheduledMatchStatus.Accepted) return 'Final';
   return '—';
-}
-
-function formatRoundSummary(round: ReturnType<typeof summarizeRound>): string {
-  const parts = [
-    `${round.expected} expected`,
-    `${round.roomsAssigned}/${round.scheduled} assigned`,
-    `${round.accepted} accepted`,
-    `${round.playing} playing`,
-    `${round.submitted} submitted`,
-    `${round.waiting} waiting`,
-  ];
-  if (round.needsAttention > 0) parts.push(`${round.needsAttention} needs attention`);
-  if (round.cancelled > 0) parts.push(`${round.cancelled} cancelled`);
-  return parts.join(' · ');
 }
 
 function roomPresenceFor(room: TournamentRoom, service: TournamentServerContextValue) {
@@ -178,16 +185,6 @@ function scheduleStateClass(status: ScheduledMatchStatus): string {
   }
 }
 
-function releaseMessage(
-  releasedRound: number | null,
-  currentRound: number | null,
-  currentSummary: ReturnType<typeof summarizeRound> | null,
-): string {
-  if (releasedRound === null) return 'No round released yet.';
-  if (currentSummary?.complete === true) return `Round ${currentRound} complete.`;
-  return `Rooms may start through Round ${releasedRound}.`;
-}
-
 interface IRoomsPageProps {
   // eslint-disable-next-line react/require-default-props
   activeTab?: ControlPages;
@@ -211,6 +208,7 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
   const [rebracketOpen, setRebracketOpen] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<IConfirmState | null>(null);
+  const [bulkPlan, setBulkPlan] = useState<{ mode: 'auto' | 'rebalance'; plan: IRebalancePlan } | null>(null);
   const [scheduleError, setScheduleError] = useState('');
   const [roomMenu, setRoomMenu] = useState<{ room: TournamentRoom; anchor: HTMLElement } | null>(null);
   const [uncontrolledTab, setUncontrolledTab] = useState(ControlPages.Live);
@@ -277,7 +275,7 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
   }, [tournament, matches]);
   const rebracketNextPhase = rebracketBoundary ? tournament.getNextFullPhase(rebracketBoundary) ?? null : null;
 
-  const serverAddress = service.status.addresses[0] ?? '';
+  const serverAddress = service.selectedAddress;
   const nextRelease = service.nextRoundToRelease();
   const nextReleaseSummary = nextRelease === null ? null : summarizeRound(matches, nextRelease);
   const previousRelease =
@@ -366,35 +364,70 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
     });
   };
 
-  const changeRoomAssignment = (match: ScheduledMatch, nextRoomId: string) => {
+  const moveRoomAssignment = (match: ScheduledMatch, nextRoomId: string) => {
     setScheduleError('');
-    if (
-      match.status !== ScheduledMatchStatus.Scheduled &&
-      match.status !== ScheduledMatchStatus.Ready &&
-      match.status !== ScheduledMatchStatus.NeedsAttention
-    )
+    if (nextRoomId === '') {
+      const issues = assignRoom(tournament, match.id, undefined, { source: 'manual' });
+      if (hasBlockingIssue(issues)) {
+        setScheduleError(issues.map((issue) => issue.message).join(' '));
+        return;
+      }
+      manager.markTournamentDataChanged();
       return;
-    const issues = validateDraft(
-      {
-        roundNumber: match.roundNumber,
-        leftTeamName: match.leftTeamName,
-        rightTeamName: match.rightTeamName,
-        roomId: nextRoomId,
+    }
+
+    const plan = planSwap(tournament, match.id, nextRoomId);
+    if (plan.kind === 'illegal') {
+      setScheduleError(plan.issues.map((issue) => issue.message).join(' '));
+      return;
+    }
+    if (plan.kind === 'move') {
+      const issues = applySwapPlan(tournament, plan);
+      if (hasBlockingIssue(issues)) {
+        setScheduleError(issues.map((issue) => issue.message).join(' '));
+        return;
+      }
+      manager.markTournamentDataChanged();
+      return;
+    }
+
+    const targetChange = plan.changes.find((change) => change.matchId === match.id);
+    const otherChange = plan.changes.find((change) => change.matchId !== match.id);
+    const targetRoom = rooms.find((room) => room.id === targetChange?.toRoomId)?.name ?? nextRoomId;
+    const otherMatch = otherChange ? matches.find((candidate) => candidate.id === otherChange.matchId) : undefined;
+    setConfirmState({
+      title: 'Swap room assignments?',
+      message: `${match.describe()} moves to ${targetRoom}. ${otherMatch?.describe() ?? 'The other game'} moves to ${
+        rooms.find((room) => room.id === otherChange?.toRoomId)?.name ?? 'the source room'
+      }.`,
+      confirmLabel: 'Swap',
+      onConfirm: () => {
+        const issues = applySwapPlan(tournament, plan);
+        if (hasBlockingIssue(issues)) setScheduleError(issues.map((issue) => issue.message).join(' '));
+        else manager.markTournamentDataChanged();
+        setConfirmState(null);
       },
-      matches,
-      rooms,
-      match.id,
-    );
-    if (hasBlockingIssue(issues)) {
-      setScheduleError(issues.map((issue) => issue.message).join(' '));
-      return;
-    }
-    const assignmentIssues = assignRoom(tournament, match.id, nextRoomId || undefined, { source: 'manual' });
-    if (hasBlockingIssue(assignmentIssues)) {
-      setScheduleError(assignmentIssues.map((issue) => issue.message).join(' '));
-      return;
-    }
+    });
+  };
+
+  const upcomingRoundNumbers = roundNumbers.filter(
+    (roundNumber) => currentRound === null || roundNumber > currentRound,
+  );
+
+  const openBulkPlan = (mode: 'auto' | 'rebalance') => {
+    let selectedRounds = upcomingRoundNumbers;
+    if (selectedRounds.length === 0 && currentRound === null) selectedRounds = roundNumbers;
+    const plan =
+      mode === 'auto'
+        ? planAutoAssignUnassigned(tournament, selectedRounds)
+        : planRebalance(tournament, selectedRounds);
+    setBulkPlan({ mode, plan });
+  };
+
+  const applyBulkPlan = (plan: IRebalancePlan) => {
+    applyRebalance(tournament, plan);
     manager.markTournamentDataChanged();
+    setBulkPlan(null);
   };
 
   const toggleRoomAssignmentLock = (match: ScheduledMatch) => {
@@ -475,49 +508,45 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
           </Tabs>
         </Box>
 
-        <div className="rooms-server-toolbar">
-          <div className="rooms-server-address">
-            <strong>
-              {service.status.running ? serverAddress || 'No LAN address found' : 'Tournament Server is off'}
-            </strong>
-            {service.status.running && service.status.addresses.length > 1 && (
-              <span> · {service.status.addresses.length} network addresses</span>
-            )}
+        {activeTab === ControlPages.Live ? (
+          <ServerToolbar
+            service={service}
+            serverAddress={serverAddress}
+            onCopy={copyText}
+            onSelectAddress={(address) => service.setPreferredNetworkAddress(address)}
+            onTestConnection={async () => {
+              if (!serverAddress) return;
+              try {
+                const response = await fetch(`${serverAddress}/connect`, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                manager.makeToast('Connection check succeeded');
+              } catch (err: any) {
+                manager.makeToast('Could not reach this network address', 'error');
+              }
+            }}
+            onOpenSettings={() => setServerSettingsOpen(true)}
+          />
+        ) : (
+          <div className="rooms-server-compact" aria-label="Tournament Server status">
+            <span className={service.status.running ? 'is-running' : 'is-offline'}>
+              Tournament Server {service.status.running ? 'running' : 'offline'}
+            </span>
+            <Button size="small" startIcon={<Settings />} onClick={() => setServerSettingsOpen(true)}>
+              Settings
+            </Button>
           </div>
-          {service.status.running && serverAddress !== '' && (
-            <Button size="small" startIcon={<ContentCopy />} onClick={() => copyText(serverAddress)}>
-              Copy address
-            </Button>
-          )}
-          <Button size="small" startIcon={<Settings />} onClick={() => setServerSettingsOpen(true)}>
-            Server settings
-          </Button>
-          {!service.status.running && (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<PlayArrow />}
-              onClick={() => setServerSettingsOpen(true)}
-            >
-              Start server
-            </Button>
-          )}
-        </div>
+        )}
 
-        <div className="rooms-summary-strip" aria-label="Tournament progress summary">
-          <SummaryItem label="Current round" value={currentRound === null ? '—' : `Round ${currentRound}`} />
-          <SummaryItem
-            label="Playing"
-            value={String(activeSessions.filter((session) => session.status === SessionStatus.Playing).length)}
-          />
-          <SummaryItem label="Submitted finals" value={String(service.inbox.length)} />
-          <SummaryItem label="Rooms online" value={`${onlineRooms} / ${rooms.length}`} />
-          <SummaryItem
-            label="Released"
-            value={service.releasedRoundNumber === null ? 'None' : `Round ${service.releasedRoundNumber}`}
-          />
-          <SummaryItem label="Next rebracket" value={rebracketBoundary ? `After ${rebracketBoundary.name}` : '—'} />
-        </div>
+        {activeTab === ControlPages.Live && (
+          <div className="rooms-context-row" aria-label="Current tournament context">
+            {currentRound === null ? 'No active round' : `Round ${currentRound}`}
+            {' · '}
+            {currentRound === null ? '—' : `${currentSummary?.accepted ?? 0}/${currentSummary?.expected ?? 0} accepted`}
+            {' · '}
+            {rooms.length === 0 ? 'No rooms configured' : `${onlineRooms}/${rooms.length} rooms online`}
+            {service.inbox.length > 0 && <> · {service.inbox.length} result pending</>}
+          </div>
+        )}
 
         {activeTab === ControlPages.Live && (
           <PrimaryOperationPanel
@@ -538,23 +567,6 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
         {activeTab === ControlPages.Live && <LiveRoomTable rooms={rooms} matches={matches} service={service} />}
 
         {activeTab === ControlPages.Display && <LiveDisplaySettingsCard />}
-
-        {activeTab === ControlPages.Live && rebracketBoundary && (
-          <section className="rooms-panel">
-            <div className="rooms-panel-header">
-              <div>
-                <h2>Rebracketing required</h2>
-                <p>
-                  {rebracketBoundary.name} is complete. Review standings before publishing{' '}
-                  {rebracketNextPhase?.name ?? 'the next phase'}.
-                </p>
-              </div>
-              <Button variant="contained" onClick={() => setRebracketOpen(true)}>
-                Review standings
-              </Button>
-            </div>
-          </section>
-        )}
 
         {activeTab === ControlPages.Rooms && (
           <section className="rooms-panel" aria-labelledby="rooms-list-heading">
@@ -601,12 +613,20 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
                   </thead>
                   <tbody>
                     {rooms.map((room) => {
-                      const match = currentMatchForRoom(room, matches);
+                      const assignmentState = roomAssignmentsForRoom(
+                        room,
+                        matches,
+                        service.releasedRoundNumber,
+                        currentRound,
+                      );
+                      const match = assignmentState.current ?? undefined;
+                      const nextMatch = assignmentState.next ?? undefined;
                       const session = sessionForRoom(room, service.sessions);
                       const presence = roomPresenceFor(room, service);
                       const state = roomState(
                         room,
                         match,
+                        nextMatch,
                         session,
                         presence?.connected ?? false,
                         service.status.running,
@@ -625,15 +645,7 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
                             {room.description && <div className="rooms-room-description">{room.description}</div>}
                           </td>
                           <td className="rooms-matchup">
-                            {match ? (
-                              <>
-                                <strong>{match.leftTeamName}</strong> <span className="rooms-secondary">vs</span>{' '}
-                                <strong>{match.rightTeamName}</strong>
-                                <span className="rooms-secondary">Round {match.roundNumber}</span>
-                              </>
-                            ) : (
-                              <span className="rooms-secondary">No current assignment</span>
-                            )}
+                            <RoomMatchup match={match} nextMatch={nextMatch} separator="vs" showRound />
                           </td>
                           <td>
                             <span className={`rooms-state ${state.className}`}>{state.label}</span>
@@ -743,91 +755,22 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
           </MenuItem>
         </Menu>
 
-        {activeTab === ControlPages.Live &&
-          readiness.state !== 'setup' &&
-          readiness.state !== 'rooms-not-configured' &&
-          readiness.state !== 'match-plan-missing' && (
-            <section className="rooms-panel" aria-labelledby="attention-heading">
-              <div className="rooms-panel-header">
-                <div>
-                  <h2 id="attention-heading">Needs attention</h2>
-                  <p>Issues that can block the next operational step.</p>
-                </div>
-              </div>
-              <AttentionList
-                service={service}
-                rooms={rooms}
-                scheduleIssues={scheduleIssues}
-                nextRelease={nextRelease}
-                releaseBlocked={releaseBlocked}
-                disabledRoomAssignments={disabledRoomAssignments}
-              />
-            </section>
-          )}
-
-        {activeTab === ControlPages.Live && roundNumbers.length > 0 && (
-          <section className="rooms-panel" aria-labelledby="release-heading">
+        {activeTab === ControlPages.Live && readiness.roomOperationsEnabled && readiness.activeIssues.length > 0 && (
+          <section className="rooms-panel" aria-labelledby="attention-heading">
             <div className="rooms-panel-header">
               <div>
-                <h2 id="release-heading">Round readiness and release</h2>
-                <p>Scheduled games are not playable until this control releases their round.</p>
+                <h2 id="attention-heading">Needs attention</h2>
+                <p>Issues that can block the next operational step.</p>
               </div>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={tournament.autoReleaseNextRound}
-                    onChange={(event) => {
-                      service.setAutoReleaseNextRound(event.target.checked);
-                    }}
-                  />
-                }
-                label="Auto-release ordinary next rounds"
-              />
             </div>
-            {roundNumbers.length === 0 ? (
-              <div className="rooms-empty-state">
-                <strong>No planned matches</strong>
-                Generate a Match Plan or add matches manually.
-              </div>
-            ) : (
-              <div>
-                {roundNumbers.map((roundNumber) => {
-                  const summary = summarizeRound(matches, roundNumber);
-                  const released = service.releasedRoundNumber === roundNumber;
-                  return (
-                    <div className="rooms-round-block" key={roundNumber}>
-                      <div className="rooms-round-header">
-                        <strong>
-                          Round {roundNumber} {released ? '· Released' : ''}
-                        </strong>
-                        <span>{formatRoundSummary(summary)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-                <Stack
-                  direction="row"
-                  sx={{
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    px: 2,
-                    py: 1.5,
-                  }}
-                >
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      color: 'text.secondary',
-                    }}
-                  >
-                    {releaseMessage(service.releasedRoundNumber, currentRound, currentSummary)}
-                  </Typography>
-                  <Button variant="contained" onClick={releaseRound} disabled={nextRelease === null || releaseBlocked}>
-                    {nextRelease === null ? 'All rounds released' : `Release Round ${nextRelease}`}
-                  </Button>
-                </Stack>
-              </div>
-            )}
+            <AttentionList
+              service={service}
+              rooms={rooms}
+              scheduleIssues={scheduleIssues}
+              nextRelease={nextRelease}
+              releaseBlocked={releaseBlocked}
+              disabledRoomAssignments={disabledRoomAssignments}
+            />
           </section>
         )}
 
@@ -841,6 +784,12 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
                 </p>
               </div>
               <div className="rooms-panel-actions">
+                <Button size="small" onClick={() => openBulkPlan('auto')} disabled={rooms.length === 0}>
+                  Auto-assign unassigned
+                </Button>
+                <Button size="small" onClick={() => openBulkPlan('rebalance')} disabled={rooms.length === 0}>
+                  Rebalance upcoming
+                </Button>
                 <Button size="small" startIcon={<Add />} onClick={() => setMatchEditor(null)}>
                   Add match
                 </Button>
@@ -857,7 +806,8 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
             <MatchPlanWorkspace
               matches={matches}
               rooms={rooms}
-              onRoomChange={changeRoomAssignment}
+              currentRoundNumber={currentRound}
+              onMove={moveRoomAssignment}
               onEdit={(match) => setMatchEditor(match)}
               onCancel={cancelMatch}
               onToggleLock={toggleRoomAssignmentLock}
@@ -865,9 +815,7 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
           </section>
         )}
 
-        {activeTab === ControlPages.Live && (service.inbox.length > 0 || service.currentRoundNumber !== null) && (
-          <MatchInboxCard />
-        )}
+        {activeTab === ControlPages.Live && service.inbox.length > 0 && <MatchInboxCard />}
 
         <RoomEditorDialog
           open={roomEditor !== undefined}
@@ -931,6 +879,15 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
           onClose={() => setRebracketOpen(false)}
           onDone={() => setRebracketOpen(false)}
         />
+        <AllocationPreviewDialog
+          open={bulkPlan !== null}
+          mode={bulkPlan?.mode ?? 'auto'}
+          plan={bulkPlan?.plan ?? null}
+          tournament={tournament}
+          rooms={rooms}
+          onClose={() => setBulkPlan(null)}
+          onApply={applyBulkPlan}
+        />
         <ServerSettingsDialog
           service={service}
           open={serverSettingsOpen}
@@ -952,17 +909,75 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
   );
 }
 
-function SummaryItem({ label, value }: { label: string; value: string }) {
+function ServerToolbar({
+  service,
+  serverAddress,
+  onCopy,
+  onSelectAddress,
+  onTestConnection,
+  onOpenSettings,
+}: {
+  service: TournamentServerContextValue;
+  serverAddress: string;
+  onCopy: (value: string) => void;
+  onSelectAddress: (value: string) => void;
+  onTestConnection: () => void;
+  onOpenSettings: () => void;
+}) {
+  const { networkAddresses } = service;
+  let addressContent: JSX.Element;
+  if (!service.status.running) {
+    addressContent = <strong>Browser room scoring is not configured</strong>;
+  } else if (networkAddresses.length > 1) {
+    addressContent = (
+      <FormControl size="small" sx={{ minWidth: 235 }}>
+        <InputLabel id="server-network-address-label">Network address</InputLabel>
+        <Select
+          labelId="server-network-address-label"
+          value={serverAddress}
+          label="Network address"
+          onChange={(event) => onSelectAddress(event.target.value)}
+        >
+          {networkAddresses.map((address) => (
+            <MenuItem key={address.url} value={address.url}>
+              {address.interfaceName}: {address.address}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+    );
+  } else {
+    addressContent = <strong>{serverAddress || 'No LAN address found'}</strong>;
+  }
   return (
-    <div className="rooms-summary-item">
-      <div className="rooms-summary-label">{label}</div>
-      <div className="rooms-summary-value">{value}</div>
+    <div className="rooms-server-toolbar">
+      <div className="rooms-server-address">{addressContent}</div>
+      {service.status.running && serverAddress !== '' && (
+        <>
+          <Button size="small" startIcon={<ContentCopy />} onClick={() => onCopy(serverAddress)}>
+            Copy URL
+          </Button>
+          <Button size="small" onClick={onTestConnection}>
+            Test connection
+          </Button>
+        </>
+      )}
+      <Button size="small" startIcon={<Settings />} onClick={onOpenSettings}>
+        {service.status.running ? 'Network & server' : 'Set up room scoring'}
+      </Button>
+      {!service.status.running && (
+        <Button size="small" variant="contained" startIcon={<PlayArrow />} onClick={onOpenSettings}>
+          Start server
+        </Button>
+      )}
     </div>
   );
 }
 
 function operationTitle(readiness: ReturnType<typeof resolveTournamentReadiness>): string {
   switch (readiness.state) {
+    case 'traditional-ready':
+      return 'Browser room scoring is not configured';
     case 'server-unavailable':
       return 'Tournament server is unavailable';
     case 'rooms-not-configured':
@@ -994,6 +1009,8 @@ function operationTitle(readiness: ReturnType<typeof resolveTournamentReadiness>
 function operationMessage(readiness: ReturnType<typeof resolveTournamentReadiness>): string {
   const firstIssue = readiness.activeIssues[0];
   switch (readiness.state) {
+    case 'traditional-ready':
+      return 'This tournament is ready for manual game entry in Games. Set up rooms only if you want browser scoring.';
     case 'server-unavailable':
       return 'Start the local server so room scorekeepers can connect.';
     case 'rooms-not-configured':
@@ -1030,28 +1047,43 @@ function runPrimaryAction(
   releaseRound: () => void,
   onNavigateTarget?: (target: ReadinessTarget) => void,
 ) {
-  const target = readiness.primaryAction?.target;
-  if (target && !target.startsWith('control:')) {
-    onNavigateTarget?.(target);
-    return;
+  const action = primaryOperationAction(readiness);
+  if (!action) return;
+
+  switch (action.kind) {
+    case 'navigate': {
+      const { target } = action;
+      if (!target) break;
+      if (!target.startsWith('control:')) {
+        onNavigateTarget?.(target);
+        break;
+      }
+      if (target === 'control:live') setActiveTab(ControlPages.Live);
+      else if (target === 'control:rooms') setActiveTab(ControlPages.Rooms);
+      else if (target === 'control:match-plan') setActiveTab(ControlPages.MatchPlan);
+      else if (target === 'control:display') setActiveTab(ControlPages.Display);
+      break;
+    }
+    case 'start-server':
+      setServerSettingsOpen(true);
+      break;
+    case 'open-rebracket':
+      setRebracketOpen(true);
+      break;
+    case 'release-round':
+      releaseRound();
+      break;
+    case 'review-results':
+      setActiveTab(ControlPages.Live);
+      break;
+    default:
+      break;
   }
-  if (target === 'control:rooms') {
-    setActiveTab(ControlPages.Rooms);
-    return;
-  }
-  if (target === 'control:match-plan') {
-    setActiveTab(ControlPages.MatchPlan);
-    return;
-  }
-  if (readiness.state === 'server-unavailable') {
-    setServerSettingsOpen(true);
-    return;
-  }
-  if (readiness.state === 'rebracket-required') {
-    setRebracketOpen(true);
-    return;
-  }
-  if (readiness.state === 'round-ready') releaseRound();
+}
+
+function primaryOperationAction(readiness: ReturnType<typeof resolveTournamentReadiness>) {
+  if (readiness.roomOperationsEnabled || !readiness.coreReady) return readiness.primaryAction;
+  return { kind: 'navigate' as const, label: 'Set up room scoring', target: 'control:rooms' as const };
 }
 
 function PrimaryOperationPanel({
@@ -1062,7 +1094,7 @@ function PrimaryOperationPanel({
   onAction: () => void;
 }) {
   const roundLabel = readiness.currentRoundNumber === null ? 'TOURNAMENT' : `ROUND ${readiness.currentRoundNumber}`;
-  const action = readiness.primaryAction;
+  const action = primaryOperationAction(readiness);
   return (
     <section className="rooms-panel rooms-primary-operation" aria-labelledby="primary-operation-heading">
       <div className="rooms-panel-header">
@@ -1087,6 +1119,42 @@ function PrimaryOperationPanel({
   );
 }
 
+function RoomMatchup({
+  match,
+  nextMatch,
+  separator,
+  showRound = false,
+}: {
+  // eslint-disable-next-line react/require-default-props
+  match?: ScheduledMatch;
+  // eslint-disable-next-line react/require-default-props
+  nextMatch?: ScheduledMatch;
+  separator: string;
+  // eslint-disable-next-line react/require-default-props
+  showRound?: boolean;
+}) {
+  if (match) {
+    return (
+      <>
+        <strong>{match.leftTeamName}</strong> <span className="rooms-secondary">{separator}</span>{' '}
+        <strong>{match.rightTeamName}</strong>
+        {showRound && <span className="rooms-secondary">Round {match.roundNumber}</span>}
+      </>
+    );
+  }
+  if (nextMatch) {
+    return (
+      <>
+        <span className="rooms-secondary">Next · Round {nextMatch.roundNumber}</span>
+        <strong>{nextMatch.leftTeamName}</strong> <span className="rooms-secondary">{separator}</span>{' '}
+        <strong>{nextMatch.rightTeamName}</strong>
+        <span className="rooms-secondary">Waiting for release</span>
+      </>
+    );
+  }
+  return <span className="rooms-secondary">No active game</span>;
+}
+
 function LiveRoomTable({
   rooms,
   matches,
@@ -1105,7 +1173,10 @@ function LiveRoomTable({
         </div>
       </div>
       {rooms.length === 0 ? (
-        <div className="rooms-empty-state">Configure rooms to see live room operations here.</div>
+        <div className="rooms-empty-state">
+          Browser room scoring is not configured. Use Games for traditional manual entry, or set up room scoring to
+          monitor Chromebooks here.
+        </div>
       ) : (
         <div className="rooms-table-wrap">
           <table className="rooms-table">
@@ -1119,24 +1190,31 @@ function LiveRoomTable({
             </thead>
             <tbody>
               {rooms.map((room) => {
-                const match = currentMatchForRoom(room, matches);
+                const assignmentState = roomAssignmentsForRoom(
+                  room,
+                  matches,
+                  service.releasedRoundNumber,
+                  service.currentRoundNumber,
+                );
+                const match = assignmentState.current ?? undefined;
+                const nextMatch = assignmentState.next ?? undefined;
                 const session = sessionForRoom(room, service.sessions);
                 const presence = roomPresenceFor(room, service);
-                const state = roomState(room, match, session, presence?.connected ?? false, service.status.running);
+                const state = roomState(
+                  room,
+                  match,
+                  nextMatch,
+                  session,
+                  presence?.connected ?? false,
+                  service.status.running,
+                );
                 return (
                   <tr key={room.id}>
                     <td>
                       <strong>{room.name}</strong>
                     </td>
                     <td className="rooms-matchup">
-                      {match ? (
-                        <>
-                          <strong>{match.leftTeamName}</strong> <span className="rooms-secondary">/</span>{' '}
-                          <strong>{match.rightTeamName}</strong>
-                        </>
-                      ) : (
-                        <span className="rooms-secondary">No current assignment</span>
-                      )}
+                      <RoomMatchup match={match} nextMatch={nextMatch} separator="/" />
                     </td>
                     <td>
                       <span className={`rooms-state ${state.className}`}>{state.label}</span>
@@ -1389,6 +1467,84 @@ function ScheduleRow({
   );
 }
 
+function AllocationPreviewDialog({
+  open,
+  mode,
+  plan,
+  tournament,
+  rooms,
+  onClose,
+  onApply,
+}: {
+  open: boolean;
+  mode: 'auto' | 'rebalance';
+  plan: IRebalancePlan | null;
+  tournament: Tournament;
+  rooms: TournamentRoom[];
+  onClose: () => void;
+  onApply: (plan: IRebalancePlan) => void;
+}) {
+  if (!plan) return null;
+  const matchById = new Map(tournament.scheduledMatches.map((match) => [match.id, match]));
+  const roomName = (roomId?: string) =>
+    roomId ? rooms.find((room) => room.id === roomId)?.name ?? roomId : 'Unassigned';
+  const blocking = plan.issues.some((issue) => issue.severity === ScheduleIssueSeverity.Error);
+  const previewChanges = [...plan.moved, ...plan.newlyAssigned].slice(0, 12);
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>{mode === 'auto' ? 'Auto-assign rooms' : 'Rebalance upcoming'}</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {mode === 'auto'
+            ? 'Only unassigned future games will be filled. Existing room choices are kept exactly as they are.'
+            : 'Future movable rounds are previewed using the deterministic allocator. Playing, submitted, accepted, and kept games are protected.'}
+        </Typography>
+        <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1.5, mb: 2 }}>
+          <Typography variant="body2">{plan.unchanged.length} unchanged</Typography>
+          <Typography variant="body2">{plan.moved.length} moved</Typography>
+          <Typography variant="body2">{plan.newlyAssigned.length} newly assigned</Typography>
+          <Typography variant="body2">{plan.locked.length} kept</Typography>
+          <Typography variant="body2">{plan.unableToAssign.length} unable to assign</Typography>
+        </Stack>
+        {previewChanges.length > 0 && (
+          <Box component="ul" sx={{ pl: 2.5, mt: 0, mb: 2 }}>
+            {previewChanges.map((change) => (
+              <li key={change.matchId}>
+                <Typography variant="body2">
+                  {matchById.get(change.matchId)?.describe() ?? change.matchId} · {roomName(change.fromRoomId)} →{' '}
+                  {roomName(change.toRoomId)}
+                </Typography>
+              </li>
+            ))}
+            {plan.moved.length + plan.newlyAssigned.length > previewChanges.length && (
+              <Typography component="li" variant="caption" color="text.secondary">
+                {plan.moved.length + plan.newlyAssigned.length - previewChanges.length} more changes
+              </Typography>
+            )}
+          </Box>
+        )}
+        {plan.issues.length > 0 && (
+          <Alert severity={blocking ? 'error' : 'warning'}>
+            {plan.issues.slice(0, 8).map((issue) => (
+              <div key={issue.message}>{issue.message}</div>
+            ))}
+          </Alert>
+        )}
+        {plan.changes.length === 0 && plan.unableToAssign.length === 0 && (
+          <Alert severity="info">There are no room changes to apply.</Alert>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" disabled={blocking || plan.changes.length === 0} onClick={() => onApply(plan)}>
+          Apply
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function ServerSettingsDialog({
   service,
   open,
@@ -1441,9 +1597,28 @@ function ServerSettingsDialog({
           />
         )}
         {service.status.running && (
-          <Alert severity="success">
-            Running on port {service.status.port}. Stop the server before changing the port.
-          </Alert>
+          <>
+            <Alert severity="success" sx={{ mb: 2 }}>
+              Running on port {service.status.port}. Stop the server before changing the port.
+            </Alert>
+            {service.networkAddresses.length > 0 && (
+              <FormControl fullWidth size="small">
+                <InputLabel id="settings-network-address-label">Preferred network address</InputLabel>
+                <Select
+                  labelId="settings-network-address-label"
+                  label="Preferred network address"
+                  value={service.selectedAddress}
+                  onChange={(event) => service.setPreferredNetworkAddress(event.target.value)}
+                >
+                  {service.networkAddresses.map((address) => (
+                    <MenuItem key={address.url} value={address.url}>
+                      {address.interfaceName}: {address.address} ({address.url})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </>
         )}
         {service.lastError !== '' && (
           <Alert severity="error" sx={{ mt: 2 }}>

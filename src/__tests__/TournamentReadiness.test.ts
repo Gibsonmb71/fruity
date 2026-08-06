@@ -34,7 +34,7 @@ describe('resolveTournamentReadiness', () => {
     const readiness = resolveTournamentReadiness(new Tournament());
 
     expect(readiness.state).toBe('setup');
-    expect(readiness.primaryAction).toEqual({ label: 'Open Tournament', target: 'setup:tournament' });
+    expect(readiness.primaryAction).toEqual({ kind: 'navigate', label: 'Open Tournament', target: 'setup:tournament' });
     expect(readiness.setup.teamsReady).toBe(false);
     expect(readiness.setup.formatReady).toBe(false);
     expect(readiness.activeIssues.map((currentIssue) => currentIssue.id)).toEqual(
@@ -55,7 +55,11 @@ describe('resolveTournamentReadiness', () => {
       formatReady: true,
     });
     expect(readiness.state).toBe('match-plan-missing');
-    expect(readiness.primaryAction).toEqual({ label: 'Create Match Plan', target: 'control:match-plan' });
+    expect(readiness.primaryAction).toEqual({
+      kind: 'navigate',
+      label: 'Create Match Plan',
+      target: 'control:match-plan',
+    });
   });
 
   test('blocks an unassigned current-round game with a direct match-plan action', () => {
@@ -84,7 +88,7 @@ describe('resolveTournamentReadiness', () => {
     });
 
     expect(readiness.state).toBe('server-unavailable');
-    expect(readiness.primaryAction).toEqual({ label: 'Start server', target: 'control:live' });
+    expect(readiness.primaryAction).toEqual({ kind: 'start-server', label: 'Start server', target: 'control:live' });
   });
 
   test('prioritizes review of submitted results', () => {
@@ -97,7 +101,11 @@ describe('resolveTournamentReadiness', () => {
     );
 
     expect(readiness.state).toBe('results-awaiting-review');
-    expect(readiness.primaryAction).toEqual({ label: 'Review results', target: 'control:live' });
+    expect(readiness.primaryAction).toEqual({
+      kind: 'review-results',
+      label: 'Review results',
+      target: 'control:live',
+    });
   });
 
   test('reports an offline room as an actionable operational block', () => {
@@ -120,6 +128,20 @@ describe('resolveTournamentReadiness', () => {
 
     expect(readiness.currentRoundSummary?.complete).toBe(true);
     expect(readiness.state).toBe('tournament-complete');
-    expect(readiness.primaryAction).toEqual({ label: 'Review reports', target: 'reports' });
+    expect(readiness.primaryAction).toEqual({ kind: 'navigate', label: 'Review reports', target: 'reports' });
+  });
+
+  test('keeps traditional manual-entry tournaments free of room-operation errors', () => {
+    const tournament = makeTestTournament(CommonRuleSets.NaqtUntimed);
+
+    const readiness = resolveTournamentReadiness(tournament);
+
+    expect(readiness.coreReady).toBe(true);
+    expect(readiness.roomOperationsEnabled).toBe(false);
+    expect(readiness.state).toBe('traditional-ready');
+    expect(readiness.primaryAction).toEqual({ kind: 'navigate', label: 'Open Games', target: 'games' });
+    expect(readiness.activeIssues.some((currentIssue) => /Match Plan|rooms|server/i.test(currentIssue.message))).toBe(
+      false,
+    );
   });
 });

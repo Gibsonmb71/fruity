@@ -85,6 +85,8 @@ export interface IRebalancePlan {
   disableMode?: RoomDisableMode;
 }
 
+export type AutoAssignPlan = IRebalancePlan;
+
 export interface ISwapPlan {
   kind: 'move' | 'swap' | 'illegal';
   issues: IScheduleIssue[];
@@ -413,6 +415,72 @@ export function applyRebalance(tournament: Tournament, plan: IRebalancePlan): vo
   }
 }
 
+/**
+ * Build a plan that only fills currently unassigned future games. Existing room choices are
+ * treated as fixed, including choices that are no longer eligible; the preview will report those
+ * conflicts instead of silently moving a director's work.
+ */
+export function planAutoAssignUnassigned(tournament: Tournament, roundNumbers: number[] = []): AutoAssignPlan {
+  const numbers = matchNumbersFor(tournament, roundNumbers);
+  const plan: AutoAssignPlan = {
+    roundNumbers: numbers,
+    unchanged: [],
+    moved: [],
+    newlyAssigned: [],
+    locked: [],
+    unableToAssign: [],
+    changes: [],
+    issues: [],
+  };
+
+  for (const roundNumber of numbers) {
+    const matches = tournament.scheduledMatches.filter((match) => match.roundNumber === roundNumber);
+    const takenRoomIds = new Set(
+      matches
+        .filter((match) => match.roomId && match.status !== ScheduledMatchStatus.Cancelled)
+        .map((match) => match.roomId as string),
+    );
+    const unassigned = sortedMatches(matches).filter(
+      (match) => !match.roomId && match.status !== ScheduledMatchStatus.Cancelled,
+    );
+
+    for (const match of unassigned) {
+      const eligibility = resolveEligibleRooms(match, tournament);
+      if (match.roomAssignmentLocked) {
+        const unable = { matchId: match.id, reason: 'Locked assignment has no room.', eligibleRoomIds: [] };
+        plan.locked.push(match.id);
+        plan.unableToAssign.push(unable);
+        plan.issues.push(error(`${match.describe()} is locked but has no room assignment.`, [match.id]));
+        continue;
+      }
+      const room = eligibility.eligibleRooms.find((candidate) => !takenRoomIds.has(candidate.id));
+      if (!room) {
+        const reason = roomUnavailableReason(match, eligibility);
+        plan.unableToAssign.push({
+          matchId: match.id,
+          reason,
+          eligibleRoomIds: eligibility.eligibleRooms.map((candidate) => candidate.id),
+        });
+        plan.issues.push(warning(`${match.describe()}: ${reason}`, [match.id]));
+        continue;
+      }
+
+      takenRoomIds.add(room.id);
+      const change = { matchId: match.id, toRoomId: room.id, reason: 'fill unassigned game' };
+      plan.newlyAssigned.push(change);
+      plan.changes.push(change);
+    }
+
+    matches
+      .filter((match) => match.roomId || match.status === ScheduledMatchStatus.Cancelled)
+      .forEach((match) => {
+        plan.unchanged.push({ matchId: match.id, fromRoomId: match.roomId, toRoomId: match.roomId });
+      });
+  }
+
+  return plan;
+}
+
 /** Plan what happens when a room is disabled, without changing the room or its history. */
 export function planRoomDisable(tournament: Tournament, roomId: string, mode: RoomDisableMode): IRebalancePlan {
   const plan = planRebalanceInternal(tournament, [], roomId);
@@ -533,6 +601,51 @@ export function planSwap(tournament: Tournament, matchId: string, targetRoomId: 
       { matchId: occupant.id, fromRoomId: targetRoomId, toRoomId: match.roomId },
     ],
   };
+}
+
+/**
+ * Apply a validated move or swap in one mutation. The plan is revalidated immediately before any
+ * field is changed, so a stale board drop cannot leave the first half of a swap applied.
+ */
+export function applySwapPlan(tournament: Tournament, plan: ISwapPlan): IScheduleIssue[] {
+  if (plan.kind === 'illegal') return plan.issues;
+  if (plan.changes.length === 0) return [];
+
+  const first = plan.changes[0];
+  if (!first.toRoomId) {
+    return assignRoom(tournament, first.matchId, undefined);
+  }
+
+  const currentPlan = planSwap(tournament, first.matchId, first.toRoomId);
+  if (currentPlan.kind !== plan.kind || currentPlan.changes.length !== plan.changes.length) {
+    return [error('The Match Plan changed while this move was being reviewed. Please try again.', [first.matchId])];
+  }
+  const expected = new Map(plan.changes.map((change) => [change.matchId, change.toRoomId]));
+  const actual = new Map(currentPlan.changes.map((change) => [change.matchId, change.toRoomId]));
+  if (expected.size !== actual.size || [...expected].some(([matchId, roomId]) => actual.get(matchId) !== roomId)) {
+    return [error('The Match Plan changed while this move was being reviewed. Please try again.', [first.matchId])];
+  }
+
+  const changedMatches = plan.changes.map((change) =>
+    tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId),
+  );
+  if (changedMatches.some((match) => !match)) {
+    return [
+      error(
+        'A scheduled match in this move no longer exists.',
+        plan.changes.map((change) => change.matchId),
+      ),
+    ];
+  }
+
+  plan.changes.forEach((change) => {
+    const match = tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId);
+    if (!match) return;
+    match.roomId = change.toRoomId;
+    match.roomAssignmentSource = change.toRoomId ? 'manual' : undefined;
+    match.roomAssignmentLocked = undefined;
+  });
+  return [];
 }
 
 /**
