@@ -152,7 +152,7 @@ function ActivePage(props: IActivePageProps) {
   const { whichPage, onNavigate } = props;
   switch (whichPage) {
     case ApplicationPages.General:
-      return <GeneralPage onNavigate={onNavigate} />;
+      return <GeneralPage />;
     case ApplicationPages.Rules:
       return <RulesPage />;
     case ApplicationPages.Schedule:
