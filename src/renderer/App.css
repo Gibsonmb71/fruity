@@ -48,39 +48,6 @@
   text-decoration: underline;
 }
 
-/* This is hacky, but actually dynamically sizing the iframe is a headache due to cross-frame scripting guardrails */
 .stat-report-iframe {
-  height: 420px;
   display: block;
-  background-color: #ffffff;
-}
-
-@media screen and (min-height: 670px) {
-  .stat-report-iframe {
-    height: 470px;
-  }
-}
-
-@media screen and (min-height: 720px) {
-  .stat-report-iframe {
-    height: 520px;
-  }
-}
-
-@media screen and (min-height: 820px) {
-  .stat-report-iframe {
-    height: 620px;
-  }
-}
-
-@media screen and (min-height: 920px) {
-  .stat-report-iframe {
-    height: 720px;
-  }
-}
-
-@media screen and (min-height: 1020px) {
-  .stat-report-iframe {
-    height: 820px;
-  }
 }

@@ -118,12 +118,25 @@ function TournamentEditor() {
           // The header is exactly `headerHeight` tall on every platform (it reserves horizontal room
           // for the macOS traffic lights, not vertical), so this is the whole of the remaining
           // viewport. If the two ever disagree the page grows a scrollbar it doesn't need.
-          minHeight: `calc(100vh - ${headerHeight}px)`,
+          height: `calc(100vh - ${headerHeight}px)`,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
           px: { xs: 2, md: 3 },
           py: 2.5,
         }}
       >
-        <Box sx={{ maxWidth: 1500, mx: 'auto' }}>
+        <Box
+          sx={{
+            maxWidth: 1500,
+            width: '100%',
+            height: '100%',
+            minHeight: 0,
+            mx: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           <ActivePage whichPage={activePage} onNavigate={setactivePage} />
         </Box>
       </Box>
