@@ -14,7 +14,7 @@ import {
   Tab,
   Tabs,
 } from '@mui/material';
-import { useContext, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { Add, Delete, Edit, Error, ExpandMore, FileUpload, FilterAlt, Warning } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
@@ -27,6 +27,7 @@ import { Team } from '../DataModel/Team';
 import { CtrlOrCmd, trunc } from '../Utils/GeneralUtils';
 import { YfEmptyState, YfPageHeader } from '../Utils/GeneralReactUtils';
 import { ApplicationPages, SetupPages } from '../Enums';
+import type { IQuickFindNavigation } from '../Services/QuickFind';
 
 // Defines the order the buttons should be in
 const viewList = ['By round', 'By pool'];
@@ -36,14 +37,39 @@ const teamSelectNullOption = '';
 interface IGamesPageProps {
   // eslint-disable-next-line react/require-default-props
   onNavigate?: (page: ApplicationPages, setupSection?: SetupPages) => void;
+  // eslint-disable-next-line react/require-default-props
+  navigation?: IQuickFindNavigation;
+  // eslint-disable-next-line react/require-default-props
+  onNavigationHandled?: () => void;
 }
 
 export default function GamesPage(props: IGamesPageProps) {
-  const { onNavigate } = props;
+  const { onNavigate, navigation, onNavigationHandled } = props;
   const tournManager = useContext(TournamentContext);
   const [curView] = useSubscription(tournManager.currentGamesPageView);
-  const [filterTeam, setFilterTeam] = useState<Team | undefined>(undefined);
+  const [filterTeam, setFilterTeam] = useState<Team | undefined>(() =>
+    navigation?.teamName ? tournManager.tournament.findTeamByName(navigation.teamName) : undefined,
+  );
   const hasSchedule = tournManager.tournament.phases.length > 0;
+
+  useEffect(() => {
+    if (!navigation) return;
+    if (navigation.teamName) {
+      setFilterTeam(tournManager.tournament.findTeamByName(navigation.teamName));
+    }
+    if (navigation.matchId) {
+      const matchAndRound = tournManager.tournament.phases
+        .flatMap((phase) =>
+          phase.rounds.map((round) => ({
+            round,
+            match: round.matches.find((m) => m.id === navigation.matchId),
+          })),
+        )
+        .find((entry) => entry.match !== undefined);
+      if (matchAndRound?.match) tournManager.openMatchEditModalExistingMatch(matchAndRound.match, matchAndRound.round);
+    }
+    onNavigationHandled?.();
+  }, [navigation, onNavigationHandled, tournManager]);
 
   return (
     <>
@@ -104,7 +130,7 @@ export default function GamesPage(props: IGamesPageProps) {
         </Paper>
       ) : (
         <>
-          {curView === 0 && <GamesViewByRound filterTeam={filterTeam} />}
+          {curView === 0 && <GamesViewByRound filterTeam={filterTeam} initialRoundNumber={navigation?.roundNumber} />}
           {curView === 1 && <GamesViewByPool />}
         </>
       )}
@@ -156,17 +182,24 @@ function TeamFilterField(props: ITeamFilterFieldProps) {
 
 interface IGameViewByRoundProps {
   filterTeam: Team | undefined;
+  // eslint-disable-next-line react/require-default-props
+  initialRoundNumber?: number;
 }
 
 function GamesViewByRound(props: IGameViewByRoundProps) {
-  const { filterTeam } = props;
+  const { filterTeam, initialRoundNumber } = props;
   const tournManager = useContext(TournamentContext);
   const [phases] = useSubscription(tournManager.tournament.phases);
 
   return (
     <Stack spacing={2}>
       {phases.map((phase) => (
-        <GamesForPhaseByRound key={phase.name} phase={phase} filterTeam={filterTeam} />
+        <GamesForPhaseByRound
+          key={phase.name}
+          phase={phase}
+          filterTeam={filterTeam}
+          initialRoundNumber={initialRoundNumber}
+        />
       ))}
     </Stack>
   );
@@ -175,10 +208,12 @@ function GamesViewByRound(props: IGameViewByRoundProps) {
 interface IGamesForPhaseByRoundProps {
   phase: Phase;
   filterTeam: Team | undefined;
+  // eslint-disable-next-line react/require-default-props
+  initialRoundNumber?: number;
 }
 
 function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
-  const { phase, filterTeam } = props;
+  const { phase, filterTeam, initialRoundNumber } = props;
 
   return (
     <Box component="section" aria-labelledby={`games-phase-${phase.code}`}>
@@ -197,6 +232,7 @@ function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
             expanded={!!filterTeam}
             forceNumericDisplay={phase.forceNumericRounds || false}
             filterTeam={filterTeam}
+            initialRoundNumber={initialRoundNumber}
           />
         ))}
       </Box>
@@ -209,12 +245,14 @@ interface ISingleRoundProps {
   expanded: boolean;
   forceNumericDisplay: boolean;
   filterTeam: Team | undefined;
+  // eslint-disable-next-line react/require-default-props
+  initialRoundNumber?: number;
 }
 
 function SingleRound(props: ISingleRoundProps) {
-  const { round, expanded: expandedProp, forceNumericDisplay, filterTeam } = props;
+  const { round, expanded: expandedProp, forceNumericDisplay, filterTeam, initialRoundNumber } = props;
   const tournManager = useContext(TournamentContext);
-  const [expanded, setExpanded] = useState(expandedProp);
+  const [expanded, setExpanded] = useState(expandedProp || initialRoundNumber === round.number);
   const canAddMatch = useMemo(() => tournManager.tournament.readyToAddMatches(), [tournManager]);
   const [numErrs, numWarns] = filterTeam === undefined ? round.countErrorsAndWarnings() : [0, 0];
   const [prevFilterTeam, setPrevFilterTeam] = useState<Team | undefined>(undefined);
