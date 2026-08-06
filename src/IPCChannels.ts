@@ -30,6 +30,8 @@ export enum IpcRendToMain {
   LaunchExternalWebPage = 'LaunchExternalWebPage',
   /** Push the read-only tournament projection that the tournament server serves to room clients */
   TournamentServerSetSnapshot = 'TournamentServerSetSnapshot',
+  /** Push the separate, deliberately reduced public live projection to the local server */
+  TournamentServerSetPublicLiveSnapshot = 'TournamentServerSetPublicLiveSnapshot',
   /** The statskeeper accepted or rejected a match a room submitted */
   TournamentServerSubmissionVerdict = 'TournamentServerSubmissionVerdict',
 }

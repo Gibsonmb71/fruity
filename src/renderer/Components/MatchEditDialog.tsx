@@ -21,8 +21,6 @@ import {
   AlertColor,
   Autocomplete,
   FormControlLabel,
-  Paper,
-  Card,
   Collapse,
   IconButton,
   Tooltip,
@@ -33,7 +31,6 @@ import { MatchEditModalContext } from '../Modal Managers/TempMatchManager';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import {
-  CollapsibleArea,
   ExpandButton,
   YfAcceptButton,
   YfCancelButton,
@@ -41,6 +38,7 @@ import {
   YfNumericField,
   hotkeyFormat,
 } from '../Utils/GeneralReactUtils';
+import YfCard from './YfCard';
 import { ValidationStatuses } from '../DataModel/Interfaces';
 import { LeftOrRight } from '../Utils/UtilTypes';
 import { MatchPlayer } from '../DataModel/MatchPlayer';
@@ -95,13 +93,11 @@ function MatchEditDialogCore() {
 
   return (
     <>
-      <Dialog fullWidth maxWidth="xl" open={isOpen} onClose={handleCancel}>
+      <Dialog fullWidth maxWidth="lg" open={isOpen} onClose={handleCancel}>
         <DialogTitle>Edit Game</DialogTitle>
         <DialogContent>
           <Box
             sx={{
-              fontSize: 14,
-              minHeight: 475,
               '& .MuiFormHelperText-root': { whiteSpace: 'nowrap' },
             }}
           >
@@ -135,14 +131,14 @@ function MatchEditDialogCore() {
               </Grid>
               {/** third row */}
               <Grid sx={{ marginBottom: 3 }} size={{ xs: 12, md: 6 }}>
-                <Paper variant="outlined" sx={{ p: 1, marginRight: 1 }}>
+                <YfCard title="Left team players" variant="flush">
                   <PlayerGrid whichTeam="left" />
-                </Paper>
+                </YfCard>
               </Grid>
               <Grid sx={{ marginBottom: 3 }} size={{ xs: 12, md: 6 }}>
-                <Paper variant="outlined" sx={{ p: 1, marginLeft: 1 }}>
+                <YfCard title="Right team players" variant="flush">
                   <PlayerGrid whichTeam="right" />
-                </Paper>
+                </YfCard>
               </Grid>
               {/** fourth row */}
               <Grid sx={{ marginBottom: 3 }} size={{ xs: 6, md: 5 }}>
@@ -179,30 +175,20 @@ function MatchEditDialogCore() {
                 <NotesCard />
               </Grid>
             </Grid>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mt: 1 }}>
+              <SuppressedValInfo />
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <ValidationSection />
+              </Box>
+            </Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ justifyContent: 'space-between', minHeight: '72px' }}>
-          <Box>
-            <SuppressedValInfo />
-          </Box>
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              maxHeight: '150px',
-              overflowY: 'auto',
-              marginRight: 'auto',
-            }}
-          >
-            <ValidationSection />
-          </Box>
-          <Box sx={{ '& .MuiButton-root': { marginLeft: 1, whiteSpace: 'nowrap' } }}>
-            <YfCancelButton onClick={handleCancel} />
-            <Button variant="outlined" onClick={handleAcceptAndStay} ref={saveAndNewButtonRef}>
-              {hotkeyFormat('&Save {AMP} New')}
-            </Button>
-            <YfAcceptButton onClick={handleAccept} ref={acceptButtonRef} />
-          </Box>
+        <DialogActions>
+          <YfCancelButton onClick={handleCancel} />
+          <Button variant="outlined" onClick={handleAcceptAndStay} ref={saveAndNewButtonRef}>
+            {hotkeyFormat('&Save {AMP} New')}
+          </Button>
+          <YfAcceptButton onClick={handleAccept} ref={acceptButtonRef} />
         </DialogActions>
       </Dialog>
       <ErrorDialog />
@@ -561,7 +547,6 @@ function PlayerRow(props: IPlayerRowProps) {
         <YfNumericField
           slotProps={{ htmlInput: { min: 0 } }}
           fullWidth
-          variant="standard"
           size="small"
           hiddenLabel
           error={tuhError}
@@ -578,14 +563,7 @@ function PlayerRow(props: IPlayerRowProps) {
       ))}
       <Grid size={{ xs: numColumns }}>
         {/** Don't use the MUI disabled property, which makes the text gray and hard to read */}
-        <TextField
-          fullWidth
-          variant="standard"
-          size="small"
-          hiddenLabel
-          slotProps={{ htmlInput: { disabled: true } }}
-          value={pts}
-        />
+        <TextField fullWidth size="small" hiddenLabel slotProps={{ htmlInput: { disabled: true } }} value={pts} />
       </Grid>
     </>
   );
@@ -728,7 +706,6 @@ function BounceBackRow(props: IBounceBackRowProps) {
         sx={{ width: '6ch' }}
         slotProps={{ htmlInput: { min: 0, step: divisor } }}
         fullWidth
-        variant="standard"
         size="small"
         error={invalid}
         value={bbPts}
@@ -779,7 +756,6 @@ function LightningRow(props: ILightningRowProps) {
         sx={{ width: '6ch' }}
         slotProps={{ htmlInput: { min: 0, step: divisor } }}
         fullWidth
-        variant="standard"
         size="small"
         value={ltngPts}
         onChange={(e) => setLtngPts(e.target.value)}
@@ -801,22 +777,26 @@ function OvertimeSection() {
   if (modalManager.tempMatch.isForfeit()) return null;
 
   return (
-    <Card variant="outlined" sx={{ p: 1 }}>
-      <Box sx={{ cursor: 'pointer' }}>
-        <Grid container onClick={() => setFormExpanded(!formExpanded)}>
-          <Grid size={{ xs: 'grow' }}>
-            <b>Overtime&emsp;</b>
-            {!formExpanded && <span>{modalManager.tempMatch.getOvertimeSummary()}</span>}
-          </Grid>
-          <Grid size={{ xs: 'auto' }}>
-            <ExpandButton expand={formExpanded} sx={{ p: 0 }}>
-              <ExpandMore />
-            </ExpandButton>
-          </Grid>
-        </Grid>
-      </Box>
+    <YfCard
+      title={
+        <>
+          <b>Overtime</b>
+          {!formExpanded && (
+            <Box component="span" sx={{ ml: 1, fontWeight: 400 }}>
+              {modalManager.tempMatch.getOvertimeSummary()}
+            </Box>
+          )}
+        </>
+      }
+      variant="flush"
+      actions={
+        <ExpandButton expand={formExpanded} sx={{ p: 0 }} onClick={() => setFormExpanded(!formExpanded)}>
+          <ExpandMore />
+        </ExpandButton>
+      }
+    >
       <Collapse in={formExpanded}>
-        <Grid container columnSpacing={1} sx={{ marginTop: 1, paddingBottom: 1 }}>
+        <Grid container columnSpacing={1} sx={{ p: 1, paddingBottom: 2 }}>
           <Grid size={{ xs: 3 }}>
             <OvertimeTuReadField />
           </Grid>
@@ -835,7 +815,7 @@ function OvertimeSection() {
           </Grid>
         </Grid>
       </Collapse>
-    </Card>
+    </YfCard>
   );
 }
 
@@ -898,26 +878,46 @@ function OvertimeBuzzesRow(props: IOverTimeRowProps) {
 function NotesCard() {
   const modalManager = useContext(MatchEditModalContext);
   const [notes, setNotes] = useSubscription(modalManager.tempMatch.notes || '');
+  const [formExpanded, setFormExpanded] = useState(false);
 
   return (
-    <Card variant="outlined" sx={{ p: 1 }}>
-      <CollapsibleArea title={<b>Notes&emsp;</b>} secondaryTitle={<span>{trunc(notes, 70)}</span>}>
-        <TextField
-          multiline
-          spellCheck={false}
-          rows={4}
-          fullWidth
-          variant="outlined"
-          size="small"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          onBlur={() => modalManager.setNotes(notes)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') modalManager.setNotes(notes);
-          }}
-        />
-      </CollapsibleArea>
-    </Card>
+    <YfCard
+      title={
+        <>
+          <b>Notes</b>
+          {!formExpanded && (
+            <Box component="span" sx={{ ml: 1, fontWeight: 400 }}>
+              {trunc(notes, 70)}
+            </Box>
+          )}
+        </>
+      }
+      variant="flush"
+      actions={
+        <ExpandButton expand={formExpanded} sx={{ p: 0 }} onClick={() => setFormExpanded(!formExpanded)}>
+          <ExpandMore />
+        </ExpandButton>
+      }
+    >
+      <Collapse in={formExpanded}>
+        <Box sx={{ p: 1 }}>
+          <TextField
+            multiline
+            spellCheck={false}
+            rows={4}
+            fullWidth
+            variant="outlined"
+            size="small"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            onBlur={() => modalManager.setNotes(notes)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') modalManager.setNotes(notes);
+            }}
+          />
+        </Box>
+      </Collapse>
+    </YfCard>
   );
 }
 

@@ -20,6 +20,7 @@ export interface IYftFileRoom {
   enabled: boolean;
   accessToken: string;
   sortOrder: number;
+  availableRoundNumbers?: number[];
 }
 
 /** Bytes of entropy in a room access token */
@@ -48,6 +49,9 @@ export class TournamentRoom {
 
   /** Display order in the Rooms list, and the order rooms are offered to the allocator */
   sortOrder: number = 0;
+
+  /** Rounds in which this room is available; absent means every round. */
+  availableRoundNumbers?: number[];
 
   constructor(name: string, sortOrder: number, id?: string, accessToken?: string) {
     this.name = name;
@@ -102,6 +106,7 @@ export class TournamentRoom {
       enabled: this.enabled,
       accessToken: this.accessToken,
       sortOrder: this.sortOrder,
+      availableRoundNumbers: this.availableRoundNumbers || undefined,
     };
   }
 
@@ -125,6 +130,11 @@ export class TournamentRoom {
     );
     if (typeof data.description === 'string') room.description = data.description;
     room.enabled = data.enabled !== false;
+    if (Array.isArray(data.availableRoundNumbers)) {
+      room.availableRoundNumbers = data.availableRoundNumbers.filter(
+        (roundNumber): roundNumber is number => typeof roundNumber === 'number' && Number.isFinite(roundNumber),
+      );
+    }
     return room;
   }
 }

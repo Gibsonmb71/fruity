@@ -246,7 +246,7 @@ function CustomPtValDialog(props: ICustomPtValDialogProps) {
       </Box>
       <DialogActions>
         <Button onClick={() => closeWindow(false)}>{hotkeyFormat('&Cancel')}</Button>
-        <Button disabled={error || newPtVal === ''} onClick={() => closeWindow(true)}>
+        <Button variant="contained" disabled={error || newPtVal === ''} onClick={() => closeWindow(true)}>
           {hotkeyFormat('&Accept')}
         </Button>
       </DialogActions>

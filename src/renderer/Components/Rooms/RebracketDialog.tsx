@@ -107,6 +107,7 @@ export default function RebracketDialog(props: IRebracketDialogProps) {
         poolNames: Object.fromEntries(nextPhase.pools.map((pool, index) => [`${nextPhase.code}-${index}`, pool.name])),
       },
       rooms.filter((room) => room.enabled),
+      tournament,
     );
     const merged = mergeGeneratedSchedule(tournament.scheduledMatches, generation.scheduledMatches, rooms);
     errors.push(

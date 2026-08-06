@@ -9,6 +9,7 @@ import FileParser from '../renderer/DataModel/FileParsing';
 import { IYftFileTournament } from '../renderer/DataModel/Tournament';
 import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
+import TournamentServerService from '../renderer/Services/TournamentServerService';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
 
 /** Save a tournament to a .yft-shaped object and read it back, as opening a saved file would */
@@ -183,6 +184,75 @@ describe('scheduled matches in the .yft file', () => {
   });
 });
 
+describe('room allocation policies in the .yft file', () => {
+  test('stage, round, pool, availability, and assignment metadata round-trip', () => {
+    const { original, written, reopened } = saveAndReopen((tourn) => {
+      const phase = tourn.getPrelimPhase();
+      if (!phase) throw new Error('test tournament has no prelim phase');
+      const room = new TournamentRoom('Room 101', 0);
+      room.availableRoundNumbers = [1, 2, 2.5];
+      tourn.rooms = [room];
+      phase.roomIds = [room.id];
+      phase.rounds[0].roomIds = [room.id];
+      phase.pools[0].preferredRoomIds = [room.id];
+      phase.pools[0].poolRoomsLocked = true;
+
+      const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+      scheduled.phaseCode = phase.code;
+      scheduled.roomId = room.id;
+      scheduled.roomAssignmentLocked = true;
+      scheduled.roomAssignmentSource = 'manual';
+      scheduled.roomNameAtPlay = room.name;
+      tourn.scheduledMatches = [scheduled];
+    });
+
+    expect(written.YfData.rooms?.[0].availableRoundNumbers).toEqual([1, 2, 2.5]);
+    expect(reopened.rooms[0].availableRoundNumbers).toEqual([1, 2, 2.5]);
+    const reopenedPhase = reopened.getPrelimPhase();
+    expect(reopenedPhase?.roomIds).toEqual([original.rooms[0].id]);
+    expect(reopenedPhase?.rounds[0].roomIds).toEqual([original.rooms[0].id]);
+    expect(reopenedPhase?.pools[0].preferredRoomIds).toEqual([original.rooms[0].id]);
+    expect(reopenedPhase?.pools[0].poolRoomsLocked).toBe(true);
+    expect(reopened.scheduledMatches[0].roomAssignmentLocked).toBe(true);
+    expect(reopened.scheduledMatches[0].roomAssignmentSource).toBe('manual');
+    expect(reopened.scheduledMatches[0].roomNameAtPlay).toBe('Room 101');
+  });
+
+  test('legacy files load with old room assignments and no policy defaults', () => {
+    const { written } = saveAndReopen((tourn) => {
+      const phase = tourn.getPrelimPhase();
+      if (!phase) throw new Error('test tournament has no prelim phase');
+      const room = new TournamentRoom('Room 101', 0);
+      tourn.rooms = [room];
+      phase.roomIds = [room.id];
+      phase.rounds[0].roomIds = [room.id];
+      phase.pools[0].preferredRoomIds = [room.id];
+      const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+      scheduled.roomId = room.id;
+      scheduled.roomAssignmentLocked = true;
+      tourn.scheduledMatches = [scheduled];
+    });
+
+    delete written.YfData.rooms?.[0].availableRoundNumbers;
+    const phase = (written.phases?.[0] as any).YfData;
+    delete phase.roomIds;
+    delete (written.phases?.[0]?.rounds?.[0] as any).YfData.roomIds;
+    delete (written.phases?.[0]?.pools?.[0] as any).YfData.preferredRoomIds;
+    delete (written.phases?.[0]?.pools?.[0] as any).YfData.poolRoomsLocked;
+    delete written.YfData.scheduledMatches?.[0].roomAssignmentLocked;
+    delete written.YfData.scheduledMatches?.[0].roomAssignmentSource;
+    delete written.YfData.scheduledMatches?.[0].roomNameAtPlay;
+
+    const reopened = reopen(written);
+    expect(reopened.rooms[0].availableRoundNumbers).toBeUndefined();
+    expect(reopened.getPrelimPhase()?.roomIds).toBeUndefined();
+    expect(reopened.getPrelimPhase()?.rounds[0].roomIds).toBeUndefined();
+    expect(reopened.getPrelimPhase()?.pools[0].preferredRoomIds).toBeUndefined();
+    expect(reopened.scheduledMatches[0].roomId).toBe(reopened.rooms[0].id);
+    expect(reopened.scheduledMatches[0].roomAssignmentLocked).toBeUndefined();
+  });
+});
+
 describe('round release metadata in the .yft file', () => {
   test('released round, automatic release, and rebracket checkpoints round-trip', () => {
     const { original, reopened, written } = saveAndReopen((tourn) => {
@@ -211,11 +281,46 @@ describe('round release metadata in the .yft file', () => {
   });
 });
 
+describe('live display settings in the .yft file', () => {
+  test('settings persist while browser slideshow position does not exist in the file', () => {
+    const { original, reopened, written } = saveAndReopen((tourn) => {
+      tourn.liveDisplaySettings.enabled = true;
+      tourn.liveDisplaySettings.slides.pools = false;
+      tourn.liveDisplaySettings.slideDurationSeconds = 30;
+      tourn.liveDisplaySettings.rowsPerSlide = 18;
+      tourn.liveDisplaySettings.theme = 'dark';
+      tourn.liveDisplaySettings.showLastUpdated = false;
+    });
+
+    expect(written.YfData.liveDisplay).toMatchObject({
+      enabled: true,
+      slideDurationSeconds: 30,
+      rowsPerSlide: 18,
+      theme: 'dark',
+      showLastUpdated: false,
+    });
+    expect(reopened.liveDisplaySettings).toEqual(original.liveDisplaySettings);
+    expect(JSON.stringify(written.YfData.liveDisplay)).not.toContain('currentSlide');
+  });
+});
+
 describe('QBJ export stays clean', () => {
   test('rooms and scheduled matches are not written to QBJ', () => {
     const tourn = makeTestTournament();
-    tourn.rooms = [new TournamentRoom('Room 101', 0)];
-    tourn.scheduledMatches = [new ScheduledMatch(1, testTeamNames[0], testTeamNames[1])];
+    const room = new TournamentRoom('Room 101', 0);
+    room.availableRoundNumbers = [1];
+    tourn.rooms = [room];
+    const phase = tourn.getPrelimPhase();
+    if (!phase) throw new Error('test tournament has no prelim phase');
+    phase.roomIds = [room.id];
+    phase.rounds[0].roomIds = [room.id];
+    phase.pools[0].preferredRoomIds = [room.id];
+    const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+    scheduled.roomId = room.id;
+    scheduled.roomAssignmentLocked = true;
+    scheduled.roomAssignmentSource = 'manual';
+    scheduled.roomNameAtPlay = room.name;
+    tourn.scheduledMatches = [scheduled];
 
     // qbjOnly is what the QBJ export path passes; YellowFruit-specific metadata must not leak into a
     // file other programs will read.
@@ -224,5 +329,35 @@ describe('QBJ export stays clean', () => {
     expect(qbj).not.toContain('accessToken');
     expect(qbj).not.toContain('scheduledMatches');
     expect(qbj).not.toContain('YfData');
+    expect(qbj).not.toContain('availableRoundNumbers');
+    expect(qbj).not.toContain('roomAssignmentLocked');
+    expect(qbj).not.toContain('preferredRoomIds');
+  });
+});
+
+describe('room policy edits do not reset server recovery', () => {
+  test('recovery identity is unchanged by policy and assignment metadata', () => {
+    const tourn = makeTestTournament();
+    const room = new TournamentRoom('Room 101', 0);
+    tourn.rooms = [room];
+    const phase = tourn.getPrelimPhase();
+    if (!phase) throw new Error('test tournament has no prelim phase');
+    const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+    scheduled.roomId = room.id;
+    tourn.scheduledMatches = [scheduled];
+
+    const service = new TournamentServerService(tourn);
+    const before = (service as any).recoveryKey();
+
+    phase.roomIds = [room.id];
+    phase.rounds[0].roomIds = [room.id];
+    phase.pools[0].preferredRoomIds = [room.id];
+    phase.pools[0].poolRoomsLocked = true;
+    room.availableRoundNumbers = [1];
+    scheduled.roomAssignmentLocked = true;
+    scheduled.roomAssignmentSource = 'manual';
+    scheduled.roomNameAtPlay = room.name;
+
+    expect((service as any).recoveryKey()).toBe(before);
   });
 });

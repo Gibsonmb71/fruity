@@ -555,6 +555,7 @@ describe('generateSchedule', () => {
     expect(scheduledMatches).toHaveLength(28);
     expect(new Set(scheduledMatches.map((m) => m.roundNumber))).toEqual(new Set([1, 2, 3, 4, 5, 6, 7]));
     expect(scheduledMatches.every((m) => m.roomId !== undefined)).toBe(true);
+    expect(scheduledMatches.every((m) => m.roomAssignmentSource === 'auto')).toBe(true);
     expect(scheduledMatches.every((m) => m.generated)).toBe(true);
     expect(scheduledMatches[0].poolName).toBe('Prelim Pool 1');
     expect(scheduledMatches[0].phaseCode).toBe('1');

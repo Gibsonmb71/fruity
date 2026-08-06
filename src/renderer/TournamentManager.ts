@@ -1418,6 +1418,9 @@ export class TournamentManager {
 
   /** Should be called anytime the user modifies something */
   private onDataChanged(doesntAffectFile = false) {
+    // Keep both the room projection and the public read-only live projection current for every
+    // accepted match, schedule edit, and persisted display-setting change.
+    this.tournamentServerService.pushTournamentSnapshot();
     this.dataChangedReactCallback();
     if (doesntAffectFile) return;
 
@@ -1431,7 +1434,6 @@ export class TournamentManager {
    * modal managers, but their edits still need the normal dirty-file and React notification path.
    */
   markTournamentDataChanged() {
-    this.tournamentServerService.pushTournamentSnapshot();
     this.onDataChanged();
   }
 

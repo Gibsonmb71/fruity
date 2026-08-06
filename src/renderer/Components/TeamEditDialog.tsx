@@ -313,7 +313,7 @@ const SaveAndNewButtons = forwardRef((props: ISaveAndNewButtonsProps, ref: React
 
   return (
     <>
-      <ButtonGroup ref={anchorRef}>
+      <ButtonGroup ref={anchorRef} variant="outlined">
         <Button disabled={disabled} onClick={onClickSaveAndNew} ref={ref}>
           {hotkeyFormat('&Save {AMP} New')}
         </Button>

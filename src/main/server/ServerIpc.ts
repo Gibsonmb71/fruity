@@ -19,6 +19,7 @@ import {
   ITournamentSnapshot,
   defaultServerPort,
 } from './ServerTypes';
+import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
 
 let server: TournamentServer | null = null;
@@ -29,6 +30,13 @@ function roomBundleDirectory(): string {
   // Packaged: dist/main/main.js -> dist/room. Dev: .erb/dll/main.bundle.dev.js -> release/app/dist/room.
   if (app.isPackaged) return path.join(__dirname, '../room');
   return path.resolve(__dirname, '../../release/app/dist/room');
+}
+
+/** Where the public audience/display bundle lives */
+function liveBundleDirectory(): string {
+  // Packaged: dist/main/main.js -> dist/live. Dev: .erb/dll/main.bundle.dev.js -> release/app/dist/live.
+  if (app.isPackaged) return path.join(__dirname, '../live');
+  return path.resolve(__dirname, '../../release/app/dist/live');
 }
 
 /** Transient state belongs in app-data, not beside the .yft tournament file. */
@@ -59,6 +67,7 @@ function getServer(): TournamentServer {
   if (!server) {
     server = new TournamentServer({
       roomBundleDirectory: roomBundleDirectory(),
+      liveBundleDirectory: liveBundleDirectory(),
       recoveryFilePath: recoveryFilePath(),
       onFinalSubmission: handleFinalSubmission,
       onSessionsChanged: handleSessionsChanged,
@@ -110,6 +119,13 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
     // Only ever stored and served verbatim; the main process doesn't interpret the tournament.
     getServer().setTournamentSnapshot(snapshot);
   });
+
+  ipcMain.on(
+    IpcRendToMain.TournamentServerSetPublicLiveSnapshot,
+    (_event: IpcMainEvent, snapshot: IPublicLiveSnapshot | null) => {
+      getServer().setPublicLiveSnapshot(snapshot);
+    },
+  );
 
   ipcMain.on(IpcRendToMain.TournamentServerSubmissionVerdict, (_event: IpcMainEvent, verdict: ISubmissionVerdict) => {
     if (!server || !verdict?.sessionId) return;

@@ -1,9 +1,12 @@
-import { IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableRow, Tooltip } from '@mui/material';
+import { IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import { useContext, useMemo } from 'react';
 import Grid from '@mui/material/Grid';
 import { Add, Edit, JoinRight } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import YfCard from './YfCard';
+import YfTablePanel from './YfTablePanel';
+import { YfEmptyState } from '../Utils/GeneralReactUtils';
 import { Phase } from '../DataModel/Phase';
 import { Pool } from '../DataModel/Pool';
 import { Team } from '../DataModel/Team';
@@ -13,7 +16,7 @@ export default function GamesViewByPool() {
   const phases = tournManager.tournament.getFullPhases();
 
   return (
-    <Stack spacing={2} sx={{ '& .MuiSvgIcon-root': { fontSize: '1rem' } }}>
+    <Stack spacing={2}>
       {phases.map((phase) => (
         <GamesForPhaseByPool key={phase.name} phase={phase} />
       ))}
@@ -62,15 +65,7 @@ function NullMatrix(props: INullMatrixProps) {
 
   return (
     <Grid size={{ xs: 12 }}>
-      <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
-        <Table size="small">
-          <TableBody>
-            <TableRow>
-              <TableCell sx={{ fontWeight: 'bold' }}>{message}</TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </TableContainer>
+      <YfEmptyState title={message} compact />
     </Grid>
   );
 }
@@ -88,17 +83,19 @@ function PoolMatrix(props: IPoolMatrixProps) {
 
   return (
     <Grid size={{ xs: 12 }}>
-      <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
+      <YfTablePanel>
         <Table size="small">
-          <TableBody>
+          <TableHead>
             <TableRow>
-              <TableCell sx={{ fontWeight: 'bold' }}>{getMatrixTitle(pool, nthRoundRobin)}</TableCell>
+              <TableCell>{getMatrixTitle(pool, nthRoundRobin)}</TableCell>
               {pool.poolTeams.map((pt) => (
                 <TableCell key={`header-${pt.team.name}`} align="center">
                   {pt.team.getTruncatedName()}
                 </TableCell>
               ))}
             </TableRow>
+          </TableHead>
+          <TableBody>
             {pool.poolTeams.map((pt) => (
               <TableRow key={`row-${pt.team.name}`}>
                 <TableCell>{pt.team.getTruncatedName()}</TableCell>
@@ -115,7 +112,7 @@ function PoolMatrix(props: IPoolMatrixProps) {
             ))}
           </TableBody>
         </Table>
-      </TableContainer>
+      </YfTablePanel>
     </Grid>
   );
 }
@@ -136,6 +133,9 @@ interface IMatrixCellProps {
 function MatrixCell(props: IMatrixCellProps) {
   const { team, opponent, phase, nthRoundRobin } = props;
   const tournManager = useContext(TournamentContext);
+  const theme = useTheme();
+  const successColor = theme.vars?.palette.success.main ?? theme.palette.success.main;
+  const errorColor = theme.vars?.palette.error.main ?? theme.palette.error.main;
   const canAddMatch = useMemo(() => tournManager.tournament.readyToAddMatches(), [tournManager]);
 
   if (team === opponent) {
@@ -163,19 +163,22 @@ function MatrixCell(props: IMatrixCellProps) {
   };
   const resultDisp = match.getShortScore(team);
   let backgroundColor = '';
-  if (resultDisp.startsWith('W')) backgroundColor = '#4caf5020';
-  else if (resultDisp.startsWith('L')) backgroundColor = '#f4433620';
+  if (resultDisp.startsWith('W')) backgroundColor = alpha(successColor, 0.12);
+  else if (resultDisp.startsWith('L')) backgroundColor = alpha(errorColor, 0.12);
 
   return (
     <TableCell align="center" sx={{ backgroundColor }}>
       {resultDisp}
-      <IconButton size="small" onClick={editExisting}>
+      <IconButton
+        size="small"
+        aria-label={`Edit match between ${team.name} and ${opponent.name}`}
+        onClick={editExisting}
+      >
         <Edit />
       </IconButton>
-      &nbsp;
       {isCarryover && (
         <Tooltip title="Carryover" placement="right">
-          <JoinRight color="secondary" sx={{ verticalAlign: 'text-bottom' }} />
+          <JoinRight color="secondary" aria-label="Carryover" sx={{ verticalAlign: 'text-bottom', ml: 0.5 }} />
         </Tooltip>
       )}
     </TableCell>

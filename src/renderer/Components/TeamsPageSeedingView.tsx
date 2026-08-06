@@ -2,7 +2,6 @@
 import Grid from '@mui/material/Grid';
 import { useContext, useState } from 'react';
 import {
-  Alert,
   Box,
   Divider,
   IconButton,
@@ -12,17 +11,17 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TableRow,
   Tooltip,
 } from '@mui/material';
 import { ArrowDropDown, ArrowDropUp, Edit, Error, Lock } from '@mui/icons-material';
 import YfCard from './YfCard';
+import YfTablePanel from './YfTablePanel';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import { Team } from '../DataModel/Team';
-import { YfCssClasses } from '../Utils/GeneralReactUtils';
+import { YfCssClasses, YfNotice } from '../Utils/GeneralReactUtils';
 import { Pool } from '../DataModel/Pool';
 import Tournament from '../DataModel/Tournament';
 
@@ -35,9 +34,7 @@ export default function SeedingView() {
     <Grid container spacing={2}>
       {readOnly && (
         <Grid size={{ xs: 12 }}>
-          <Alert severity="info" icon={<Lock fontSize="small" />}>
-            Seeds are read-only
-          </Alert>
+          <YfNotice icon={<Lock fontSize="small" />} title="Seeds are read-only" />
         </Grid>
       )}
       <Grid size={{ xs: 12, sm: 6, md: 4 }}>{usingTemplate && <SeedList />}</Grid>
@@ -129,15 +126,21 @@ function SeedListItem(props: ISeedListItemProps) {
       <ListItem
         secondaryAction={
           <>
-            <IconButton size="small" disabled={!canMoveUp} onClick={() => tournManager.shiftSeedUp(seedNo)}>
-              <ArrowDropUp
-                sx={{ color: !canMoveUp ? 'transparent' : undefined, pointerEvents: ptrEventsForInteractiveChld }}
-              />
+            <IconButton
+              size="small"
+              aria-label={`Move seed ${seedNo} up`}
+              disabled={!canMoveUp}
+              onClick={() => tournManager.shiftSeedUp(seedNo)}
+            >
+              <ArrowDropUp sx={{ pointerEvents: ptrEventsForInteractiveChld }} />
             </IconButton>
-            <IconButton size="small" disabled={!canMoveDown} onClick={() => tournManager.shiftSeedDown(seedNo)}>
-              <ArrowDropDown
-                sx={{ color: !canMoveDown ? 'transparent' : undefined, pointerEvents: ptrEventsForInteractiveChld }}
-              />
+            <IconButton
+              size="small"
+              aria-label={`Move seed ${seedNo} down`}
+              disabled={!canMoveDown}
+              onClick={() => tournManager.shiftSeedDown(seedNo)}
+            >
+              <ArrowDropDown sx={{ pointerEvents: ptrEventsForInteractiveChld }} />
             </IconButton>
           </>
         }
@@ -164,16 +167,16 @@ function PoolView() {
     <Grid container spacing={2}>
       {phase.pools.map((pool) => (
         <Grid key={pool.name} size={{ xs: 12, md: 6 }}>
-          <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
+          <YfTablePanel>
             {usingTemplate ? <PoolViewSeedTable pool={pool} /> : <UnseededPoolTable pool={pool} />}
-          </TableContainer>
+          </YfTablePanel>
         </Grid>
       ))}
       {!usingTemplate && unassignedTeams.length > 0 && (
         <Grid size={{ xs: 12 }}>
-          <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
+          <YfTablePanel>
             <UnassignedTeamsList teamList={unassignedTeams} />
-          </TableContainer>
+          </YfTablePanel>
         </Grid>
       )}
     </Grid>
@@ -282,9 +285,7 @@ function UnseededPoolTable(props: IUnseededPoolTableProps) {
           <TableCell sx={{ width: '40px' }} />
         </TableRow>
       </TableHead>
-      <TableBody sx={{ '& .MuiSvgIcon-root': { fontSize: '1.2rem' }, '& .MuiIconButton-root': { p: 0 } }}>
-        {listItems}
-      </TableBody>
+      <TableBody>{listItems}</TableBody>
     </Table>
   );
 }
@@ -307,9 +308,7 @@ function UnassignedTeamsList(props: IUnassignedTeamsListProps) {
           <TableCell sx={{ width: '40px' }} />
         </TableRow>
       </TableHead>
-      <TableBody sx={{ '& .MuiSvgIcon-root': { fontSize: '1.2rem' }, '& .MuiIconButton-root': { p: 0 } }}>
-        {listItems}
-      </TableBody>
+      <TableBody>{listItems}</TableBody>
     </Table>
   );
 }
@@ -364,6 +363,7 @@ function PoolViewTableRowUnseeded(props: IPoolViewTableRowUnseededProps) {
           <Tooltip title="Change pool assignment">
             <IconButton
               size="small"
+              aria-label={`Change ${team?.name ?? 'team'} pool assignment`}
               onClick={() => tournManager.openPoolAssignmentModal(team, phase, handleModalAccept, pool ?? undefined)}
             >
               <Edit />

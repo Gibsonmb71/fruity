@@ -55,13 +55,15 @@ export interface IYftFilePool extends IQbjPool, IYftFileObject {
 }
 
 /** Additional info not in qbj but needed for a .yft file */
-interface IPoolExtraData {
+export interface IPoolExtraData {
   size: number;
   roundRobins: number;
   seeds: number[];
   hasCarryover: boolean;
   feederPools?: IQbjPool;
   autoAdvanceRules: AdvancementOpportunity[];
+  preferredRoomIds?: string[];
+  poolRoomsLocked?: boolean;
 }
 
 export class Pool implements IQbjPool, IYftDataModelObject {
@@ -98,6 +100,12 @@ export class Pool implements IQbjPool, IYftDataModelObject {
   autoAdvanceRules: AdvancementOpportunity[] = [];
 
   sizeValidationError: string = '';
+
+  /** Rooms preferred by this pool when an assignment is otherwise free. */
+  preferredRoomIds?: string[];
+
+  /** If true, the pool's preferred rooms are a hard preference for manual planning UI. */
+  poolRoomsLocked?: boolean;
 
   get id(): string {
     return `Pool_${this.name}`;
@@ -137,6 +145,8 @@ export class Pool implements IQbjPool, IYftDataModelObject {
       seeds: this.seeds,
       hasCarryover: this.hasCarryover,
       autoAdvanceRules: this.autoAdvanceRules,
+      preferredRoomIds: this.preferredRoomIds || undefined,
+      poolRoomsLocked: this.poolRoomsLocked || undefined,
     };
     const yftFileObj = { YfData: yfData, ...qbjObject };
 

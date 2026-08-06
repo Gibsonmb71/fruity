@@ -3,7 +3,6 @@
 import { useContext } from 'react';
 import Grid from '@mui/material/Grid';
 import {
-  TableContainer,
   Table,
   TableHead,
   TableRow,
@@ -16,14 +15,15 @@ import {
   Typography,
   Box,
   Checkbox,
+  Button,
 } from '@mui/material';
 import { Create, Done, Edit, Error, Warning } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import { PoolTeamStats } from '../DataModel/StatSummaries';
 import { Phase, PhaseTypes } from '../DataModel/Phase';
-import { LinkButton } from '../Utils/GeneralReactUtils';
 import YfCard from './YfCard';
+import YfTablePanel from './YfTablePanel';
 import { Pool } from '../DataModel/Pool';
 import { Match } from '../DataModel/Match';
 
@@ -66,11 +66,7 @@ function PhaseStandings(props: IPhaseStandingsProps) {
 
   return (
     <YfCard title={phase.name}>
-      <Grid
-        container
-        spacing={2}
-        sx={{ '& .MuiSvgIcon-root': { fontSize: '1rem' }, '& .MuiIconButton-root': { py: 0 } }}
-      >
+      <Grid container spacing={2}>
         {thisTournament.isLastFullPhase(phase) && (
           <>
             <Grid size={{ xs: 6 }}>
@@ -78,31 +74,31 @@ function PhaseStandings(props: IPhaseStandingsProps) {
                 <TiebreakerOrFinalsInfo key={ph.code} tbOrFinalsPhase={ph} />
               ))}
             </Grid>
-            <Grid sx={{ textAlign: 'right', '& .MuiSvgIcon-root': { fontSize: '1.5rem' } }} size={{ xs: 6 }}>
+            <Grid sx={{ textAlign: 'right' }} size={{ xs: 6 }}>
               <ConfirmFinalRanksCheckbox />
             </Grid>
           </>
         )}
         {phaseStats.pools.map((poolStats) => (
           <Grid key={poolStats.pool.name} size={{ xs: 12 }}>
-            <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
+            <YfTablePanel>
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell width="5%" />
-                    <TableCell width="20%">{poolStats.pool.name}</TableCell>
-                    <TableCell align="right" width="5%">
+                    <TableCell sx={{ width: '4ch' }} />
+                    <TableCell sx={{ width: '18rem' }}>{poolStats.pool.name}</TableCell>
+                    <TableCell align="right" sx={{ width: '4ch' }}>
                       W
                     </TableCell>
-                    <TableCell align="right" width="5%">
+                    <TableCell align="right" sx={{ width: '4ch' }}>
                       L
                     </TableCell>
                     {phaseStats.anyTiesExist && (
-                      <TableCell align="right" width="5%">
+                      <TableCell align="right" sx={{ width: '4ch' }}>
                         T
                       </TableCell>
                     )}
-                    <TableCell align="right" width="8%">
+                    <TableCell align="right" sx={{ width: '6ch' }}>
                       Pct
                     </TableCell>
                     <TableCell align="right">{`PP${regulationTossupCount}`}</TableCell>
@@ -111,21 +107,21 @@ function PhaseStandings(props: IPhaseStandingsProps) {
                       <TableCell align="right">{nextPhase ? 'Seed' : 'Final Rank'}</TableCell>
                     )}
 
-                    {nextPhase && <TableCell width="4%" />}
-                    {nextPhase && <TableCell>Advance To</TableCell>}
+                    {nextPhase && <TableCell sx={{ width: '4ch' }} />}
+                    {nextPhase && <TableCell sx={{ width: '9rem' }}>Advance To</TableCell>}
                     {nextPhase && thisTournament.usingScheduleTemplate && (
                       <TableCell align="center">
                         <Tooltip
                           placement="left"
                           title={`Place all of this pool's teams into the ${nextPhase.name} pools as shown`}
                         >
-                          <LinkButton
+                          <Button
                             size="small"
                             variant="text"
                             onClick={() => tournManager.rebracketPool(poolStats, nextPhase)}
                           >
                             Confirm All
-                          </LinkButton>
+                          </Button>
                         </Tooltip>
                       </TableCell>
                     )}
@@ -156,7 +152,7 @@ function PhaseStandings(props: IPhaseStandingsProps) {
                   ))}
                 </TableBody>
               </Table>
-            </TableContainer>
+            </YfTablePanel>
             {tbPhase && <TiebreakerOrFinalsInfo tbOrFinalsPhase={tbPhase} pool={poolStats.pool} />}
           </Grid>
         ))}
@@ -194,6 +190,7 @@ function AdvanceToCell(props: IAdvanceToCellProps) {
       <Tooltip placement="right" title="Change assignment">
         <IconButton
           size="small"
+          aria-label={`Change ${ptStats.team.name} pool assignment`}
           onClick={() =>
             tournManager.openPoolAssignmentModal(ptStats.poolTeam.team, nextPhase, handleModalAccept, poolToShow)
           }
@@ -234,9 +231,9 @@ function ConfirmationCell(props: IConfirmationCellProps) {
 
   return (
     <TableCell align="center">
-      <LinkButton size="small" variant="text" onClick={confirm}>
+      <Button size="small" variant="text" onClick={confirm}>
         Confirm
-      </LinkButton>
+      </Button>
     </TableCell>
   );
 }
@@ -284,9 +281,9 @@ function TiebreakerOrFinalsInfo(props: ITiebreakerOrFinalsInfoProps) {
 
   if (matches.length === 0) {
     return (
-      <LinkButton sx={{ marginTop: 1, mx: 2 }} onClick={newMatchForRound}>
+      <Button variant="text" sx={{ marginTop: 1, mx: 2 }} onClick={newMatchForRound}>
         {buttonLabel}
-      </LinkButton>
+      </Button>
     );
   }
 
@@ -301,13 +298,19 @@ function TiebreakerOrFinalsInfo(props: ITiebreakerOrFinalsInfoProps) {
         {matches.map((match) => (
           <div key={match.id}>
             {match.getWinnerLoserString()}{' '}
-            <IconButton size="small" onClick={() => editExisting(match)}>
+            <IconButton
+              size="small"
+              aria-label={`Edit ${match.getWinnerLoserString()}`}
+              onClick={() => editExisting(match)}
+            >
               <Edit />
             </IconButton>
           </div>
         ))}
       </Box>
-      <LinkButton onClick={newMatchForRound}>{buttonLabel}</LinkButton>
+      <Button variant="text" onClick={newMatchForRound}>
+        {buttonLabel}
+      </Button>
     </Box>
   );
 }
@@ -342,8 +345,14 @@ function FinalRankCell(props: IFinalRankCellProps) {
 
   return (
     <TableCell align="right">
-      {explicitRank || ptStats.finalRankCalculated}&emsp;
-      <IconButton size="small" onClick={() => tournManager.openRankModal(ptStats.team)}>
+      <Box component="span" sx={{ mr: 1 }}>
+        {explicitRank || ptStats.finalRankCalculated}
+      </Box>
+      <IconButton
+        size="small"
+        aria-label={`Edit final rank for ${ptStats.team.name}`}
+        onClick={() => tournManager.openRankModal(ptStats.team)}
+      >
         <Edit />
       </IconButton>
     </TableCell>

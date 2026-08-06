@@ -259,7 +259,13 @@ const yfTheme = createTheme({
     },
     MuiDialogActions: {
       styleOverrides: {
-        root: { padding: '12px 20px', gap: 8, '& > :not(style) ~ :not(style)': { marginLeft: 0 } },
+        root: {
+          padding: '12px 20px',
+          gap: 8,
+          justifyContent: 'flex-end',
+          '& > :not(style) ~ :not(style)': { marginLeft: 0 },
+          '& > .MuiButton-colorError': { marginRight: 'auto' },
+        },
       },
     },
     MuiDialogContentText: { styleOverrides: { root: { fontSize: '0.875rem' } } },
@@ -373,7 +379,40 @@ const yfTheme = createTheme({
 
     MuiLink: { defaultProps: { underline: 'hover' } },
 
-    MuiSnackbarContent: { styleOverrides: { root: { borderRadius: radius.control } } },
+    MuiSnackbar: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          maxWidth: 'min(600px, calc(100vw - 32px))',
+          '& .MuiAlert-filledSuccess': {
+            backgroundColor: theme.vars.palette.success.main,
+            color: theme.vars.palette.success.contrastText,
+          },
+          '& .MuiAlert-filledWarning': {
+            backgroundColor: theme.vars.palette.warning.main,
+            color: theme.vars.palette.warning.contrastText,
+          },
+          '& .MuiAlert-filledError': {
+            backgroundColor: theme.vars.palette.error.main,
+            color: theme.vars.palette.error.contrastText,
+          },
+          '& .MuiAlert-filledInfo': {
+            backgroundColor: theme.vars.palette.info.main,
+            color: theme.vars.palette.info.contrastText,
+          },
+        }),
+      },
+    },
+    MuiSnackbarContent: {
+      styleOverrides: {
+        root: { borderRadius: radius.control, minWidth: 'min(360px, calc(100vw - 32px))' },
+        message: { fontSize: '0.8125rem' },
+      },
+    },
+
+    MuiSvgIcon: {
+      defaultProps: { fontSize: 'small' },
+      styleOverrides: { root: { verticalAlign: 'middle' } },
+    },
 
     MuiSkeleton: { styleOverrides: { root: { borderRadius: 6 } } },
 
