@@ -409,18 +409,13 @@ export function applyRebalance(tournament: Tournament, plan: IRebalancePlan): vo
   for (const change of plan.changes) {
     const match = tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId);
     if (!match || match.roomAssignmentLocked || isLifecycleFrozen(match)) continue;
-    match.roomId = change.toRoomId;
-    match.roomAssignmentSource = change.toRoomId ? 'auto' : undefined;
-    match.roomAssignmentLocked = undefined;
+    assignRoom(tournament, match.id, change.toRoomId, { source: 'auto', unlock: true });
   }
 }
 
 /** Plan what happens when a room is disabled, without changing the room or its history. */
 export function planRoomDisable(tournament: Tournament, roomId: string, mode: RoomDisableMode): IRebalancePlan {
-  const plan =
-    mode === 'redistribute'
-      ? planRebalanceInternal(tournament, [], roomId)
-      : planRebalanceInternal(tournament, [], roomId);
+  const plan = planRebalanceInternal(tournament, [], roomId);
   plan.disabledRoomId = roomId;
   plan.disableMode = mode;
 
@@ -560,11 +555,10 @@ export function assignRoom(
       ]),
     ];
   }
-  if (
-    match.status === ScheduledMatchStatus.Submitted ||
-    match.status === ScheduledMatchStatus.Accepted ||
-    match.status === ScheduledMatchStatus.Cancelled
-  ) {
+  if (match.status === ScheduledMatchStatus.Submitted || match.status === ScheduledMatchStatus.Accepted) {
+    return [error('Historical or cancelled games cannot be reassigned.', [match.id])];
+  }
+  if (match.status === ScheduledMatchStatus.Cancelled && roomId !== undefined) {
     return [error('Historical or cancelled games cannot be reassigned.', [match.id])];
   }
   if (match.roomAssignmentLocked && !options.unlock && roomId !== match.roomId) {

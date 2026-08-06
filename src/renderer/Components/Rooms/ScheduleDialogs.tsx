@@ -30,6 +30,7 @@ import {
   mergeGeneratedSchedule,
   validateDraft,
 } from '../../Services/ScheduleService';
+import { assignRoom } from '../../Services/RoomAllocationService';
 
 function availableRounds(tournament: Tournament): number[] {
   return tournament.phases
@@ -83,19 +84,55 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
     const nextIssues = runValidation();
     if (hasBlockingIssue(nextIssues)) return;
     if (match) {
+      const previous = {
+        roundNumber: match.roundNumber,
+        leftTeamName: match.leftTeamName,
+        rightTeamName: match.rightTeamName,
+        roomId: match.roomId,
+        generated: match.generated,
+        phaseCode: match.phaseCode,
+        status: match.status,
+        roomAssignmentLocked: match.roomAssignmentLocked,
+        roomAssignmentSource: match.roomAssignmentSource,
+      };
       match.roundNumber = round;
       match.leftTeamName = leftTeam;
       match.rightTeamName = rightTeam;
-      match.roomId = roomId || undefined;
       match.generated = !isAdHoc;
       match.phaseCode = tournament.whichPhaseIsRoundNumberIn(round)?.code ?? match.phaseCode;
+      const assignmentIssues = assignRoom(tournament, match.id, roomId || undefined, {
+        source: 'manual',
+        lock: previous.roomAssignmentLocked,
+      });
+      if (hasBlockingIssue(assignmentIssues)) {
+        match.roundNumber = previous.roundNumber;
+        match.leftTeamName = previous.leftTeamName;
+        match.rightTeamName = previous.rightTeamName;
+        match.generated = previous.generated;
+        match.phaseCode = previous.phaseCode;
+        match.status = previous.status;
+        assignRoom(tournament, match.id, previous.roomId, {
+          source: previous.roomAssignmentSource,
+          lock: previous.roomAssignmentLocked,
+          unlock: true,
+        });
+        match.roomAssignmentLocked = previous.roomAssignmentLocked;
+        match.roomAssignmentSource = previous.roomAssignmentSource;
+        setIssues([...nextIssues, ...assignmentIssues]);
+        return;
+      }
       if (match.status === ScheduledMatchStatus.NeedsAttention) match.status = ScheduledMatchStatus.Scheduled;
     } else {
       const created = new ScheduledMatch(round, leftTeam, rightTeam);
-      created.roomId = roomId || undefined;
       created.generated = !isAdHoc;
       created.phaseCode = tournament.whichPhaseIsRoundNumberIn(round)?.code ?? '';
       tournament.scheduledMatches.push(created);
+      const assignmentIssues = assignRoom(tournament, created.id, roomId || undefined, { source: 'manual' });
+      if (hasBlockingIssue(assignmentIssues)) {
+        tournament.scheduledMatches = tournament.scheduledMatches.filter((scheduled) => scheduled !== created);
+        setIssues([...nextIssues, ...assignmentIssues]);
+        return;
+      }
     }
     manager.markTournamentDataChanged();
     onClose();
@@ -315,6 +352,7 @@ export function ScheduleGeneratorDialog(props: IScheduleGeneratorDialogProps) {
         poolNames: Object.fromEntries(phase.pools.map((pool, index) => [`${phase.code}-${index}`, pool.name])),
       },
       selectedRooms,
+      tournament,
     );
     const merged = mergeGeneratedSchedule(tournament.scheduledMatches, generation.scheduledMatches, rooms);
     setPreview({ generation, merged, roomCount: selectedRooms.length, roundCount: roundNumbers.length });

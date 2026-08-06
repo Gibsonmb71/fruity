@@ -10,9 +10,11 @@
  * scorekeeper picks the wrong one; a game handed to a disabled room means nobody shows up.
  */
 import { ScheduledMatch, ScheduledMatchStatus } from '../DataModel/ScheduledMatch';
-import { Phase } from '../DataModel/Phase';
+import { Phase, PhaseTypes } from '../DataModel/Phase';
+import Tournament from '../DataModel/Tournament';
 import { TournamentRoom } from '../DataModel/TournamentRoom';
 import { IAllocatableRoom, IPoolPairingRequest, allocateRooms, generatePhasePairings } from './RoundRobinScheduler';
+import { assignRoom } from './RoomAllocationService';
 
 /** How bad a scheduling problem is */
 export enum ScheduleIssueSeverity {
@@ -341,7 +343,11 @@ export interface IGenerationResult {
  * rounds than its pools need is an error rather than a silent truncation, because the missing games
  * would never be played and the standings would quietly be wrong.
  */
-export function generateSchedule(request: IGenerationRequest, rooms: TournamentRoom[]): IGenerationResult {
+export function generateSchedule(
+  request: IGenerationRequest,
+  rooms: TournamentRoom[],
+  tournament?: Tournament,
+): IGenerationResult {
   const issues: IScheduleIssue[] = [];
   const pairingRounds = generatePhasePairings(request.pools);
 
@@ -379,10 +385,29 @@ export function generateSchedule(request: IGenerationRequest, rooms: TournamentR
     );
     scheduled.phaseCode = request.phaseCode;
     scheduled.poolName = request.poolNames?.[assignment.poolId];
-    scheduled.roomId = assignment.roomId;
     scheduled.generated = true;
     return scheduled;
   });
+
+  // Keep initial pairing/block allocation in RoundRobinScheduler, but make the final room write go
+  // through the same policy-aware path as manual and incremental assignments. The context is
+  // isolated so preview generation remains non-mutating for the caller's tournament.
+  const assignmentContext = new Tournament();
+  assignmentContext.rooms = rooms;
+  assignmentContext.scheduledMatches = scheduledMatches;
+  assignmentContext.phases = tournament?.phases ?? [
+    new Phase(
+      PhaseTypes.Prelim,
+      Math.min(...request.roundNumbers),
+      Math.max(...request.roundNumbers),
+      request.phaseCode,
+    ),
+  ];
+  for (const [index, assignment] of assignments.entries()) {
+    const scheduled = scheduledMatches[index];
+    if (!scheduled) continue;
+    issues.push(...assignRoom(assignmentContext, scheduled.id, assignment.roomId, { source: 'auto' }));
+  }
 
   issues.push(...validateSchedule(scheduledMatches, rooms));
 
