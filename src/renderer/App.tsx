@@ -22,6 +22,7 @@ import {
   Snackbar,
   TextField,
   Tooltip,
+  Typography,
 } from '@mui/material';
 import { Close, Launch } from '@mui/icons-material';
 import NavBar, { applicationPageOrder } from './Components/NavBar';
@@ -44,14 +45,15 @@ import SetupPage from './Components/SetupPage';
 import ControlPage from './Components/ControlPage';
 import yfTheme from './Theme/yfTheme';
 import { headerHeight } from './Theme/tokens';
-import { ReadinessTarget, resolveTournamentReadiness } from './Services/TournamentReadiness';
+import { resolveTournamentReadiness } from './Services/TournamentReadiness';
+import { INavigationIntent } from './Services/Navigation';
 import {
   fallbackNavigationPreferences,
   readNavigationPreferences,
   writeNavigationPreferences,
 } from './Services/NavigationPreferences';
 import { buildQuickFindItems, filterQuickFindItems } from './Services/QuickFind';
-import type { IQuickFindItem, IQuickFindNavigation } from './Services/QuickFind';
+import type { IQuickFindItem } from './Services/QuickFind';
 
 window.onerror = () => window.electron.ipcRenderer.sendMessage(IpcRendToMain.WebPageCrashed);
 window.electron.ipcRenderer.removeAllListeners(); // needed in dev environemnt so that you don't end up with duplicate listers when the app reloads
@@ -96,7 +98,8 @@ function TournamentEditor() {
   const [setupSection, setSetupSection] = useState(SetupPages.Tournament);
   const [controlSection, setControlSection] = useState(ControlPages.Live);
   const [quickFindOpen, setQuickFindOpen] = useState(false);
-  const [gamesNavigation, setGamesNavigation] = useState<IQuickFindNavigation | null>(null);
+  const [gamesNavigation, setGamesNavigation] = useState<INavigationIntent | null>(null);
+  const [controlNavigation, setControlNavigation] = useState<INavigationIntent | null>(null);
   const navigationIdentity = mgr.filePath || 'new-tournament';
   const restoredIdentity = useRef<string | null>(null);
 
@@ -109,6 +112,7 @@ function TournamentEditor() {
       releasedRoundNumber: mgr.tournamentServerService.releasedRoundNumber,
       inboxCount: mgr.tournamentServerService.inbox.length,
       conflictCount: mgr.tournamentServerService.conflicts.length,
+      inboxScheduledMatchIds: mgr.tournamentServerService.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     });
     const next =
       saved ??
@@ -189,8 +193,8 @@ function TournamentEditor() {
     setactivePage(ApplicationPages.Control);
   };
 
-  const openReadinessTarget = (target: ReadinessTarget, navigation?: IQuickFindNavigation) => {
-    switch (target) {
+  const openReadinessTarget = (intent: INavigationIntent) => {
+    switch (intent.target) {
       case 'setup:tournament':
         openSetupSection(SetupPages.Tournament);
         break;
@@ -204,19 +208,22 @@ function TournamentEditor() {
         openSetupSection(SetupPages.Format);
         break;
       case 'games':
-        setGamesNavigation(navigation ? { ...navigation } : null);
+        setGamesNavigation({ ...intent });
         setactivePage(ApplicationPages.Games);
         break;
       case 'control:match-plan':
+        setControlNavigation({ ...intent });
         openControlSection(ControlPages.MatchPlan);
         break;
       case 'control:rooms':
+        setControlNavigation({ ...intent });
         openControlSection(ControlPages.Rooms);
         break;
       case 'control:display':
         openControlSection(ControlPages.Display);
         break;
       case 'control:live':
+        setControlNavigation({ ...intent });
         openControlSection(ControlPages.Live);
         break;
       case 'reports':
@@ -235,6 +242,7 @@ function TournamentEditor() {
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
     roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
   });
@@ -288,7 +296,9 @@ function TournamentEditor() {
               setupSection={setupSection}
               controlSection={controlSection}
               gamesNavigation={gamesNavigation}
+              controlNavigation={controlNavigation}
               onGamesNavigationHandled={() => setGamesNavigation(null)}
+              onControlNavigationHandled={() => setControlNavigation(null)}
               onOpenSetup={openSetupSection}
               onOpenControl={openControlSection}
               onNavigateTarget={openReadinessTarget}
@@ -320,11 +330,13 @@ interface IActivePageProps {
   whichPage: ApplicationPages;
   setupSection: SetupPages;
   controlSection: ControlPages;
-  gamesNavigation: IQuickFindNavigation | null;
+  gamesNavigation: INavigationIntent | null;
+  controlNavigation: INavigationIntent | null;
   onGamesNavigationHandled: () => void;
+  onControlNavigationHandled: () => void;
   onOpenSetup: (section: SetupPages) => void;
   onOpenControl: (section?: ControlPages) => void;
-  onNavigateTarget: (target: ReadinessTarget) => void;
+  onNavigateTarget: (intent: INavigationIntent) => void;
   onNavigate: (page: ApplicationPages, setupSection?: SetupPages) => void;
 }
 
@@ -335,7 +347,9 @@ function ActivePage(props: IActivePageProps) {
     setupSection,
     controlSection,
     gamesNavigation,
+    controlNavigation,
     onGamesNavigationHandled,
+    onControlNavigationHandled,
     onOpenSetup,
     onOpenControl,
     onNavigateTarget,
@@ -358,6 +372,8 @@ function ActivePage(props: IActivePageProps) {
           section={controlSection}
           onSectionChange={(section) => onOpenControl(section)}
           onNavigateTarget={onNavigateTarget}
+          navigation={controlNavigation ?? undefined}
+          onNavigationHandled={onControlNavigationHandled}
         />
       );
     case ApplicationPages.Reports:
@@ -374,7 +390,7 @@ function QuickFindDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onNavigate: (target: ReadinessTarget, navigation?: IQuickFindNavigation) => void;
+  onNavigate: (intent: INavigationIntent) => void;
 }) {
   const mgr = useContext(TournamentContext);
   const [query, setQuery] = useState('');
@@ -395,7 +411,7 @@ function QuickFindDialog({
   const choose = (item: IQuickFindItem | undefined) => {
     if (!item) return;
     onClose();
-    onNavigate(item.target, item.navigation);
+    onNavigate(item.navigation);
   };
 
   return (
@@ -436,7 +452,19 @@ function QuickFindDialog({
               onMouseEnter={() => setSelectedIndex(index)}
               onClick={() => choose(item)}
             >
-              <ListItemText primary={item.label} secondary={item.detail} />
+              <ListItemText
+                primary={
+                  <Box component="span" sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                    <Typography component="span" variant="overline" color="primary.main" sx={{ fontSize: '0.62rem', lineHeight: 1 }}>
+                      {item.category}
+                    </Typography>
+                    <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>
+                      {item.label}
+                    </Typography>
+                  </Box>
+                }
+                secondary={item.detail}
+              />
             </ListItemButton>
           ))}
           {results.length === 0 && (

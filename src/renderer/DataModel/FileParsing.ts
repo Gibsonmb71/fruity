@@ -178,6 +178,18 @@ export default class FileParser {
       this.tourn.rebracketedPhaseCodes = Array.isArray(yfExtraData.rebracketedPhaseCodes)
         ? yfExtraData.rebracketedPhaseCodes.filter((code): code is string => typeof code === 'string')
         : [];
+      const hasLegacyRoomConfiguration =
+        this.tourn.rooms.length > 0 ||
+        this.tourn.scheduledMatches.length > 0 ||
+        this.tourn.releasedRoundNumber !== null ||
+        this.tourn.autoReleaseNextRound ||
+        this.tourn.rebracketedPhaseCodes.length > 0;
+      this.tourn.roomScoringMode =
+        yfExtraData.roomScoringMode === 'browser' || yfExtraData.roomScoringMode === 'traditional'
+          ? yfExtraData.roomScoringMode
+          : hasLegacyRoomConfiguration
+            ? 'browser'
+            : 'traditional';
       this.tourn.liveDisplaySettings = FileParser.parseLiveDisplaySettings(yfExtraData.liveDisplay);
     } else {
       this.tourn.inferCarryoverStatus();

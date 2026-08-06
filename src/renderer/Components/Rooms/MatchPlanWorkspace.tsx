@@ -24,6 +24,7 @@ import { DragIndicator, LockOpenOutlined, LockOutlined, MoreVert } from '@mui/ic
 import { ScheduledMatch, ScheduledMatchStatus } from '../../DataModel/ScheduledMatch';
 import { TournamentRoom } from '../../DataModel/TournamentRoom';
 import { roundsWithGames } from '../../Services/ScheduleService';
+import { INavigationPayload } from '../../Services/Navigation';
 
 type MatchPlanView = 'round' | 'board';
 type MatchPlanRange = 'current' | 'next' | 'all';
@@ -36,6 +37,8 @@ interface IMatchPlanWorkspaceProps {
   onEdit: (match: ScheduledMatch) => void;
   onCancel: (match: ScheduledMatch) => void;
   onToggleLock: (match: ScheduledMatch) => void;
+  /** Optional deep-link payload; the current board consumes it at the page level. */
+  navigation?: INavigationPayload;
 }
 
 interface IMatchPlanCallbacks {

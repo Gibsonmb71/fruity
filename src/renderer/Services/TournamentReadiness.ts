@@ -3,6 +3,7 @@ import { Match } from '../DataModel/Match';
 import { ScheduledMatch } from '../DataModel/ScheduledMatch';
 import Tournament from '../DataModel/Tournament';
 import { TournamentRoom } from '../DataModel/TournamentRoom';
+import { createNavigationIntent, INavigationIntent, INavigationPayload } from './Navigation';
 import {
   ScheduleIssueSeverity,
   IScheduleIssue,
@@ -55,6 +56,7 @@ export interface ITournamentIssue {
   roundNumber?: number;
   /** Number of raw issues represented by this actionable group. */
   groupedCount?: number;
+  navigation?: INavigationIntent;
 }
 
 export interface IReadinessSession {
@@ -70,6 +72,7 @@ export interface IReadinessServerState {
   conflictCount?: number;
   sessions?: IReadinessSession[];
   roomPresence?: Array<{ roomId: string; connected: boolean }>;
+  inboxScheduledMatchIds?: string[];
 }
 
 export interface IReadinessAction {
@@ -79,6 +82,7 @@ export interface IReadinessAction {
   roundNumber?: number;
   phaseCode?: string;
   scheduledMatchIds?: string[];
+  navigation?: INavigationIntent;
 }
 
 export interface ITournamentReadiness {
@@ -118,9 +122,42 @@ function issue(
   message: string,
   target: ReadinessTarget,
   actionLabel?: string,
-  extra: Partial<ITournamentIssue> = {},
+  extra: Omit<Partial<ITournamentIssue>, 'navigation'> & { navigation?: INavigationPayload } = {},
 ): ITournamentIssue {
-  return { id, severity, title, message, target, actionLabel, ...extra };
+  const { navigation, ...rest } = extra;
+  return {
+    id,
+    severity,
+    title,
+    message,
+    target,
+    actionLabel,
+    ...rest,
+    navigation: createNavigationIntent(target, {
+      ...navigation,
+      roundNumber: rest.roundNumber,
+      scheduledMatchIds: rest.scheduledMatchIds,
+      scheduledMatchId: rest.scheduledMatchIds?.[0],
+    }),
+  };
+}
+
+function readinessAction(
+  kind: IReadinessAction['kind'],
+  label: string,
+  target: ReadinessTarget,
+  payload: INavigationPayload = {},
+): IReadinessAction {
+  const action: IReadinessAction = {
+    kind,
+    label,
+    target,
+    navigation: createNavigationIntent(target, payload),
+  };
+  if (payload.roundNumber !== undefined) action.roundNumber = payload.roundNumber;
+  if (payload.phaseCode !== undefined) action.phaseCode = payload.phaseCode;
+  if (payload.scheduledMatchIds !== undefined) action.scheduledMatchIds = payload.scheduledMatchIds;
+  return action;
 }
 
 function allMatches(tournament: Tournament): Match[] {
@@ -157,7 +194,14 @@ function addScheduleIssues(issues: ITournamentIssue[], scheduleIssues: ISchedule
         scheduleIssue.message,
         'control:match-plan',
         'Open Match Plan',
-        { scheduledMatchIds: scheduleIssue.scheduledMatchIds },
+        {
+          scheduledMatchIds: scheduleIssue.scheduledMatchIds,
+          navigation: {
+            scheduledMatchIds: scheduleIssue.scheduledMatchIds,
+            scheduledMatchId: scheduleIssue.scheduledMatchIds[0],
+            focus: 'scheduled-match',
+          },
+        },
       ),
     );
   });
@@ -176,6 +220,7 @@ function addMatchValidationIssues(issues: ITournamentIssue[], matches: Match[]) 
           `${match.getScoreString()}: ${errors[0]}`,
           'games',
           'Review game',
+          { navigation: { matchId: match.id, gamesReviewFilter: 'needs-review', focus: 'scheduled-match' } },
         ),
       );
     } else if (warnings.length > 0) {
@@ -187,6 +232,7 @@ function addMatchValidationIssues(issues: ITournamentIssue[], matches: Match[]) 
           `${match.getScoreString()}: ${warnings[0]}`,
           'games',
           'Review game',
+          { navigation: { matchId: match.id, gamesReviewFilter: 'needs-review', focus: 'scheduled-match' } },
         ),
       );
     }
@@ -259,6 +305,19 @@ function groupActiveIssues(issues: ITournamentIssue[], currentRoundNumber: numbe
         scheduledMatchIds,
         roundNumber: currentRoundNumber ?? first.roundNumber,
         groupedCount: grouped.length,
+        navigation: createNavigationIntent(first.target, {
+          matchId: first.navigation?.matchId,
+          matchIds: first.navigation?.matchIds,
+          scheduledMatchIds,
+          scheduledMatchId: first.navigation?.scheduledMatchId ?? scheduledMatchIds[0],
+          teamName: first.navigation?.teamName,
+          phaseCode: first.navigation?.phaseCode,
+          roomId: first.navigation?.roomId,
+          gamesReviewFilter: first.navigation?.gamesReviewFilter,
+          controlFocus: first.navigation?.controlFocus,
+          focus: first.navigation?.focus,
+          roundNumber: currentRoundNumber ?? first.navigation?.roundNumber ?? first.roundNumber,
+        }),
       };
     })
     .sort((a, b) => {
@@ -323,15 +382,7 @@ export function resolveTournamentReadiness(
   const matches = allMatches(tournament);
   const rooms = tournament.rooms.slice();
   const coreReady = tournamentReady && rulesReady && teamsReady && formatReady;
-  const roomOperationsEnabled =
-    rooms.length > 0 ||
-    scheduledMatches.length > 0 ||
-    server?.running === true ||
-    (server?.inboxCount ?? 0) > 0 ||
-    (server?.conflictCount ?? 0) > 0 ||
-    (server?.sessions?.length ?? 0) > 0 ||
-    (server?.roomPresence?.length ?? 0) > 0 ||
-    (server?.releasedRoundNumber !== null && server?.releasedRoundNumber !== undefined);
+  const roomOperationsEnabled = tournament.roomScoringMode === 'browser';
 
   if (!tournamentReady) {
     issues.push(
@@ -438,6 +489,7 @@ export function resolveTournamentReadiness(
         `${server?.conflictCount} submitted result${server?.conflictCount === 1 ? '' : 's'} need a decision.`,
         'control:live',
         'Review conflicts',
+        { navigation: { focus: 'result-inbox', scheduledMatchId: server?.inboxScheduledMatchIds?.[0] } },
       ),
     );
   }
@@ -450,6 +502,7 @@ export function resolveTournamentReadiness(
         `${server?.inboxCount} submitted result${server?.inboxCount === 1 ? '' : 's'} are waiting for review.`,
         'control:live',
         'Review results',
+        { navigation: { focus: 'result-inbox', scheduledMatchId: server?.inboxScheduledMatchIds?.[0] } },
       ),
     );
   }
@@ -493,68 +546,70 @@ export function resolveTournamentReadiness(
 
   if (!coreReady) {
     state = 'setup';
-    if (!tournamentReady) primaryAction = { kind: 'navigate', label: 'Open Tournament', target: 'setup:tournament' };
-    else if (!rulesReady) primaryAction = { kind: 'navigate', label: 'Open Rules', target: 'setup:rules' };
-    else if (!teamsReady) primaryAction = { kind: 'navigate', label: 'Open Teams', target: 'setup:teams' };
-    else primaryAction = { kind: 'navigate', label: 'Open Format', target: 'setup:format' };
+    if (!tournamentReady) primaryAction = readinessAction('navigate', 'Open Tournament', 'setup:tournament');
+    else if (!rulesReady) primaryAction = readinessAction('navigate', 'Open Rules', 'setup:rules');
+    else if (!teamsReady) primaryAction = readinessAction('navigate', 'Open Teams', 'setup:teams');
+    else primaryAction = readinessAction('navigate', 'Open Format', 'setup:format');
   } else if (!roomOperationsEnabled) {
     state = 'traditional-ready';
-    primaryAction = { kind: 'navigate', label: 'Open Games', target: 'games' };
+    primaryAction = readinessAction('navigate', 'Open Games', 'games');
   } else if (serverUnavailable) {
     state = 'server-unavailable';
-    primaryAction = { kind: 'start-server', label: 'Start server', target: 'control:live' };
+    primaryAction = readinessAction('start-server', 'Start server', 'control:live');
   } else if (roomsMissing) {
     state = 'rooms-not-configured';
-    primaryAction = { kind: 'navigate', label: 'Configure rooms', target: 'control:rooms' };
+    primaryAction = readinessAction('navigate', 'Configure rooms', 'control:rooms');
   } else if (planMissing) {
     state = 'match-plan-missing';
-    primaryAction = { kind: 'navigate', label: 'Create Match Plan', target: 'control:match-plan' };
+    primaryAction = readinessAction('navigate', 'Create Match Plan', 'control:match-plan');
   } else if (conflictsAwaitingDecision) {
     state = 'results-awaiting-review';
-    primaryAction = { kind: 'review-results', label: 'Review conflicts', target: 'control:live' };
+    primaryAction = readinessAction('review-results', 'Review conflicts', 'control:live', {
+      focus: 'result-inbox',
+      controlFocus: 'inbox',
+      scheduledMatchId: server?.inboxScheduledMatchIds?.[0],
+    });
   } else if (conflictIds.length > 0 || roomOffline) {
     state = 'schedule-blocked';
-    primaryAction = {
-      kind: 'navigate',
-      label: 'Fix assignment',
-      target: 'control:match-plan',
-      roundNumber: currentRoundNumber ?? undefined,
+    primaryAction = readinessAction('navigate', 'Fix assignment', 'control:match-plan', {
+      focus: 'scheduled-match',
+      controlFocus: 'match-plan',
       scheduledMatchIds: conflictIds,
-    };
+      scheduledMatchId: conflictIds[0],
+      roundNumber: currentRoundNumber ?? undefined,
+    });
   } else if (reviewAwaiting) {
     state = 'results-awaiting-review';
-    primaryAction = { kind: 'review-results', label: 'Review results', target: 'control:live' };
+    primaryAction = readinessAction('review-results', 'Review results', 'control:live', {
+      focus: 'result-inbox',
+      controlFocus: 'inbox',
+      scheduledMatchId: server?.inboxScheduledMatchIds?.[0],
+    });
   } else if (currentComplete) {
     if (rebracketBoundary) {
       state = 'rebracket-required';
-      primaryAction = {
-        kind: 'open-rebracket',
-        label: 'Review standings & rebracket',
-        target: 'control:live',
+      primaryAction = readinessAction('open-rebracket', 'Review standings & rebracket', 'control:live', {
         phaseCode: rebracketBoundary.code,
-      };
+        controlFocus: 'current-round',
+      });
     } else if (nextRound !== null) {
       state = 'next-round-preparation';
-      primaryAction = {
-        kind: 'navigate',
-        label: `Prepare Round ${nextRound}`,
-        target: 'control:match-plan',
+      primaryAction = readinessAction('navigate', `Prepare Round ${nextRound}`, 'control:match-plan', {
         roundNumber: nextRound,
-      };
+        controlFocus: 'match-plan',
+      });
     } else {
       state = 'tournament-complete';
-      primaryAction = { kind: 'navigate', label: 'Review reports', target: 'reports' };
+      primaryAction = readinessAction('navigate', 'Review reports', 'reports');
     }
   } else if (currentInProgress) {
     state = 'round-in-progress';
   } else if (currentRoundNumber !== null && server?.releasedRoundNumber !== currentRoundNumber) {
     state = 'round-ready';
-    primaryAction = {
-      kind: 'release-round',
-      label: `Release Round ${currentRoundNumber}`,
-      target: 'control:live',
+    primaryAction = readinessAction('release-round', `Release Round ${currentRoundNumber}`, 'control:live', {
       roundNumber: currentRoundNumber,
-    };
+      controlFocus: 'current-round',
+    });
   } else if (currentRoundNumber !== null) {
     state = 'round-ready';
   }

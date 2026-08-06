@@ -18,6 +18,7 @@ function makeScheduledTournament(): {
   match.roomId = room.id;
   tournament.rooms = [room];
   tournament.scheduledMatches = [match];
+  tournament.roomScoringMode = 'browser';
   return { tournament, match, room };
 }
 
@@ -34,7 +35,8 @@ describe('resolveTournamentReadiness', () => {
     const readiness = resolveTournamentReadiness(new Tournament());
 
     expect(readiness.state).toBe('setup');
-    expect(readiness.primaryAction).toEqual({ kind: 'navigate', label: 'Open Tournament', target: 'setup:tournament' });
+    expect(readiness.primaryAction).toMatchObject({ kind: 'navigate', label: 'Open Tournament', target: 'setup:tournament' });
+    expect(readiness.primaryAction?.navigation).toMatchObject({ target: 'setup:tournament' });
     expect(readiness.setup.teamsReady).toBe(false);
     expect(readiness.setup.formatReady).toBe(false);
     expect(readiness.activeIssues.map((currentIssue) => currentIssue.id)).toEqual(
@@ -45,6 +47,7 @@ describe('resolveTournamentReadiness', () => {
   test('requires a concrete match plan after setup is ready', () => {
     const tournament = makeTestTournament(CommonRuleSets.NaqtUntimed);
     tournament.rooms = [new TournamentRoom('101', 0, 'room-101', 'token-101')];
+    tournament.roomScoringMode = 'browser';
 
     const readiness = resolveTournamentReadiness(tournament, runningServer());
 
@@ -55,7 +58,7 @@ describe('resolveTournamentReadiness', () => {
       formatReady: true,
     });
     expect(readiness.state).toBe('match-plan-missing');
-    expect(readiness.primaryAction).toEqual({
+    expect(readiness.primaryAction).toMatchObject({
       kind: 'navigate',
       label: 'Create Match Plan',
       target: 'control:match-plan',
@@ -88,7 +91,7 @@ describe('resolveTournamentReadiness', () => {
     });
 
     expect(readiness.state).toBe('server-unavailable');
-    expect(readiness.primaryAction).toEqual({ kind: 'start-server', label: 'Start server', target: 'control:live' });
+    expect(readiness.primaryAction).toMatchObject({ kind: 'start-server', label: 'Start server', target: 'control:live' });
   });
 
   test('prioritizes review of submitted results', () => {
@@ -101,7 +104,7 @@ describe('resolveTournamentReadiness', () => {
     );
 
     expect(readiness.state).toBe('results-awaiting-review');
-    expect(readiness.primaryAction).toEqual({
+    expect(readiness.primaryAction).toMatchObject({
       kind: 'review-results',
       label: 'Review results',
       target: 'control:live',
@@ -128,7 +131,7 @@ describe('resolveTournamentReadiness', () => {
 
     expect(readiness.currentRoundSummary?.complete).toBe(true);
     expect(readiness.state).toBe('tournament-complete');
-    expect(readiness.primaryAction).toEqual({ kind: 'navigate', label: 'Review reports', target: 'reports' });
+    expect(readiness.primaryAction).toMatchObject({ kind: 'navigate', label: 'Review reports', target: 'reports' });
   });
 
   test('keeps traditional manual-entry tournaments free of room-operation errors', () => {
@@ -139,7 +142,7 @@ describe('resolveTournamentReadiness', () => {
     expect(readiness.coreReady).toBe(true);
     expect(readiness.roomOperationsEnabled).toBe(false);
     expect(readiness.state).toBe('traditional-ready');
-    expect(readiness.primaryAction).toEqual({ kind: 'navigate', label: 'Open Games', target: 'games' });
+    expect(readiness.primaryAction).toMatchObject({ kind: 'navigate', label: 'Open Games', target: 'games' });
     expect(readiness.activeIssues.some((currentIssue) => /Match Plan|rooms|server/i.test(currentIssue.message))).toBe(
       false,
     );

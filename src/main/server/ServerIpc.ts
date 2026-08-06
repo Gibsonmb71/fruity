@@ -140,3 +140,8 @@ export async function shutDownTournamentServer() {
   await server.stop();
   server = null;
 }
+
+/** Whether the optional tournament server is currently accepting room connections. */
+export function isTournamentServerRunning() {
+  return server?.getStatus().running ?? false;
+}

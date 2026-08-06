@@ -42,7 +42,7 @@ import {
 import { IpcBidirectional, IpcRendToMain } from '../IPCChannels';
 import { FileSwitchActions, statReportProtocol } from '../SharedUtils';
 import checkForNewVersions from './UpdateChecker';
-import registerTournamentServerIpc, { shutDownTournamentServer } from './server/ServerIpc';
+import registerTournamentServerIpc, { isTournamentServerRunning, shutDownTournamentServer } from './server/ServerIpc';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -104,10 +104,6 @@ const createWindow = async () => {
   };
 
   const isMac = process.platform === 'darwin';
-  if (isMac) {
-    app.dock?.setIcon(getAssetPath('icon-macos.png'));
-  }
-
   mainWindow = new BrowserWindow({
     show: false,
     width: 1200,
@@ -149,10 +145,25 @@ const createWindow = async () => {
 
   mainWindow.on('close', (e) => {
     if (!mainWindow) return; // just making typescript happy
-    if (!appAllowedToQuit()) {
-      e.preventDefault();
-      tryFileSwitchAction(mainWindow, FileSwitchActions.CloseApp);
+    if (appAllowedToQuit()) return;
+
+    e.preventDefault();
+
+    if (isTournamentServerRunning()) {
+      const response = dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning',
+        title: 'Tournament server is running',
+        message: 'Quit YellowFruit and stop the tournament server?',
+        detail: 'Room scorekeepers will be disconnected, and any active games may be interrupted.',
+        buttons: ['Cancel', 'Quit and stop server'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (response !== 1) return;
     }
+
+    tryFileSwitchAction(mainWindow, FileSwitchActions.CloseApp);
   });
 
   mainWindow.on('closed', () => {

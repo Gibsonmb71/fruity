@@ -1,4 +1,4 @@
-import { ArrowForward, Check, WarningAmber } from '@mui/icons-material';
+import { ArrowForward, Check } from '@mui/icons-material';
 import {
   Box,
   Button,
@@ -14,17 +14,20 @@ import {
 import { useContext, useState } from 'react';
 import { SetupPages } from '../Enums';
 import { TournamentContext } from '../TournamentManager';
-import { ReadinessTarget, resolveTournamentReadiness } from '../Services/TournamentReadiness';
+import { resolveTournamentReadiness } from '../Services/TournamentReadiness';
+import { createNavigationIntent, INavigationIntent } from '../Services/Navigation';
 import { YfPageHeader } from '../Utils/GeneralReactUtils';
 import GeneralPage from './GeneralPage';
 import RulesPage from './RulesPage';
 import TeamsPage from './TeamsPage';
 import SchedulePage from './SchedulePage';
+import ReadinessMark from './ReadinessMark';
+import { readinessStatus } from '../Services/ReadinessSemantics';
 
 interface ISetupPageProps {
   section: SetupPages;
   onSectionChange: (section: SetupPages) => void;
-  onNavigateTarget: (target: ReadinessTarget) => void;
+  onNavigateTarget: (intent: INavigationIntent) => void;
 }
 
 const setupTabs = [
@@ -79,6 +82,7 @@ function SetupStatus({ section, onSectionChange, onNavigateTarget }: ISetupPageP
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
     roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
   });
@@ -162,7 +166,7 @@ function SetupPreflight({
 }: {
   readiness: ReturnType<typeof resolveTournamentReadiness>;
   onSectionChange: (section: SetupPages) => void;
-  onNavigateTarget: (target: ReadinessTarget) => void;
+  onNavigateTarget: (intent: INavigationIntent) => void;
 }) {
   const [open, setOpen] = useState(false);
   const coreChecks = [
@@ -178,44 +182,32 @@ function SetupPreflight({
       : 'Ready for traditional manual game entry.';
   }
 
-  const openTarget = (target: ReadinessTarget) => {
+  const openTarget = (target: import('../Services/TournamentReadiness').ReadinessTarget) => {
     setOpen(false);
     if (target.startsWith('setup:')) {
       const section = setupSectionForTarget(target);
       onSectionChange(section);
       return;
     }
-    onNavigateTarget(target);
+    onNavigateTarget(createNavigationIntent(target));
   };
 
   return (
     <>
-      <Box
-        sx={{
-          mt: 1,
-          px: 1.5,
-          py: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 2,
-          border: 1,
-          borderColor: readiness.coreReady ? 'success.light' : 'divider',
-          borderRadius: 1.5,
-          backgroundColor: 'background.paper',
-        }}
-      >
-        <Box>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {readiness.coreReady ? 'Setup ready' : 'Setup needs attention'}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {statusMessage}
-          </Typography>
-        </Box>
-        <Button size="small" variant="outlined" onClick={() => setOpen(true)}>
-          Run preflight
+      <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.75, minHeight: 32 }}>
+        <ReadinessMark status={readinessStatus(readiness.coreReady, !readiness.coreReady)} />
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          Setup
+        </Typography>
+        <Typography variant="body2" color={readiness.coreReady ? 'success.main' : 'warning.main'}>
+          {readiness.coreReady ? 'Ready' : 'Needs attention'}
+        </Typography>
+        <Button size="small" variant="outlined" sx={{ ml: 0.5 }} onClick={() => setOpen(true)}>
+          Preflight
         </Button>
+        <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+          {statusMessage}
+        </Typography>
       </Box>
       <Dialog fullWidth maxWidth="sm" open={open} onClose={() => setOpen(false)}>
         <DialogTitle>Setup preflight</DialogTitle>
@@ -227,8 +219,7 @@ function SetupPreflight({
             <PreflightRow
               key={check.label}
               label={check.label}
-              ready={check.ready}
-              neutral={false}
+              status={readinessStatus(check.ready, !check.ready)}
               actionLabel={check.ready ? undefined : 'Fix'}
               onAction={() => openTarget(check.target)}
             />
@@ -241,29 +232,25 @@ function SetupPreflight({
             <>
               <PreflightRow
                 label="Rooms configured"
-                ready={readiness.roomOperations.roomsConfigured}
-                neutral={false}
+                status={readinessStatus(readiness.roomOperations.roomsConfigured, !readiness.roomOperations.roomsConfigured)}
                 actionLabel={readiness.roomOperations.roomsConfigured ? undefined : 'Set up rooms'}
                 onAction={() => openTarget('control:rooms')}
               />
               <PreflightRow
                 label="Match Plan configured"
-                ready={readiness.roomOperations.matchPlanConfigured}
-                neutral={false}
+                status={readinessStatus(readiness.roomOperations.matchPlanConfigured, !readiness.roomOperations.matchPlanConfigured)}
                 actionLabel={readiness.roomOperations.matchPlanConfigured ? undefined : 'Open Match Plan'}
                 onAction={() => openTarget('control:match-plan')}
               />
               <PreflightRow
                 label="Tournament Server running"
-                ready={readiness.roomOperations.serverRunning}
-                neutral={false}
+                status={readinessStatus(readiness.roomOperations.serverRunning, !readiness.roomOperations.serverRunning)}
                 actionLabel={readiness.roomOperations.serverRunning ? undefined : 'Start server'}
                 onAction={() => openTarget('control:live')}
               />
               <PreflightRow
                 label="Current assignments valid"
-                ready={readiness.roomOperations.currentAssignmentsValid}
-                neutral={false}
+                status={readinessStatus(readiness.roomOperations.currentAssignmentsValid, !readiness.roomOperations.currentAssignmentsValid)}
                 actionLabel={readiness.roomOperations.currentAssignmentsValid ? undefined : 'Review Match Plan'}
                 onAction={() => openTarget('control:match-plan')}
               />
@@ -271,8 +258,7 @@ function SetupPreflight({
           ) : (
             <PreflightRow
               label="Browser room scoring"
-              ready={false}
-              neutral
+              status="unknown"
               actionLabel="Optional"
               onAction={() => openTarget('control:rooms')}
             />
@@ -291,25 +277,19 @@ function SetupPreflight({
 
 function PreflightRow({
   label,
-  ready,
-  neutral = false,
+  status,
   actionLabel,
   onAction,
 }: {
   label: string;
-  ready: boolean;
-  neutral: boolean;
+  status: 'verified' | 'problem' | 'unknown';
   actionLabel: string | undefined;
   onAction: () => void;
 }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, minHeight: 36 }}>
       <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-        {ready ? (
-          <Check color="success" fontSize="small" />
-        ) : (
-          <WarningAmber color={neutral ? 'disabled' : 'warning'} fontSize="small" />
-        )}
+        <ReadinessMark status={status} />
         {label}
       </Typography>
       {actionLabel && (

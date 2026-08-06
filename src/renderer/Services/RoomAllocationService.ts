@@ -93,6 +93,28 @@ export interface ISwapPlan {
   changes: IRoomChange[];
 }
 
+export type RoomDropState = 'eligible' | 'swappable' | 'unavailable' | 'protected' | 'same';
+
+export interface IRoomDropFeedback {
+  state: RoomDropState;
+  issues: IScheduleIssue[];
+}
+
+interface IRoomAssignmentState {
+  roomId?: string;
+  roomAssignmentLocked?: boolean;
+  roomAssignmentSource?: RoomAssignmentSource;
+  status: ScheduledMatchStatus;
+}
+
+export interface IRoomAssignmentUndoSnapshot {
+  entries: Array<{
+    matchId: string;
+    before: IRoomAssignmentState;
+    expectedAfter: IRoomAssignmentState;
+  }>;
+}
+
 export interface IAssignRoomOptions {
   /** Assignment provenance; automatic generation uses auto, controls use manual. */
   source?: RoomAssignmentSource;
@@ -601,6 +623,90 @@ export function planSwap(tournament: Tournament, matchId: string, targetRoomId: 
       { matchId: occupant.id, fromRoomId: targetRoomId, toRoomId: match.roomId },
     ],
   };
+}
+
+/** Derive board drop feedback from the same allocation validation used by mutations. */
+export function getRoomDropFeedback(tournament: Tournament, matchId: string, targetRoomId: string): IRoomDropFeedback {
+  const match = tournament.scheduledMatches.find((candidate) => candidate.id === matchId);
+  if (!match) return { state: 'unavailable', issues: [error('That scheduled match no longer exists.')] };
+  if (targetRoomId === '' || targetRoomId === '__unassigned__') {
+    if (match.roomId === undefined) return { state: 'same', issues: [] };
+    if (match.status === ScheduledMatchStatus.Playing || match.status === ScheduledMatchStatus.Submitted || match.status === ScheduledMatchStatus.Accepted || match.status === ScheduledMatchStatus.Cancelled) {
+      return { state: 'protected', issues: [error('Historical or in-flight games cannot be unassigned.', [match.id])] };
+    }
+    if (match.roomAssignmentLocked) return { state: 'protected', issues: [error('This room assignment is locked.', [match.id])] };
+    return { state: 'eligible', issues: [] };
+  }
+  const plan = planSwap(tournament, matchId, targetRoomId);
+  if (plan.kind === 'illegal') {
+    const protectedTarget = plan.issues.some((candidate) => /protected|locked|in progress|historical|cancelled/i.test(candidate.message));
+    return { state: protectedTarget ? 'protected' : 'unavailable', issues: plan.issues };
+  }
+  if (plan.kind === 'swap') return { state: 'swappable', issues: [] };
+  if (plan.changes.length === 0) return { state: 'same', issues: [] };
+  return { state: 'eligible', issues: [] };
+}
+
+function assignmentState(match: ScheduledMatch): IRoomAssignmentState {
+  return {
+    roomId: match.roomId,
+    roomAssignmentLocked: match.roomAssignmentLocked,
+    roomAssignmentSource: match.roomAssignmentSource,
+    status: match.status,
+  };
+}
+
+/** Capture the exact assignment/provenance state for a room mutation. */
+export function createRoomAssignmentUndoSnapshot(tournament: Tournament, matchIds: string[]): IRoomAssignmentUndoSnapshot {
+  return {
+    entries: Array.from(new Set(matchIds))
+      .map((matchId) => tournament.scheduledMatches.find((match) => match.id === matchId))
+      .filter((match): match is ScheduledMatch => match !== undefined)
+      .map((match) => ({ matchId: match.id, before: assignmentState(match), expectedAfter: assignmentState(match) })),
+  };
+}
+
+/** Complete a snapshot after a successful mutation so undo can reject stale state safely. */
+export function finalizeRoomAssignmentUndoSnapshot(
+  tournament: Tournament,
+  snapshot: IRoomAssignmentUndoSnapshot,
+): IRoomAssignmentUndoSnapshot {
+  return {
+    entries: snapshot.entries.map((entry) => {
+      const match = tournament.scheduledMatches.find((candidate) => candidate.id === entry.matchId);
+      return match ? { ...entry, expectedAfter: assignmentState(match) } : entry;
+    }),
+  };
+}
+
+/** Restore a targeted snapshot only while every affected game is still in the same editable lifecycle. */
+export function restoreRoomAssignmentUndoSnapshot(
+  tournament: Tournament,
+  snapshot: IRoomAssignmentUndoSnapshot,
+): { restored: boolean; reason?: string } {
+  for (const entry of snapshot.entries) {
+    const match = tournament.scheduledMatches.find((candidate) => candidate.id === entry.matchId);
+    if (!match) return { restored: false, reason: 'A scheduled game no longer exists.' };
+    if (match.status !== entry.before.status || isLifecycleFrozen(match)) {
+      return { restored: false, reason: 'A game in that assignment has already advanced and cannot be undone.' };
+    }
+    const current = assignmentState(match);
+    if (
+      current.roomId !== entry.expectedAfter.roomId ||
+      current.roomAssignmentLocked !== entry.expectedAfter.roomAssignmentLocked ||
+      current.roomAssignmentSource !== entry.expectedAfter.roomAssignmentSource
+    ) {
+      return { restored: false, reason: 'The room plan changed again, so the older assignment is no longer safe to restore.' };
+    }
+  }
+  snapshot.entries.forEach((entry) => {
+    const match = tournament.scheduledMatches.find((candidate) => candidate.id === entry.matchId);
+    if (!match) return;
+    match.roomId = entry.before.roomId;
+    match.roomAssignmentLocked = entry.before.roomAssignmentLocked;
+    match.roomAssignmentSource = entry.before.roomAssignmentSource;
+  });
+  return { restored: true };
 }
 
 /**

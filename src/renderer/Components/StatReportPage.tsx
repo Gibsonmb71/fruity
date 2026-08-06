@@ -3,9 +3,6 @@ import {
   Box,
   Button,
   Checkbox,
-  FormControl,
-  FormControlLabel,
-  InputLabel,
   ListItemText,
   Menu,
   MenuItem,
@@ -16,17 +13,16 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
-import { CheckCircleOutlined, FileDownload, Launch, MoreHoriz, WarningAmber } from '@mui/icons-material';
+import { FileDownload, Launch, MoreHoriz } from '@mui/icons-material';
 import { YfCssClasses, YfPageHeader } from '../Utils/GeneralReactUtils';
 import { statReportProtocol } from '../../SharedUtils';
 import { StatReportFileNames, StatReportPages } from '../Enums';
 import useSubscription from '../Utils/CustomHooks';
 import { TournamentContext } from '../TournamentManager';
-import { resolveTournamentReadiness } from '../Services/TournamentReadiness';
 import { PhaseTypes } from '../DataModel/Phase';
-import { CommonRuleSets } from '../DataModel/ScoringRules';
-import { ScheduledMatchStatus } from '../DataModel/ScheduledMatch';
 import { IReportScope } from '../Services/ReportScope';
+import { resolvePublicationReadiness, IPublicationReadiness } from '../Services/ReportReadiness';
+import ReadinessMark from './ReadinessMark';
 
 const primaryReportTabs = [
   { value: StatReportPages.Standings, label: 'Standings' },
@@ -46,7 +42,8 @@ export default function StatReportPage() {
   const [includeCarryover, setIncludeCarryover] = useState(true);
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [detailAnchor, setDetailAnchor] = useState<HTMLElement | null>(null);
-  const readiness = resolveTournamentReadiness(tournManager.tournament);
+  const [scopeAnchor, setScopeAnchor] = useState<HTMLElement | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const reportPages = tournManager.tournament.phases;
   const allPhaseCodes = useMemo(() => reportPages.map((phase) => phase.code), [reportPages]);
   const effectivePhaseCodes = useMemo(() => {
@@ -67,17 +64,15 @@ export default function StatReportPage() {
   const selectedPhases = reportPages.filter((phase) => effectivePhaseCodes.includes(phase.code));
   const canIncludeCarryover = selectedPhases.some((phase) => phase.phaseType === PhaseTypes.Playoff);
   const path = `${statReportProtocol}://${StatReportFileNames[activeReportPage]}`;
-  const allMatches = useMemo(
-    () => tournManager.tournament.phases.flatMap((phase) => phase.rounds.flatMap((round) => round.matches)),
-    [tournManager.tournament.phases],
+  const publicationReadiness = useMemo(
+    () => resolvePublicationReadiness(tournManager.tournament),
+    [tournManager.tournament],
   );
-  const invalidGames = allMatches.filter((match) => match.getErrorMessages().length > 0).length;
-  const warnings = allMatches.reduce((count, match) => count + match.getNumSuppressedWarnings(), 0);
-  const hasStats = tournManager.tournament.stats.length > 0;
   let selectedScopeLabel = selectedPhases.map((phase) => phase.name).join(', ') || 'Selected stages';
   if (scopeMode === 'all') selectedScopeLabel = 'Entire tournament';
   else if (scopeMode === 'prelim') selectedScopeLabel = 'Preliminaries';
   else if (scopeMode === 'playoffs') selectedScopeLabel = 'Playoffs and finals';
+  const scopeButtonLabel = `${selectedScopeLabel}${includeCarryover && canIncludeCarryover ? ' + carryovers' : ''}`;
 
   useEffect(() => {
     tournManager.setReportScope(reportScope);
@@ -116,13 +111,7 @@ export default function StatReportPage() {
         />
       </Box>
 
-      <ResultsReadiness
-        invalidGames={invalidGames}
-        hasStats={hasStats}
-        suppressedWarnings={warnings}
-        readiness={readiness}
-      />
-      <NaqtSubmissionReadiness readiness={readiness} />
+      <PublicationReadiness readiness={publicationReadiness} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((open) => !open)} />
 
       <Stack
         direction={{ xs: 'column', md: 'row' }}
@@ -139,59 +128,9 @@ export default function StatReportPage() {
           ))}
         </Tabs>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-          <FormControl size="small" sx={{ minWidth: 190 }}>
-            <InputLabel>Scope</InputLabel>
-            <Select
-              label="Scope"
-              value={scopeMode}
-              onChange={(event) => {
-                const next = event.target.value as typeof scopeMode;
-                if (next === 'selected' && selectedPhaseCodes.length === 0) setSelectedPhaseCodes(allPhaseCodes);
-                setScopeMode(next);
-              }}
-            >
-              <MenuItem value="all">Entire tournament</MenuItem>
-              <MenuItem value="prelim">Preliminaries</MenuItem>
-              <MenuItem value="playoffs">Playoffs and finals</MenuItem>
-              <MenuItem value="selected">Selected stages…</MenuItem>
-            </Select>
-          </FormControl>
-          {scopeMode === 'selected' && (
-            <FormControl size="small" sx={{ minWidth: 230, maxWidth: 320 }}>
-              <InputLabel>Stages</InputLabel>
-              <Select
-                multiple
-                label="Stages"
-                value={selectedPhaseCodes}
-                onChange={(event) => setSelectedPhaseCodes(event.target.value as string[])}
-                renderValue={(values) =>
-                  (values as string[])
-                    .map((code) => reportPages.find((phase) => phase.code === code)?.name ?? code)
-                    .join(', ')
-                }
-              >
-                {reportPages.map((phase) => (
-                  <MenuItem key={phase.code} value={phase.code}>
-                    <Checkbox checked={selectedPhaseCodes.includes(phase.code)} size="small" />
-                    <ListItemText primary={phase.name} />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-          {canIncludeCarryover && (
-            <FormControlLabel
-              control={
-                <Checkbox
-                  size="small"
-                  checked={includeCarryover}
-                  onChange={(event) => setIncludeCarryover(event.target.checked)}
-                />
-              }
-              label="Include carried-over games"
-              sx={{ mr: 0, '& .MuiFormControlLabel-label': { fontSize: '0.78rem' } }}
-            />
-          )}
+          <Button size="small" variant="outlined" endIcon={<MoreHoriz />} onClick={(event) => setScopeAnchor(event.currentTarget)}>
+            Scope: {scopeButtonLabel}
+          </Button>
           <Button
             size="small"
             variant="outlined"
@@ -202,14 +141,32 @@ export default function StatReportPage() {
           </Button>
         </Stack>
       </Stack>
-      {scopeMode !== 'all' && (
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-          Preview scope: {selectedScopeLabel}.{' '}
-          {includeCarryover && canIncludeCarryover
-            ? 'Carried-over games are included.'
-            : 'Only games in the selected stages are included.'}
-        </Typography>
-      )}
+      <Menu anchorEl={scopeAnchor} open={scopeAnchor !== null} onClose={() => setScopeAnchor(null)}>
+        <MenuItem selected={scopeMode === 'all'} onClick={() => { setScopeMode('all'); setScopeAnchor(null); }}>
+          Entire tournament
+        </MenuItem>
+        <MenuItem selected={scopeMode === 'prelim'} onClick={() => { setScopeMode('prelim'); setScopeAnchor(null); }}>
+          Preliminaries
+        </MenuItem>
+        <MenuItem selected={scopeMode === 'playoffs'} onClick={() => { setScopeMode('playoffs'); setScopeAnchor(null); }}>
+          Playoffs and finals
+        </MenuItem>
+        <MenuItem selected={scopeMode === 'selected'} onClick={() => { setScopeMode('selected'); setScopeAnchor(null); }}>
+          Custom stage selection
+        </MenuItem>
+        {scopeMode === 'selected' && reportPages.map((phase) => (
+          <MenuItem key={phase.code} onClick={() => setSelectedPhaseCodes((codes) => codes.includes(phase.code) ? codes.filter((code) => code !== phase.code) : [...codes, phase.code])}>
+            <Checkbox checked={selectedPhaseCodes.includes(phase.code)} size="small" />
+            <ListItemText primary={phase.name} />
+          </MenuItem>
+        ))}
+        {canIncludeCarryover && (
+          <MenuItem onClick={() => setIncludeCarryover((included) => !included)}>
+            <Checkbox checked={includeCarryover} size="small" />
+            <ListItemText primary="Include carried-over games" />
+          </MenuItem>
+        )}
+      </Menu>
 
       <Paper
         variant="outlined"
