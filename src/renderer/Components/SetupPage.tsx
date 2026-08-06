@@ -30,6 +30,12 @@ interface ISetupPageProps {
   onNavigateTarget: (intent: INavigationIntent) => void;
 }
 
+interface ISetupStatusProps {
+  section: SetupPages;
+  onSectionChange: (section: SetupPages) => void;
+  readiness: ReturnType<typeof resolveTournamentReadiness>;
+}
+
 const setupTabs = [
   { label: 'Tournament', value: SetupPages.Tournament },
   { label: 'Rules', value: SetupPages.Rules },
@@ -73,19 +79,7 @@ function setupTabReady(section: SetupPages, readiness: ReturnType<typeof resolve
   }
 }
 
-function SetupStatus({ section, onSectionChange, onNavigateTarget }: ISetupPageProps) {
-  const tournManager = useContext(TournamentContext);
-  const service = tournManager.tournamentServerService;
-  const readiness = resolveTournamentReadiness(tournManager.tournament, {
-    running: service.status.running,
-    currentRoundNumber: service.currentRoundNumber,
-    releasedRoundNumber: service.releasedRoundNumber,
-    inboxCount: service.inbox.length,
-    conflictCount: service.conflicts.length,
-    inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
-    sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
-    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
-  });
+function SetupStatus({ section, onSectionChange, readiness }: ISetupStatusProps) {
   const { setup } = readiness;
 
   const nextSetupAction = setupActionFor(readiness);
@@ -154,7 +148,6 @@ function SetupStatus({ section, onSectionChange, onNavigateTarget }: ISetupPageP
           </Button>
         </Box>
       )}
-      <SetupPreflight readiness={readiness} onSectionChange={onSectionChange} onNavigateTarget={onNavigateTarget} />
     </>
   );
 }
@@ -163,27 +156,23 @@ function SetupPreflight({
   readiness,
   onSectionChange,
   onNavigateTarget,
+  open,
+  onClose,
 }: {
   readiness: ReturnType<typeof resolveTournamentReadiness>;
   onSectionChange: (section: SetupPages) => void;
   onNavigateTarget: (intent: INavigationIntent) => void;
+  open: boolean;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const coreChecks = [
     { label: 'Tournament details', ready: readiness.setup.tournamentReady, target: 'setup:tournament' as const },
     { label: 'Ruleset', ready: readiness.setup.rulesReady, target: 'setup:rules' as const },
     { label: 'Teams', ready: readiness.setup.teamsReady, target: 'setup:teams' as const },
     { label: 'Format', ready: readiness.setup.formatReady, target: 'setup:format' as const },
   ];
-  let statusMessage = 'Run a preflight to see the next fix.';
-  if (readiness.coreReady) {
-    statusMessage = readiness.roomOperationsEnabled
-      ? 'Core setup is ready; room operations are checked separately.'
-      : 'Ready for traditional manual game entry.';
-  }
-
   const openTarget = (target: import('../Services/TournamentReadiness').ReadinessTarget) => {
-    setOpen(false);
+    onClose();
     if (target.startsWith('setup:')) {
       const section = setupSectionForTarget(target);
       onSectionChange(section);
@@ -194,22 +183,7 @@ function SetupPreflight({
 
   return (
     <>
-      <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.75, minHeight: 32 }}>
-        <ReadinessMark status={readinessStatus(readiness.coreReady, !readiness.coreReady)} />
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          Setup
-        </Typography>
-        <Typography variant="body2" color={readiness.coreReady ? 'success.main' : 'warning.main'}>
-          {readiness.coreReady ? 'Ready' : 'Needs attention'}
-        </Typography>
-        <Button size="small" variant="outlined" sx={{ ml: 0.5 }} onClick={() => setOpen(true)}>
-          Preflight
-        </Button>
-        <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-          {statusMessage}
-        </Typography>
-      </Box>
-      <Dialog fullWidth maxWidth="sm" open={open} onClose={() => setOpen(false)}>
+      <Dialog fullWidth maxWidth="sm" open={open} onClose={onClose}>
         <DialogTitle>Setup preflight</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
@@ -268,7 +242,7 @@ function SetupPreflight({
           {readiness.coreReady && !readiness.roomOperationsEnabled && (
             <Button onClick={() => openTarget('games')}>Open Games</Button>
           )}
-          <Button onClick={() => setOpen(false)}>Done</Button>
+          <Button onClick={onClose}>Done</Button>
         </DialogActions>
       </Dialog>
     </>
@@ -302,10 +276,45 @@ function PreflightRow({
 }
 
 export default function SetupPage({ section, onSectionChange, onNavigateTarget }: ISetupPageProps) {
+  const tournManager = useContext(TournamentContext);
+  const service = tournManager.tournamentServerService;
+  const readiness = resolveTournamentReadiness(tournManager.tournament, {
+    running: service.status.running,
+    currentRoundNumber: service.currentRoundNumber,
+    releasedRoundNumber: service.releasedRoundNumber,
+    inboxCount: service.inbox.length,
+    conflictCount: service.conflicts.length,
+    inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
+    sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
+    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
+  });
+  const [preflightOpen, setPreflightOpen] = useState(false);
+
   return (
     <Box sx={{ minHeight: '100%' }}>
-      <YfPageHeader title="Setup" description="Configure the tournament before game-day operations." />
-      <SetupStatus section={section} onSectionChange={onSectionChange} onNavigateTarget={onNavigateTarget} />
+      <YfPageHeader
+        title="Setup"
+        description="Configure the tournament before game-day operations."
+        status={
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <ReadinessMark status={readinessStatus(readiness.coreReady, !readiness.coreReady)} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {readiness.coreReady ? 'Ready' : 'Needs attention'}
+            </Typography>
+            <Button size="small" variant="outlined" onClick={() => setPreflightOpen(true)}>
+              Preflight
+            </Button>
+          </Box>
+        }
+      />
+      <SetupStatus section={section} onSectionChange={onSectionChange} readiness={readiness} />
+      <SetupPreflight
+        readiness={readiness}
+        onSectionChange={onSectionChange}
+        onNavigateTarget={onNavigateTarget}
+        open={preflightOpen}
+        onClose={() => setPreflightOpen(false)}
+      />
       <Box sx={{ mt: 2 }}>
         {section === SetupPages.Tournament && <GeneralPage showPageHeader={false} />}
         {section === SetupPages.Rules && <RulesPage showPageHeader={false} />}

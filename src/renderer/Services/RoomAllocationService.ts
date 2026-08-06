@@ -124,6 +124,158 @@ export interface IAssignRoomOptions {
   unlock?: boolean;
 }
 
+export interface IRoomAssignmentSnapshotEntry {
+  matchId: string;
+  roomId?: string;
+  roomAssignmentSource?: RoomAssignmentSource;
+  roomAssignmentLocked?: boolean;
+  roomNameAtPlay?: string;
+}
+
+export interface IRoomAssignmentSnapshot {
+  entries: IRoomAssignmentSnapshotEntry[];
+}
+
+/** Capture only the assignment fields needed to restore one assignment operation. */
+export function captureRoomAssignmentSnapshot(
+  tournament: Tournament,
+  matchIds: string[],
+): IRoomAssignmentSnapshot {
+  const ids = new Set(matchIds);
+  return {
+    entries: tournament.scheduledMatches
+      .filter((match) => ids.has(match.id))
+      .map((match) => ({
+        matchId: match.id,
+        roomId: match.roomId,
+        roomAssignmentSource: match.roomAssignmentSource,
+        roomAssignmentLocked: match.roomAssignmentLocked,
+        roomNameAtPlay: match.roomNameAtPlay,
+      })),
+  };
+}
+
+/**
+ * Restore a captured assignment atomically. Revalidation intentionally happens against the current
+ * tournament, because an undo may be clicked after a room has started or a later assignment has
+ * occupied the old destination.
+ */
+export function restoreRoomAssignmentSnapshot(
+  tournament: Tournament,
+  snapshot: IRoomAssignmentSnapshot,
+): IScheduleIssue[] {
+  const matches = snapshot.entries.map((entry) => tournament.scheduledMatches.find((match) => match.id === entry.matchId));
+  if (matches.some((match) => !match)) {
+    return [error('Undo is no longer safe because a scheduled match no longer exists.')];
+  }
+  const resolvedMatches = matches as ScheduledMatch[];
+  const snapshotIds = new Set(snapshot.entries.map((entry) => entry.matchId));
+  const issues: IScheduleIssue[] = [];
+
+  snapshot.entries.forEach((entry) => {
+    const match = resolvedMatches.find((candidate) => candidate.id === entry.matchId);
+    if (!match) return;
+    if (isLifecycleFrozen(match) || match.status === ScheduledMatchStatus.Cancelled) {
+      issues.push(error(`Undo is unsafe: ${match.describe()} is no longer movable.`, [match.id]));
+      return;
+    }
+    if (match.roomAssignmentLocked && !entry.roomAssignmentLocked) {
+      issues.push(error(`Undo is unsafe: ${match.describe()} has been kept in its current room.`, [match.id]));
+    }
+    if (!entry.roomId) return;
+    const room = tournament.rooms.find((candidate) => candidate.id === entry.roomId);
+    if (!room) {
+      issues.push(error(`Undo is unsafe: the previous room for ${match.describe()} no longer exists.`, [match.id]));
+      return;
+    }
+    const eligibility = resolveEligibleRooms(match, tournament);
+    if (!eligibility.eligibleRooms.some((candidate) => candidate.id === entry.roomId)) {
+      issues.push(error(`Undo is unsafe: ${room.name} is no longer eligible for ${match.describe()}.`, [match.id]));
+    }
+  });
+
+  const targetSlots = new Map<string, string>();
+  snapshot.entries.forEach((entry) => {
+    const match = resolvedMatches.find((candidate) => candidate.id === entry.matchId);
+    if (!match || !entry.roomId) return;
+    const slot = `${match.roundNumber}\u0000${entry.roomId}`;
+    const previous = targetSlots.get(slot);
+    if (previous && previous !== match.id) {
+      issues.push(error('Undo is unsafe because two matches would occupy the same room.', [previous, match.id]));
+    }
+    targetSlots.set(slot, match.id);
+
+    const outside = tournament.scheduledMatches.find(
+      (candidate) =>
+        !snapshotIds.has(candidate.id) &&
+        candidate.id !== match.id &&
+        candidate.roundNumber === match.roundNumber &&
+        candidate.roomId === entry.roomId &&
+        candidate.status !== ScheduledMatchStatus.Cancelled,
+    );
+    if (outside) {
+      issues.push(error(`Undo is unsafe because ${roomName(tournament, entry.roomId)} is now occupied by another game.`, [
+        match.id,
+        outside.id,
+      ]));
+    }
+  });
+
+  if (issues.length > 0) return issues;
+  snapshot.entries.forEach((entry) => {
+    const match = resolvedMatches.find((candidate) => candidate.id === entry.matchId);
+    if (!match) return;
+    match.roomId = entry.roomId;
+    match.roomAssignmentSource = entry.roomAssignmentSource;
+    match.roomAssignmentLocked = entry.roomAssignmentLocked;
+    match.roomNameAtPlay = entry.roomNameAtPlay;
+  });
+  return [];
+}
+
+function roomName(tournament: Tournament, roomId: string): string {
+  return tournament.rooms.find((room) => room.id === roomId)?.name ?? roomId;
+}
+
+export type RoomDropDestinationState = 'idle' | 'valid-empty' | 'valid-swap' | 'invalid' | 'protected';
+
+export interface IRoomDropDestination {
+  state: RoomDropDestinationState;
+  message: string;
+  plan?: ISwapPlan;
+}
+
+/** Pure board affordance state derived from the existing move/swap policy. */
+export function planRoomDrop(
+  tournament: Tournament,
+  matchId: string,
+  targetRoomId?: string,
+): IRoomDropDestination {
+  const match = tournament.scheduledMatches.find((candidate) => candidate.id === matchId);
+  if (!match) return { state: 'invalid', message: 'This scheduled match no longer exists.' };
+  if (targetRoomId === undefined) {
+    if (isLifecycleFrozen(match) || match.status === ScheduledMatchStatus.Cancelled || match.roomAssignmentLocked) {
+      return { state: 'protected', message: 'This match is protected and cannot be unassigned.' };
+    }
+    return { state: 'valid-empty', message: 'Valid destination: leave this match unassigned.' };
+  }
+
+  const plan = planSwap(tournament, matchId, targetRoomId);
+  if (plan.kind === 'illegal') {
+    const protectedDestination = plan.issues.some((issue) => /protected|locked|progress|historical|cancelled/i.test(issue.message));
+    return {
+      state: protectedDestination ? 'protected' : 'invalid',
+      message: plan.issues[0]?.message ?? 'This room is not a valid destination.',
+      plan,
+    };
+  }
+  return {
+    state: plan.kind === 'swap' ? 'valid-swap' : 'valid-empty',
+    message: plan.kind === 'swap' ? 'Valid destination: swap the two matches.' : 'Valid destination: move this match here.',
+    plan,
+  };
+}
+
 const error = (message: string, scheduledMatchIds: string[] = []): IScheduleIssue =>
   ({ severity: 'error', message, scheduledMatchIds }) as IScheduleIssue;
 
