@@ -62,3 +62,21 @@ body {
 .stat-report-iframe {
   display: block;
 }
+
+/* A validation summary can bring a statskeeper directly to the offending field. Keep the cue
+ * brief so it helps recovery without turning a score sheet into a noisy status dashboard. */
+.yf-match-field-highlight {
+  animation: yf-match-field-highlight 1.4s ease-out;
+}
+
+@keyframes yf-match-field-highlight {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  20%,
+  65% {
+    background-color: color-mix(in srgb, var(--mui-palette-warning-main) 18%, transparent);
+  }
+}

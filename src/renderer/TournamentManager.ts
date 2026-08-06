@@ -1313,10 +1313,12 @@ export class TournamentManager {
     this.matchBeingModified = match;
   }
 
-  matchEditModalAttemptToSave(stayOpen: boolean = false) {
+  matchEditModalAttemptToSave(stayOpen: boolean = false): boolean {
     if (this.matchModalManager.preSaveValidation()) {
       this.matchEditModalSave(stayOpen);
+      return true;
     }
+    return false;
   }
 
   private matchEditModalSave(stayOpen: boolean = false) {

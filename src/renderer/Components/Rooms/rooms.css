@@ -313,92 +313,6 @@
   font-size: 0.875rem;
 }
 
-.rooms-round-block {
-  border-bottom: 1px solid var(--ops-border);
-}
-
-.rooms-round-block:last-child {
-  border-bottom: 0;
-}
-
-.rooms-round-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px 8px;
-  background: var(--ops-surface-muted);
-}
-
-.rooms-round-header strong {
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.rooms-round-header span {
-  color: var(--ops-muted);
-  font-size: 0.78rem;
-}
-
-.rooms-schedule-row {
-  display: grid;
-  grid-template-columns: 110px minmax(220px, 1fr) 160px 110px 140px;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--ops-border);
-  font-size: 0.875rem;
-}
-
-.rooms-schedule-row:first-of-type {
-  border-top: 0;
-}
-
-.rooms-schedule-room {
-  color: var(--ops-muted);
-}
-
-/* Native select, restyled to sit alongside the MUI controls without pulling in a MUI Select. */
-.rooms-schedule-room select {
-  width: 100%;
-  min-height: 30px;
-  padding: 4px 8px;
-  border: 1px solid var(--ops-border);
-  border-radius: 8px;
-  background: var(--ops-surface);
-  color: var(--ops-text);
-  font: inherit;
-  font-size: 0.8125rem;
-}
-
-.rooms-schedule-room select:hover:not(:disabled) {
-  border-color: var(--ops-faint);
-}
-
-.rooms-schedule-room select:focus-visible {
-  outline: 2px solid var(--ops-accent);
-  outline-offset: -1px;
-}
-
-.rooms-schedule-room select:disabled {
-  color: var(--ops-faint);
-  opacity: 1;
-}
-
-.rooms-schedule-teams {
-  min-width: 0;
-}
-
-.rooms-schedule-teams strong {
-  font-weight: 500;
-}
-
-.rooms-schedule-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
 .rooms-inbox-row {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(160px, 0.55fr) minmax(180px, 0.7fr) auto;
@@ -591,14 +505,6 @@
   .rooms-page-header {
     flex-direction: column;
     gap: 8px;
-  }
-
-  .rooms-schedule-row {
-    grid-template-columns: 90px minmax(180px, 1fr) 120px auto;
-  }
-
-  .rooms-schedule-status {
-    display: none;
   }
 
   .rooms-inbox-row {

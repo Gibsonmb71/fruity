@@ -7,6 +7,13 @@ export interface IQuickFindItem {
   label: string;
   detail: string;
   target: ReadinessTarget;
+  navigation?: IQuickFindNavigation;
+}
+
+export interface IQuickFindNavigation {
+  matchId?: string;
+  teamName?: string;
+  roundNumber?: number;
 }
 
 const pageItems: IQuickFindItem[] = [
@@ -30,6 +37,7 @@ export function buildQuickFindItems(tournament: Tournament): IQuickFindItem[] {
     label: team.name,
     detail: 'Team',
     target: 'games' as const,
+    navigation: { teamName: team.name },
   }));
   const roomItems = tournament.rooms.map((room) => ({
     id: `room-${room.id}`,
@@ -43,6 +51,7 @@ export function buildQuickFindItems(tournament: Tournament): IQuickFindItem[] {
       label: round.displayName(),
       detail: phase.name,
       target: roundTarget,
+      navigation: { roundNumber: round.number },
     })),
   );
   const scheduledItems = tournament.scheduledMatches.map((match) => ({
@@ -58,6 +67,7 @@ export function buildQuickFindItems(tournament: Tournament): IQuickFindItem[] {
         label: match.getScoreString(),
         detail: `${phase.name} · ${round.displayName()}`,
         target: 'games' as const,
+        navigation: { matchId: match.id, roundNumber: round.number },
       })),
     ),
   );

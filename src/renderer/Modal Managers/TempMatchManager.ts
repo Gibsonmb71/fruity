@@ -9,6 +9,7 @@ import { MatchPlayer } from '../DataModel/MatchPlayer';
 import { PlayerAnswerCount } from '../DataModel/PlayerAnswerCount';
 import { textFieldChanged } from '../Utils/GeneralUtils';
 import { Round } from '../DataModel/Round';
+import { ScheduledMatch } from '../DataModel/ScheduledMatch';
 
 export class TempMatchManager {
   /** The Match being edited */
@@ -27,6 +28,9 @@ export class TempMatchManager {
 
   /** The round the match belonged to at the time the user opened it */
   originalRoundOpened?: Round;
+
+  /** Optional operations context for an accepted result that came from a scheduled match. */
+  scheduledMatchContext?: ScheduledMatch;
 
   /** Error to print next to the round field */
   roundFieldError?: string;
@@ -54,9 +58,13 @@ export class TempMatchManager {
     delete this.round;
     delete this.phase;
     delete this.roundFieldError;
+    delete this.roundNumber;
     delete this.originalRoundOpened;
     delete this.originalMatchLoaded;
+    delete this.scheduledMatchContext;
     this.otFieldsEnabledOverride = false;
+    this.errorDialogIsOpen = false;
+    this.errorDialogContents = [];
   }
 
   /**
@@ -68,6 +76,14 @@ export class TempMatchManager {
    */
   openModal(match?: Match, round?: Round, leftTeam?: Team, rightTeam?: Team) {
     this.modalIsOpen = true;
+    delete this.scheduledMatchContext;
+    delete this.originalMatchLoaded;
+    delete this.originalRoundOpened;
+    delete this.phase;
+    delete this.roundFieldError;
+    delete this.roundNumber;
+    this.errorDialogIsOpen = false;
+    this.errorDialogContents = [];
     this.round = round;
     if (round) this.phase = this.tournament.whichPhaseIsRoundIn(round);
     this.roundNumber = this.phase?.usesNumericRounds() ? round?.number : undefined;
@@ -75,6 +91,9 @@ export class TempMatchManager {
       this.loadMatch(match);
       this.originalMatchLoaded = match;
       this.originalRoundOpened = round;
+      this.scheduledMatchContext = this.tournament.scheduledMatches.find(
+        (scheduled) => scheduled.resultMatchId === match.id,
+      );
       this.otFieldsEnabledOverride = match.overtimeTossupsRead !== undefined && match.overtimeTossupsRead !== 0;
     } else {
       this.createBlankMatch();
@@ -85,6 +104,7 @@ export class TempMatchManager {
     if (this.phase?.phaseType === PhaseTypes.Tiebreaker) this.tempMatch.tiebreaker = true;
     if (this.roundNumber !== undefined) this.validateRoundNo();
     if (this.originalMatchLoaded) this.validateHaveTeamsPlayedInRound(false);
+    this.refreshValidation();
     this.dataChangedReactCallback();
   }
 
@@ -133,6 +153,7 @@ export class TempMatchManager {
 
   /** Returns true if we can save the data */
   preSaveValidation() {
+    if (this.round === undefined) this.validateRoundNo();
     if (this.tempMatch.isForfeit()) {
       this.tempMatch.leftTeam.matchPlayers = [];
       this.tempMatch.rightTeam.matchPlayers = [];
@@ -145,11 +166,18 @@ export class TempMatchManager {
     let errors: string[] = [];
     if (this.roundFieldError) errors.push(`Round number: ${this.roundFieldError}`);
     errors = errors.concat(this.tempMatch.getErrorMessages());
+    this.dataChangedReactCallback();
     if (errors.length > 0) {
-      this.openErrorDialog(errors);
       return false;
     }
     return true;
+  }
+
+  /** Recalculate the authoritative validators for the editor without attempting a save. */
+  refreshValidation() {
+    this.tempMatch.validateAll(this.tournament.scoringRules);
+    this.validateTeamPools(false);
+    if (this.round !== undefined) this.validateHaveTeamsPlayedInRound(false);
   }
 
   setRoundNo(val: string) {
@@ -160,9 +188,10 @@ export class TempMatchManager {
       } // else don't change it (revert to last valid value)
     } else {
       this.roundNumber = parsed;
+      this.setPhaseAndRound();
       this.removeBadCarryoverPhase();
     }
-    this.setPhaseAndRound();
+    if (Number.isNaN(parsed)) this.setPhaseAndRound();
     this.validateRoundNo();
     this.validateHaveTeamsPlayedInRound(true);
     this.dataChangedReactCallback();
@@ -196,7 +225,11 @@ export class TempMatchManager {
 
   /** Find Phase and Round objects, given the current round number */
   setPhaseAndRound() {
-    if (this.roundNumber === undefined) return;
+    if (this.roundNumber === undefined) {
+      delete this.phase;
+      delete this.round;
+      return;
+    }
     this.phase = this.tournament.whichPhaseIsRoundNumberIn(this.roundNumber);
     this.round = this.phase?.getRound(this.roundNumber);
   }
@@ -429,6 +462,17 @@ export class TempMatchManager {
     }
 
     const [playerToMove] = matchTeam.matchPlayers.splice(posDragInt, 1);
+    matchTeam.matchPlayers.splice(positionDroppedOn, 0, playerToMove);
+    this.dataChangedReactCallback();
+  }
+
+  /** Move a player one row through the keyboard-accessible reorder controls. */
+  moveMatchPlayer(whichTeam: LeftOrRight, position: number, direction: 'up' | 'down') {
+    const matchTeam = this.tempMatch.getMatchTeam(whichTeam);
+    const positionDroppedOn = direction === 'up' ? position - 1 : position + 1;
+    if (position < 0 || position >= matchTeam.matchPlayers.length) return;
+    if (positionDroppedOn < 0 || positionDroppedOn >= matchTeam.matchPlayers.length) return;
+    const [playerToMove] = matchTeam.matchPlayers.splice(position, 1);
     matchTeam.matchPlayers.splice(positionDroppedOn, 0, playerToMove);
     this.dataChangedReactCallback();
   }

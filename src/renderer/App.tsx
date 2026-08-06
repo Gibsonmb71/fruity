@@ -51,7 +51,7 @@ import {
   writeNavigationPreferences,
 } from './Services/NavigationPreferences';
 import { buildQuickFindItems, filterQuickFindItems } from './Services/QuickFind';
-import type { IQuickFindItem } from './Services/QuickFind';
+import type { IQuickFindItem, IQuickFindNavigation } from './Services/QuickFind';
 
 window.onerror = () => window.electron.ipcRenderer.sendMessage(IpcRendToMain.WebPageCrashed);
 window.electron.ipcRenderer.removeAllListeners(); // needed in dev environemnt so that you don't end up with duplicate listers when the app reloads
@@ -96,6 +96,7 @@ function TournamentEditor() {
   const [setupSection, setSetupSection] = useState(SetupPages.Tournament);
   const [controlSection, setControlSection] = useState(ControlPages.Live);
   const [quickFindOpen, setQuickFindOpen] = useState(false);
+  const [gamesNavigation, setGamesNavigation] = useState<IQuickFindNavigation | null>(null);
   const navigationIdentity = mgr.filePath || 'new-tournament';
   const restoredIdentity = useRef<string | null>(null);
 
@@ -188,7 +189,7 @@ function TournamentEditor() {
     setactivePage(ApplicationPages.Control);
   };
 
-  const openReadinessTarget = (target: ReadinessTarget) => {
+  const openReadinessTarget = (target: ReadinessTarget, navigation?: IQuickFindNavigation) => {
     switch (target) {
       case 'setup:tournament':
         openSetupSection(SetupPages.Tournament);
@@ -203,6 +204,7 @@ function TournamentEditor() {
         openSetupSection(SetupPages.Format);
         break;
       case 'games':
+        setGamesNavigation(navigation ? { ...navigation } : null);
         setactivePage(ApplicationPages.Games);
         break;
       case 'control:match-plan':
@@ -285,6 +287,8 @@ function TournamentEditor() {
               whichPage={activePage}
               setupSection={setupSection}
               controlSection={controlSection}
+              gamesNavigation={gamesNavigation}
+              onGamesNavigationHandled={() => setGamesNavigation(null)}
               onOpenSetup={openSetupSection}
               onOpenControl={openControlSection}
               onNavigateTarget={openReadinessTarget}
@@ -316,6 +320,8 @@ interface IActivePageProps {
   whichPage: ApplicationPages;
   setupSection: SetupPages;
   controlSection: ControlPages;
+  gamesNavigation: IQuickFindNavigation | null;
+  onGamesNavigationHandled: () => void;
   onOpenSetup: (section: SetupPages) => void;
   onOpenControl: (section?: ControlPages) => void;
   onNavigateTarget: (target: ReadinessTarget) => void;
@@ -324,12 +330,28 @@ interface IActivePageProps {
 
 /** A switch statement for which page to show */
 function ActivePage(props: IActivePageProps) {
-  const { whichPage, setupSection, controlSection, onOpenSetup, onOpenControl, onNavigateTarget, onNavigate } = props;
+  const {
+    whichPage,
+    setupSection,
+    controlSection,
+    gamesNavigation,
+    onGamesNavigationHandled,
+    onOpenSetup,
+    onOpenControl,
+    onNavigateTarget,
+    onNavigate,
+  } = props;
   switch (whichPage) {
     case ApplicationPages.Setup:
       return <SetupPage section={setupSection} onSectionChange={onOpenSetup} onNavigateTarget={onNavigateTarget} />;
     case ApplicationPages.Games:
-      return <GamesPage onNavigate={onNavigate} />;
+      return (
+        <GamesPage
+          navigation={gamesNavigation ?? undefined}
+          onNavigationHandled={onGamesNavigationHandled}
+          onNavigate={onNavigate}
+        />
+      );
     case ApplicationPages.Control:
       return (
         <ControlPage
@@ -352,7 +374,7 @@ function QuickFindDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onNavigate: (target: ReadinessTarget) => void;
+  onNavigate: (target: ReadinessTarget, navigation?: IQuickFindNavigation) => void;
 }) {
   const mgr = useContext(TournamentContext);
   const [query, setQuery] = useState('');
@@ -373,7 +395,7 @@ function QuickFindDialog({
   const choose = (item: IQuickFindItem | undefined) => {
     if (!item) return;
     onClose();
-    onNavigate(item.target);
+    onNavigate(item.target, item.navigation);
   };
 
   return (
