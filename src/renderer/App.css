@@ -6,8 +6,19 @@
  * behavioral or layout-hack rules here.
 */
 
+html,
+body,
 #root {
-  min-height: 100vh;
+  height: 100%;
+}
+
+html,
+body {
+  overflow: hidden;
+}
+
+#root {
+  min-height: 0;
 }
 
 ::selection {

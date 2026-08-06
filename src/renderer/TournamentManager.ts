@@ -722,6 +722,11 @@ export class TournamentManager {
     window.electron.ipcRenderer.sendMessage(IpcRendToMain.StatReportSaveDialog, defaultFilePrefix);
   }
 
+  // eslint-disable-next-line class-methods-use-this
+  requestQbjExport() {
+    window.electron.ipcRenderer.sendMessage(IpcRendToMain.LaunchQbjExportWorkflow);
+  }
+
   onFinishInAppStatReport() {
     this.inAppStatReportGenerated = new Date();
     this.onDataChanged(true);
@@ -835,6 +840,11 @@ export class TournamentManager {
 
   applStdRuleSet(ruleSet: CommonRuleSets) {
     this.tournament.applyRuleSet(ruleSet);
+    this.onDataChanged();
+  }
+
+  clearStandardRuleSet() {
+    this.tournament.clearStdRuleSet();
     this.onDataChanged();
   }
 

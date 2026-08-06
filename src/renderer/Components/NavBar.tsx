@@ -6,35 +6,47 @@ import Typography from '@mui/material/Typography';
 import Menu from '@mui/material/Menu';
 import Button from '@mui/material/Button';
 import MenuItem from '@mui/material/MenuItem';
-import { Dialog, DialogActions, DialogContent, DialogTitle, Divider, ListItemIcon, Tooltip } from '@mui/material';
+import {
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  ListItemIcon,
+  ListItemText,
+  Tooltip,
+} from '@mui/material';
 import { useColorScheme } from '@mui/material/styles';
-import { Check, DarkMode, HelpOutlined, LightMode, SaveOutlined, SettingsBrightness } from '@mui/icons-material';
+import {
+  Check,
+  DarkMode,
+  HelpOutlined,
+  LightMode,
+  SaveOutlined,
+  SettingsBrightness,
+  WarningAmber,
+} from '@mui/icons-material';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ApplicationPages } from '../Enums';
 import { hotkeyFormat } from '../Utils/GeneralReactUtils';
 import getAppPageHelpText from './PageLevelHelpText';
 import { headerHeight, macTrafficLightWidth } from '../Theme/tokens';
 import { TournamentContext } from '../TournamentManager';
+import { ITournamentReadiness, ReadinessTarget } from '../Services/TournamentReadiness';
 
 // Display names for the buttons
 const pageNames = {
-  [ApplicationPages.General]: 'General',
-  [ApplicationPages.Rules]: 'Rules',
-  [ApplicationPages.Schedule]: 'Schedule',
-  [ApplicationPages.Teams]: 'Teams',
+  [ApplicationPages.Setup]: 'Setup',
   [ApplicationPages.Games]: 'Games',
-  [ApplicationPages.Rooms]: 'Rooms',
-  [ApplicationPages.StatReport]: 'Stat Report',
+  [ApplicationPages.Control]: 'Control',
+  [ApplicationPages.Reports]: 'Reports',
 };
 // Which order the pages should be in
 export const applicationPageOrder = [
-  ApplicationPages.General,
-  ApplicationPages.Rules,
-  ApplicationPages.Schedule,
-  ApplicationPages.Teams,
+  ApplicationPages.Setup,
   ApplicationPages.Games,
-  ApplicationPages.Rooms,
-  ApplicationPages.StatReport,
+  ApplicationPages.Control,
+  ApplicationPages.Reports,
 ];
 
 const isMac = window.electron.getPlatform() === 'darwin';
@@ -66,12 +78,15 @@ type NavLayout = 'centered' | 'inline' | 'scroll';
 interface INavBarProps {
   activePage: ApplicationPages;
   setActivePage: (page: ApplicationPages) => void;
+  readiness: ITournamentReadiness;
+  onNavigateTarget: (target: ReadinessTarget) => void;
 }
 
 function NavBar(props: INavBarProps) {
-  const { activePage, setActivePage } = props;
+  const { activePage, setActivePage, readiness, onNavigateTarget } = props;
   const tournManager = React.useContext(TournamentContext);
   const [tipsDialogOpen, setTipsDialogOpen] = React.useState(false);
+  const [issuesAnchor, setIssuesAnchor] = React.useState<HTMLElement | null>(null);
   const activeIndex = applicationPageOrder.indexOf(activePage);
   const tournamentLabel = tournManager.tournament.name.trim() || tournManager.displayName || 'New tournament';
   let fileStatus: 'New' | 'Unsaved' | 'Saved' = 'Saved';
@@ -180,16 +195,16 @@ function NavBar(props: INavBarProps) {
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0, flexShrink: 0 }}>
               <Box
+                component="span"
                 aria-hidden
                 sx={{
-                  width: 7,
-                  height: 7,
                   flexShrink: 0,
-                  borderRadius: '50%',
-                  backgroundColor: 'primary.main',
-                  boxShadow: '0 0 0 3px var(--mui-palette-action-selected)',
+                  fontSize: '1rem',
+                  lineHeight: 1,
                 }}
-              />
+              >
+                🍌
+              </Box>
               <Typography
                 noWrap
                 sx={{
@@ -301,6 +316,17 @@ function NavBar(props: INavBarProps) {
               ...(centered ? { ml: 'auto' } : undefined),
             }}
           >
+            {readiness.issues.length > 0 && (
+              <Button
+                size="small"
+                color="warning"
+                startIcon={<WarningAmber fontSize="small" />}
+                onClick={(event) => setIssuesAnchor(event.currentTarget)}
+                sx={{ ...noDragSx, minHeight: 28, px: 0.75, fontSize: '0.75rem' }}
+              >
+                {readiness.issues.length} {readiness.issues.length === 1 ? 'issue' : 'issues'}
+              </Button>
+            )}
             {tournManager.unsavedData && (
               <Tooltip title="Save your changes">
                 <Button
@@ -350,6 +376,28 @@ function NavBar(props: INavBarProps) {
           </Box>
         </Box>
       </AppBar>
+      <Menu
+        anchorEl={issuesAnchor}
+        open={issuesAnchor !== null}
+        onClose={() => setIssuesAnchor(null)}
+        slotProps={{ paper: { sx: { maxWidth: 430 } } }}
+      >
+        {readiness.issues.map((issue) => (
+          <MenuItem
+            key={issue.id}
+            onClick={() => {
+              onNavigateTarget(issue.target);
+              setIssuesAnchor(null);
+            }}
+            sx={{ alignItems: 'flex-start', whiteSpace: 'normal' }}
+          >
+            <ListItemIcon sx={{ minWidth: 28, mt: 0.25 }}>
+              <WarningAmber color={issue.severity === 'error' ? 'error' : 'warning'} fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={issue.title} secondary={issue.message} />
+          </MenuItem>
+        ))}
+      </Menu>
       <HelpTipsDialog page={activePage} isOpen={tipsDialogOpen} onClose={() => setTipsDialogOpen(false)} />
     </>
   );

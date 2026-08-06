@@ -27,6 +27,7 @@ import {
   handleSaveBackup,
   generateBackup,
   handleLoadBackup,
+  exportQbjFile,
   handleExportQbjFile,
   createDirectories,
   importGamesFromQbjRendererLaunch,
@@ -200,6 +201,10 @@ app
     ipcMain.on(IpcRendToMain.WebPageCrashed, handleRendererCrashed);
     ipcMain.on(IpcRendToMain.LaunchImportQbjTeamWorkflow, handleLaunchImportQbjTeamsFromRenderer);
     ipcMain.on(IpcRendToMain.LaunchImportSqbsTeamWorkflow, handleLaunchImportSqbsTeamsFromRenderer);
+    ipcMain.on(IpcRendToMain.LaunchQbjExportWorkflow, (event) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (window) exportQbjFile(window);
+    });
     ipcMain.on(IpcBidirectional.ExportQbjFile, handleExportQbjFile);
     ipcMain.on(IpcBidirectional.SqbsExport, handleExportSqbsFile);
     ipcMain.on(IpcRendToMain.LaunchStatReportInBrowser, handlelaunchStatReportInBrowserWindow);

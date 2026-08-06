@@ -1,6 +1,4 @@
 import {
-  ToggleButtonGroup,
-  ToggleButton,
   Stack,
   Accordion,
   AccordionSummary,
@@ -11,15 +9,15 @@ import {
   Tooltip,
   Autocomplete,
   TextField,
-  Skeleton,
   Button,
   Paper,
+  Tab,
+  Tabs,
 } from '@mui/material';
-import React, { useContext, useMemo, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import { Add, Delete, Edit, Error, ExpandMore, FileUpload, FilterAlt, Warning } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
-import YfCard from './YfCard';
 import { Match } from '../DataModel/Match';
 import { Phase } from '../DataModel/Phase';
 import { Round } from '../DataModel/Round';
@@ -28,7 +26,7 @@ import { ValidationStatuses } from '../DataModel/Interfaces';
 import { Team } from '../DataModel/Team';
 import { CtrlOrCmd, trunc } from '../Utils/GeneralUtils';
 import { YfEmptyState, YfPageHeader } from '../Utils/GeneralReactUtils';
-import { ApplicationPages } from '../Enums';
+import { ApplicationPages, SetupPages } from '../Enums';
 
 // Defines the order the buttons should be in
 const viewList = ['By round', 'By pool'];
@@ -37,7 +35,7 @@ const teamSelectNullOption = '';
 
 interface IGamesPageProps {
   // eslint-disable-next-line react/require-default-props
-  onNavigate?: (page: ApplicationPages) => void;
+  onNavigate?: (page: ApplicationPages, setupSection?: SetupPages) => void;
 }
 
 export default function GamesPage(props: IGamesPageProps) {
@@ -62,21 +60,18 @@ export default function GamesPage(props: IGamesPageProps) {
           borderColor: 'divider',
         }}
       >
-        <ToggleButtonGroup
-          color="primary"
-          exclusive
+        <Tabs
           value={curView}
           onChange={(e, newValue) => {
-            if (newValue === null) return;
             tournManager.setGamesPageView(newValue);
           }}
+          aria-label="Game views"
+          sx={{ minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.25, px: 1.5 } }}
         >
           {viewList.map((val, idx) => (
-            <ToggleButton key={val} value={idx}>
-              {val}
-            </ToggleButton>
+            <Tab key={val} value={idx} label={val} />
           ))}
-        </ToggleButtonGroup>
+        </Tabs>
         <Tooltip placement="top" title={`Import games from one file into multiple rounds (${CtrlOrCmd()}+M)`}>
           <span>
             <Button
@@ -98,11 +93,11 @@ export default function GamesPage(props: IGamesPageProps) {
       {!hasSchedule ? (
         <Paper variant="outlined">
           <YfEmptyState
-            title="Choose a schedule before entering games"
+            title="Choose a format before entering games"
             description="Once the tournament has stages and rounds, games will be organized here for quick entry and review."
             action={
-              <Button variant="contained" onClick={() => onNavigate?.(ApplicationPages.Schedule)}>
-                Open Schedule
+              <Button variant="contained" onClick={() => onNavigate?.(ApplicationPages.Setup, SetupPages.Format)}>
+                Open Format
               </Button>
             }
           />
@@ -186,8 +181,15 @@ function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
   const { phase, filterTeam } = props;
 
   return (
-    <YfCard title={phase.name} variant="flush">
-      <Box sx={{ '& > * + *': { borderTop: 1, borderColor: 'divider' } }}>
+    <Box component="section" aria-labelledby={`games-phase-${phase.code}`}>
+      <Typography
+        id={`games-phase-${phase.code}`}
+        variant="overline"
+        sx={{ display: 'block', color: 'text.secondary', letterSpacing: '0.08em', fontWeight: 700, mb: 0.5 }}
+      >
+        {phase.name}
+      </Typography>
+      <Box sx={{ borderTop: 1, borderColor: 'divider' }}>
         {phase.rounds.map((round) => (
           <SingleRound
             key={round.name}
@@ -198,7 +200,7 @@ function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
           />
         ))}
       </Box>
-    </YfCard>
+    </Box>
   );
 }
 
@@ -255,28 +257,14 @@ function SingleRound(props: ISingleRoundProps) {
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, ml: 'auto' }}>
             {numErrs > 0 && (
-              <Tooltip title={roundValidationIconTooltip(numErrs, 'e')}>
-                <Typography
-                  variant="caption"
-                  color="error.main"
-                  sx={{ display: 'flex', alignItems: 'center', gap: 0.375, fontWeight: 600 }}
-                >
-                  <Error color="error" sx={{ fontSize: 16 }} />
-                  {numErrs}
-                </Typography>
-              </Tooltip>
+              <Typography variant="caption" color="error.main" sx={{ fontWeight: 600 }}>
+                {numErrs} {numErrs === 1 ? 'error' : 'errors'}
+              </Typography>
             )}
             {numWarns > 0 && (
-              <Tooltip title={roundValidationIconTooltip(numWarns, 'w')}>
-                <Typography
-                  variant="caption"
-                  color="warning.main"
-                  sx={{ display: 'flex', alignItems: 'center', gap: 0.375, fontWeight: 600 }}
-                >
-                  <Warning color="warning" sx={{ fontSize: 16 }} />
-                  {numWarns}
-                </Typography>
-              </Tooltip>
+              <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
+                {numWarns} {numWarns === 1 ? 'warning' : 'warnings'}
+              </Typography>
             )}
             {canAddMatch && (
               <Box sx={{ display: 'flex', gap: 0.25 }}>
@@ -307,12 +295,8 @@ function SingleRound(props: ISingleRoundProps) {
           </Box>
         </Box>
       </AccordionSummary>
-      <AccordionDetails sx={{ px: 2, pb: 2 }}>
-        {expanded ? (
-          <SingleRoundMatchList round={round} matchList={matchesToShow} />
-        ) : (
-          <PlaceholderMatchList listSize={Math.min(matchesToShow.length, 6)} />
-        )}
+      <AccordionDetails sx={{ px: 2, pb: 1.5 }}>
+        {expanded && <SingleRoundMatchList round={round} matchList={matchesToShow} />}
       </AccordionDetails>
     </Accordion>
   );
@@ -326,13 +310,9 @@ interface ISingleRoundMatchListProps {
 function SingleRoundMatchList(props: ISingleRoundMatchListProps) {
   const { round, matchList } = props;
   return (
-    round.matches.length > 0 && (
+    matchList.length > 0 && (
       <Box
         sx={{
-          border: 1,
-          borderColor: 'divider',
-          borderRadius: 2,
-          overflow: 'hidden',
           '& > * + *': { borderTop: 1, borderColor: 'divider' },
         }}
       >
@@ -344,25 +324,6 @@ function SingleRoundMatchList(props: ISingleRoundMatchListProps) {
   );
 }
 
-interface IPlaceholderMatchListProps {
-  listSize: number;
-}
-
-function PlaceholderMatchList(props: IPlaceholderMatchListProps) {
-  const { listSize } = props;
-  if (listSize === 0) return null;
-
-  const placeholders: React.JSX.Element[] = [];
-  for (let i = 1; i <= listSize; i++) {
-    const widthPct = 15 + 35 * Math.random();
-    placeholders.push(
-      <Skeleton key={i} variant="text" width={`${widthPct.toPrecision(2)}%`} sx={{ fontSize: '16pt' }} />,
-    );
-  }
-
-  return <Stack spacing={2}>{placeholders}</Stack>;
-}
-
 interface IMatchListItemProps {
   match: Match;
   round: Round;
@@ -372,6 +333,9 @@ function MatchListItem(props: IMatchListItemProps) {
   const { match, round } = props;
   const tournManager = useContext(TournamentContext);
   const validationStatus = match.getOverallValidationStatus();
+
+  const errorMessage = match.getErrorMessages()[0];
+  const warningMessage = match.getWarningMessages()[0];
 
   return (
     <Box
@@ -405,19 +369,24 @@ function MatchListItem(props: IMatchListItemProps) {
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         {validationStatus === ValidationStatuses.Error && (
-          <Tooltip
-            title={`This game has errors that prevent it from counting in the stat report: ${trunc(
-              match.getErrorMessages().join('; '),
-              120,
-            )}`}
+          <Typography
+            variant="caption"
+            color="error.main"
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, maxWidth: 360 }}
           >
-            <Error color="error" sx={{ fontSize: 18 }} />
-          </Tooltip>
+            <Error color="error" sx={{ fontSize: 18, flexShrink: 0 }} />
+            {`Error: ${trunc(errorMessage ?? 'Invalid game data', 120)}`}
+          </Typography>
         )}
         {validationStatus === ValidationStatuses.Warning && (
-          <Tooltip title={`This game has validation warnings: ${trunc(match.getWarningMessages().join('; '), 120)}`}>
-            <Warning color="warning" sx={{ fontSize: 18 }} />
-          </Tooltip>
+          <Typography
+            variant="caption"
+            color="warning.main"
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, maxWidth: 360 }}
+          >
+            <Warning color="warning" sx={{ fontSize: 18, flexShrink: 0 }} />
+            {`Warning: ${trunc(warningMessage ?? 'Review this game', 120)}`}
+          </Typography>
         )}
       </Box>
       <Box sx={{ display: 'flex', gap: 0.25, flexShrink: 0 }}>
@@ -434,13 +403,4 @@ function MatchListItem(props: IMatchListItemProps) {
       </Box>
     </Box>
   );
-}
-
-function roundValidationIconTooltip(num: number, errOrWarn: 'e' | 'w') {
-  const start = num === 1 ? 'game has' : 'games have';
-  const noun = errOrWarn === 'e' ? 'errors' : 'warnings';
-  const msg = `${num} ${start} ${noun}`;
-  if (errOrWarn === 'w') return msg;
-
-  return `${msg}. Games with errors don't count in the stat report until the errors are corrected.`;
 }

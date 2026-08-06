@@ -12,17 +12,13 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { Alert, AlertColor, IconButton, Snackbar, Tooltip } from '@mui/material';
 import { Close, Launch } from '@mui/icons-material';
 import NavBar, { applicationPageOrder } from './Components/NavBar';
-import GeneralPage from './Components/GeneralPage';
 import { TournamentManager, TournamentContext } from './TournamentManager';
-import RulesPage from './Components/RulesPage';
-import SchedulePage from './Components/SchedulePage';
-import TeamsPage from './Components/TeamsPage';
 import TeamEditDialog from './Components/TeamEditDialog';
 import GenericDialog from './Components/GenericDialog';
 import GamesPage from './Components/GamesPage';
 import MatchEditDialog from './Components/MatchEditDialog';
 import StatReportPage from './Components/StatReportPage';
-import { ApplicationPages } from './Enums';
+import { ApplicationPages, ControlPages, SetupPages } from './Enums';
 import PhaseEditDialog from './Components/PhaseEditDialog';
 import PoolEditDialog from './Components/PoolEditDialog';
 import RankEditDialog from './Components/RankEditDialog';
@@ -31,9 +27,11 @@ import PoolAssignmentDialog from './Components/PoolAssignmentDialog';
 import MatchImportResultDialog from './Components/MatchImportResultDialog';
 import SqbsExportDialog from './Components/SqbsExportDialog';
 import AboutYfDialog from './Components/AboutYfDialog';
-import RoomsPage from './Components/Rooms/RoomsPage';
+import SetupPage from './Components/SetupPage';
+import ControlPage from './Components/ControlPage';
 import yfTheme from './Theme/yfTheme';
 import { headerHeight } from './Theme/tokens';
+import { ReadinessTarget, resolveTournamentReadiness } from './Services/TournamentReadiness';
 
 window.onerror = () => window.electron.ipcRenderer.sendMessage(IpcRendToMain.WebPageCrashed);
 window.electron.ipcRenderer.removeAllListeners(); // needed in dev environemnt so that you don't end up with duplicate listers when the app reloads
@@ -74,16 +72,22 @@ function YellowFruit() {
 /** The actual UI of the application */
 function TournamentEditor() {
   const mgr = useContext(TournamentContext);
-  const [activePage, setactivePage] = useState(ApplicationPages.General);
+  const [activePage, setactivePage] = useState(ApplicationPages.Setup);
+  const [setupSection, setSetupSection] = useState(SetupPages.Tournament);
+  const [controlSection, setControlSection] = useState(ControlPages.Live);
 
   useEffect(() => {
-    if (activePage === ApplicationPages.StatReport) {
+    if (activePage === ApplicationPages.Reports) {
       mgr.generateHtmlReport();
-    } else if (activePage === ApplicationPages.Teams && mgr.currentTeamsPageView === 2) {
+    } else if (
+      activePage === ApplicationPages.Setup &&
+      setupSection === SetupPages.Teams &&
+      mgr.currentTeamsPageView === 2
+    ) {
       mgr.compileStats();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mgr, mgr.tournament]);
+  }, [mgr, mgr.tournament, activePage, setupSection]);
 
   useHotkeys('alt+shift+right', () => {
     if (!mgr.anyModalOpen()) {
@@ -101,17 +105,81 @@ function TournamentEditor() {
   });
 
   const changePage = (page: ApplicationPages) => {
-    if (page === ApplicationPages.StatReport) {
+    if (page === ApplicationPages.Reports) {
       mgr.generateHtmlReport();
-    } else if (page === ApplicationPages.Teams && mgr.currentTeamsPageView === 2) {
+    } else if (page === ApplicationPages.Setup && setupSection === SetupPages.Teams && mgr.currentTeamsPageView === 2) {
       mgr.compileStats();
     }
     setactivePage(page);
   };
 
+  const openSetupSection = (section: SetupPages) => {
+    setSetupSection(section);
+    setactivePage(ApplicationPages.Setup);
+  };
+
+  const openControlSection = (section: ControlPages = ControlPages.Live) => {
+    setControlSection(section);
+    setactivePage(ApplicationPages.Control);
+  };
+
+  const openReadinessTarget = (target: ReadinessTarget) => {
+    switch (target) {
+      case 'setup:tournament':
+        openSetupSection(SetupPages.Tournament);
+        break;
+      case 'setup:rules':
+        openSetupSection(SetupPages.Rules);
+        break;
+      case 'setup:teams':
+        openSetupSection(SetupPages.Teams);
+        break;
+      case 'setup:format':
+        openSetupSection(SetupPages.Format);
+        break;
+      case 'games':
+        setactivePage(ApplicationPages.Games);
+        break;
+      case 'control:match-plan':
+        openControlSection(ControlPages.MatchPlan);
+        break;
+      case 'control:rooms':
+        openControlSection(ControlPages.Rooms);
+        break;
+      case 'control:display':
+        openControlSection(ControlPages.Display);
+        break;
+      case 'control:live':
+        openControlSection(ControlPages.Live);
+        break;
+      case 'reports':
+        setactivePage(ApplicationPages.Reports);
+        mgr.generateHtmlReport();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const service = mgr.tournamentServerService;
+  const readiness = resolveTournamentReadiness(mgr.tournament, {
+    running: service.status.running,
+    currentRoundNumber: service.currentRoundNumber,
+    releasedRoundNumber: service.releasedRoundNumber,
+    inboxCount: service.inbox.length,
+    conflictCount: service.conflicts.length,
+    sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
+    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
+  });
+
   return (
     <>
-      <NavBar activePage={activePage} setActivePage={changePage} />
+      <NavBar
+        activePage={activePage}
+        setActivePage={changePage}
+        readiness={readiness}
+        onNavigateTarget={openReadinessTarget}
+      />
       <Box
         component="main"
         sx={{
@@ -137,7 +205,29 @@ function TournamentEditor() {
             flexDirection: 'column',
           }}
         >
-          <ActivePage whichPage={activePage} onNavigate={setactivePage} />
+          <Box
+            sx={{
+              height: '100%',
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              scrollbarGutter: 'stable',
+              pr: 0.5,
+            }}
+          >
+            <ActivePage
+              whichPage={activePage}
+              setupSection={setupSection}
+              controlSection={controlSection}
+              onOpenSetup={openSetupSection}
+              onOpenControl={openControlSection}
+              onNavigateTarget={openReadinessTarget}
+              onNavigate={(page, section) => {
+                if (section !== undefined) setSetupSection(section);
+                setactivePage(page);
+              }}
+            />
+          </Box>
         </Box>
       </Box>
       <GenericDialog />
@@ -157,26 +247,31 @@ function TournamentEditor() {
 
 interface IActivePageProps {
   whichPage: ApplicationPages;
-  onNavigate: (page: ApplicationPages) => void;
+  setupSection: SetupPages;
+  controlSection: ControlPages;
+  onOpenSetup: (section: SetupPages) => void;
+  onOpenControl: (section?: ControlPages) => void;
+  onNavigateTarget: (target: ReadinessTarget) => void;
+  onNavigate: (page: ApplicationPages, setupSection?: SetupPages) => void;
 }
 
 /** A switch statement for which page to show */
 function ActivePage(props: IActivePageProps) {
-  const { whichPage, onNavigate } = props;
+  const { whichPage, setupSection, controlSection, onOpenSetup, onOpenControl, onNavigateTarget, onNavigate } = props;
   switch (whichPage) {
-    case ApplicationPages.General:
-      return <GeneralPage />;
-    case ApplicationPages.Rules:
-      return <RulesPage />;
-    case ApplicationPages.Schedule:
-      return <SchedulePage />;
-    case ApplicationPages.Teams:
-      return <TeamsPage />;
+    case ApplicationPages.Setup:
+      return <SetupPage section={setupSection} onSectionChange={onOpenSetup} />;
     case ApplicationPages.Games:
       return <GamesPage onNavigate={onNavigate} />;
-    case ApplicationPages.Rooms:
-      return <RoomsPage />;
-    case ApplicationPages.StatReport:
+    case ApplicationPages.Control:
+      return (
+        <ControlPage
+          section={controlSection}
+          onSectionChange={(section) => onOpenControl(section)}
+          onNavigateTarget={onNavigateTarget}
+        />
+      );
+    case ApplicationPages.Reports:
       return <StatReportPage />;
     default:
       return null;

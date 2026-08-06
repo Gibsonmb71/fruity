@@ -421,9 +421,11 @@ const yfTheme = createTheme({
       styleOverrides: {
         root: ({ theme }) => ({
           backgroundColor: theme.vars.palette.background.paper,
-          borderBottom: `1px solid ${theme.vars.palette.divider}`,
+          // Draw the divider inside the 44px strip so the document shell and the
+          // viewport calculation agree exactly. A real border adds one extra pixel
+          // to the header and creates a second page scrollbar at short heights.
+          boxShadow: `inset 0 -1px 0 ${theme.vars.palette.divider}`,
           backgroundImage: 'none',
-          boxShadow: 'none',
         }),
       },
     },

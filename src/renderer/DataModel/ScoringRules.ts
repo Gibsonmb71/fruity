@@ -245,13 +245,13 @@ export class ScoringRules implements IQbjScoringRules, IYftDataModelObject {
   static getRuleSetName(ruleSet: CommonRuleSets) {
     switch (ruleSet) {
       case CommonRuleSets.AcfPowers:
-        return 'ACF with powers';
+        return 'mACF / powers';
       case CommonRuleSets.Acf:
-        return 'ACF (standard)';
+        return 'ACF';
       case CommonRuleSets.NaqtTimed:
-        return 'NAQT (timed)';
+        return 'NAQT Timed';
       case CommonRuleSets.NaqtUntimed:
-        return 'NAQT (untimed)';
+        return 'NAQT Untimed';
       default:
         return 'Custom';
     }
