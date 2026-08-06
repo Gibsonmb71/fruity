@@ -5,6 +5,7 @@ import MatchImportResult, { ImportResultStatus } from '../DataModel/MatchImportR
 import { StatsValidity } from '../DataModel/Match';
 import MatchImportService from './MatchImportService';
 import scoringRulesToModaqGameFormat from './YellowFruitScoringRulesToModaq';
+import buildPublicLiveSnapshot from './PublicLiveSnapshot';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
 import {
   IMatchSubmission,
@@ -15,6 +16,7 @@ import {
   ITournamentSnapshot,
   defaultServerPort,
 } from '../../main/server/ServerTypes';
+import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
 
 /** One remote submission waiting on the statskeeper's decision */
 export interface IInboxItem {
@@ -321,6 +323,13 @@ export default class TournamentServerService {
     // does not exist yet. The real renderer always has window.electron.
     if (typeof window === 'undefined' || !window.electron) return;
     window.electron.ipcRenderer.sendMessage(IpcRendToMain.TournamentServerSetSnapshot, this.buildTournamentSnapshot());
+    const publicSnapshot = this.buildPublicLiveSnapshot();
+    window.electron.ipcRenderer.sendMessage(IpcRendToMain.TournamentServerSetPublicLiveSnapshot, publicSnapshot);
+  }
+
+  /** Build the deliberately reduced public view. Disabled tournaments return null and expose no data. */
+  buildPublicLiveSnapshot(): IPublicLiveSnapshot | null {
+    return buildPublicLiveSnapshot(this.tournament);
   }
 
   async startServer(port?: number) {

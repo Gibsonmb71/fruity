@@ -426,6 +426,70 @@
   line-height: 1.4;
 }
 
+.rooms-live-settings-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+  gap: 24px;
+  padding: 16px;
+}
+
+.rooms-live-setting-column {
+  min-width: 0;
+}
+
+.rooms-live-setting-column > .MuiTypography-root {
+  margin-bottom: 6px;
+  color: var(--ops-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rooms-live-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.rooms-live-controls .MuiFormControlLabel-root {
+  grid-column: 1 / -1;
+}
+
+.rooms-live-urls {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--ops-border);
+}
+
+.rooms-live-url-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ops-border);
+}
+
+.rooms-live-url-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.rooms-live-url-row strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.rooms-live-url-row span {
+  color: var(--ops-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 .rooms-dialog-section {
   padding: 12px 0;
   border-bottom: 1px solid var(--ops-border);
@@ -526,6 +590,16 @@
 
   .rooms-inbox-actions {
     grid-column: 1 / -1;
+  }
+
+  .rooms-live-settings-body {
+    grid-template-columns: 1fr;
+  }
+
+  .rooms-live-url-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
 }
 

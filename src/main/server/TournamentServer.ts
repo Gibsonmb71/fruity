@@ -15,6 +15,7 @@ import {
   emptyTournamentSnapshot,
   staleRoomThresholdMs,
 } from './ServerTypes';
+import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
 
 /** Content types for the handful of file types the room bundle is made of */
 const contentTypes: Record<string, string> = {
@@ -35,6 +36,8 @@ const contentTypes: Record<string, string> = {
 export interface ITournamentServerOptions {
   /** Directory holding the built browser room bundle */
   roomBundleDirectory: string;
+  /** Directory holding the separate public audience/display bundle */
+  liveBundleDirectory?: string;
   /** Called when a room submits a final result that needs the statskeeper's decision */
   onFinalSubmission: (submission: IMatchSubmission) => void;
   /** Called when any session changes, so the desktop dashboard can refresh */
@@ -64,6 +67,9 @@ export default class TournamentServer {
 
   private snapshot: ITournamentSnapshot = emptyTournamentSnapshot;
 
+  /** Public projection supplied by the renderer; null means the tournament has disabled Live Display. */
+  private publicLiveSnapshot: IPublicLiveSnapshot | null = null;
+
   readonly sessions = new SessionStore();
 
   private router: Router;
@@ -81,6 +87,7 @@ export default class TournamentServer {
     const host: IRouterHost = {
       sessions: this.sessions,
       getSnapshot: () => this.snapshot,
+      getPublicLiveSnapshot: () => this.publicLiveSnapshot,
       onFinalSubmission: (sessionId) => this.handleFinalSubmission(sessionId),
       onSnapshot: () => this.notifySessionsChanged(),
       onRoomCheckIn: (roomId) => this.markRoomCheckIn(roomId),
@@ -104,10 +111,20 @@ export default class TournamentServer {
       // results. The renderer sends this stable key before the server can serve a request.
       this.sessions.clear();
       this.roomLastSeenAt.clear();
+      this.publicLiveSnapshot = null;
     }
     if (snapshot.recoveryKey) this.recoveryKey = snapshot.recoveryKey;
     this.snapshot = snapshot;
     this.persistRecovery();
+  }
+
+  /** Replace the separate public projection. It never shares the room snapshot's credentials or session state. */
+  setPublicLiveSnapshot(snapshot: IPublicLiveSnapshot | null) {
+    this.publicLiveSnapshot = snapshot;
+  }
+
+  getPublicLiveSnapshot(): IPublicLiveSnapshot | null {
+    return this.publicLiveSnapshot;
   }
 
   getTournamentSnapshot(): ITournamentSnapshot {
@@ -341,7 +358,7 @@ export default class TournamentServer {
   }
 
   /**
-   * Serve the browser room application.
+   * Serve the browser room or public live application.
    *
    * Paths from the client are never trusted: the resolved path must stay inside the bundle
    * directory, and anything that isn't a real file there falls back to index.html so the room app
@@ -355,10 +372,18 @@ export default class TournamentServer {
       return;
     }
 
-    const root = this.options.roomBundleDirectory;
+    const isLivePath = pathname === '/live' || pathname === '/live/' || pathname.startsWith('/live/');
+    const root = isLivePath ? this.options.liveBundleDirectory : this.options.roomBundleDirectory;
+    if (!root) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('The public live application is not available.');
+      return;
+    }
     const indexPath = path.join(root, 'index.html');
 
-    const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+    const pathWithinBundle = isLivePath ? pathname.replace(/^\/live\/?/, '') : pathname;
+    const relative =
+      pathWithinBundle === '' || pathWithinBundle === '/' ? 'index.html' : pathWithinBundle.replace(/^\/+/, '');
     // path.resolve collapses any ".." the client sent; the containment check below is what makes
     // that safe rather than the normalization itself.
     const candidate = path.resolve(root, relative);
@@ -374,7 +399,9 @@ export default class TournamentServer {
     if (!existsSync(fileToServe)) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end(
-        'The room application has not been built. Run "npm run build:room" (or "npm run build") and restart the server.',
+        isLivePath
+          ? 'The public live application has not been built. Run "npm run build:live" (or "npm run build") and restart the server.'
+          : 'The room application has not been built. Run "npm run build:room" (or "npm run build") and restart the server.',
       );
       return;
     }

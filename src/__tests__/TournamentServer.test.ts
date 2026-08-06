@@ -14,6 +14,27 @@ import {
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import { makeModaqCycleExport, makeStandardModaqMatch, testTeamNames } from './TestFixtures';
+import type { IPublicLiveSnapshot } from '../shared/LiveTypes';
+
+const publicSnapshot: IPublicLiveSnapshot = {
+  version: 1,
+  tournamentName: 'Test Tournament',
+  lastUpdatedAt: '2026-08-05T15:00:00.000Z',
+  latestCompletedRound: null,
+  teamStandings: [],
+  individualStandings: [],
+  phaseStandings: [],
+  recentResults: [],
+  nextRound: null,
+  settings: {
+    slides: { teamStandings: true, individuals: true, pools: true, recentResults: true, nextRound: true },
+    slideDurationSeconds: 10,
+    rowsPerSlide: 10,
+    theme: 'system',
+    showLastUpdated: true,
+  },
+  metricLabels: { teamPpg: 'PP20TUH', individualPptuh: 'PP20TUH', teamPpb: 'PPB' },
+};
 
 /** Snapshot matching the test fixtures: 3 rounds, 4 teams, ACF-with-powers rules */
 function makeSnapshot(): ITournamentSnapshot {
@@ -36,15 +57,20 @@ let server: TournamentServer;
 let baseUrl: string;
 let submissions: IMatchSubmission[];
 let bundleDir: string;
+let liveBundleDir: string;
 
 beforeEach(async () => {
   submissions = [];
   bundleDir = mkdtempSync(path.join(tmpdir(), 'yf-room-bundle-'));
   writeFileSync(path.join(bundleDir, 'index.html'), '<!doctype html><title>Room</title>');
   writeFileSync(path.join(bundleDir, 'room.js'), 'console.log("room");');
+  liveBundleDir = mkdtempSync(path.join(tmpdir(), 'yf-live-bundle-'));
+  writeFileSync(path.join(liveBundleDir, 'index.html'), '<!doctype html><title>Live</title>');
+  writeFileSync(path.join(liveBundleDir, 'live.js'), 'console.log("live");');
 
   server = new TournamentServer({
     roomBundleDirectory: bundleDir,
+    liveBundleDirectory: liveBundleDir,
     onFinalSubmission: (s) => submissions.push(s),
   });
   server.setTournamentSnapshot(makeSnapshot());
@@ -57,6 +83,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await server.stop();
   rmSync(bundleDir, { recursive: true, force: true });
+  rmSync(liveBundleDir, { recursive: true, force: true });
 });
 
 /**
@@ -187,6 +214,57 @@ describe('read-only tournament endpoints', () => {
 
     expect(body.teams).toHaveLength(4);
     expect(body.teams[0].players[0].name).toContain('Player 1');
+  });
+});
+
+describe('public live endpoints', () => {
+  test('the public snapshot is read-only and contains no room/session credentials', async () => {
+    server.setPublicLiveSnapshot(publicSnapshot);
+
+    const res = await fetch(`${baseUrl}/api/v1/public/snapshot`);
+    const body = await res.json();
+    const serialized = JSON.stringify(body);
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual(publicSnapshot);
+    expect(serialized).not.toMatch(/token|session|recovery/i);
+  });
+
+  test('disabled Live Display returns no tournament data', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/public/snapshot`);
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toContain('disabled');
+  });
+
+  test('public snapshot cannot be changed over HTTP', async () => {
+    server.setPublicLiveSnapshot(publicSnapshot);
+
+    const res = await fetch(`${baseUrl}/api/v1/public/snapshot`, { method: 'POST' });
+
+    expect(res.status).toBe(405);
+  });
+
+  test('live audience and display routes serve the separate bundle', async () => {
+    server.setPublicLiveSnapshot(publicSnapshot);
+
+    const audience = await fetch(`${baseUrl}/live`);
+    const display = await fetch(`${baseUrl}/live/display?mode=standings`);
+
+    expect(audience.status).toBe(200);
+    expect(display.status).toBe(200);
+    expect(await audience.text()).toContain('<title>Live</title>');
+    expect(await display.text()).toContain('<title>Live</title>');
+  });
+
+  test('the public projection remains available after a local server restart', async () => {
+    server.setPublicLiveSnapshot(publicSnapshot);
+    await server.stop();
+    const status = await server.start(0);
+    baseUrl = `http://127.0.0.1:${(server as any).server.address().port}`;
+
+    expect(status.running).toBe(true);
+    expect(await (await fetch(`${baseUrl}/api/v1/public/snapshot`)).json()).toEqual(publicSnapshot);
   });
 });
 

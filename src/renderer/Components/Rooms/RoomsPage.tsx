@@ -57,6 +57,7 @@ import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSe
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
 import RebracketDialog from './RebracketDialog';
 import MatchInboxCard from './MatchInboxCard';
+import LiveDisplaySettingsCard from './LiveDisplaySettingsCard';
 import { YfPageHeader } from '../../Utils/GeneralReactUtils';
 import './rooms.css';
 
@@ -461,6 +462,8 @@ export default function RoomsPage() {
           />
           <SummaryItem label="Next rebracket" value={rebracketBoundary ? `After ${rebracketBoundary.name}` : '—'} />
         </div>
+
+        <LiveDisplaySettingsCard />
 
         {rebracketBoundary && (
           <section className="rooms-panel">

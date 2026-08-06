@@ -211,6 +211,29 @@ describe('round release metadata in the .yft file', () => {
   });
 });
 
+describe('live display settings in the .yft file', () => {
+  test('settings persist while browser slideshow position does not exist in the file', () => {
+    const { original, reopened, written } = saveAndReopen((tourn) => {
+      tourn.liveDisplaySettings.enabled = true;
+      tourn.liveDisplaySettings.slides.pools = false;
+      tourn.liveDisplaySettings.slideDurationSeconds = 30;
+      tourn.liveDisplaySettings.rowsPerSlide = 18;
+      tourn.liveDisplaySettings.theme = 'dark';
+      tourn.liveDisplaySettings.showLastUpdated = false;
+    });
+
+    expect(written.YfData.liveDisplay).toMatchObject({
+      enabled: true,
+      slideDurationSeconds: 30,
+      rowsPerSlide: 18,
+      theme: 'dark',
+      showLastUpdated: false,
+    });
+    expect(reopened.liveDisplaySettings).toEqual(original.liveDisplaySettings);
+    expect(JSON.stringify(written.YfData.liveDisplay)).not.toContain('currentSlide');
+  });
+});
+
 describe('QBJ export stays clean', () => {
   test('rooms and scheduled matches are not written to QBJ', () => {
     const tourn = makeTestTournament();
