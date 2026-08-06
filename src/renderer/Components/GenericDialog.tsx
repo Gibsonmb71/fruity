@@ -53,9 +53,17 @@ function GenericDialogCore() {
       {title && <DialogTitle>{title}</DialogTitle>}
       <DialogContent sx={{ whiteSpace: 'pre-line' }}>{contents}</DialogContent>
       <DialogActions>
-        {acceptButtonCaption && <Button onClick={handleAccept}>{hotkeyFormat(acceptButtonCaption)}</Button>}
-        {discardButtonCaption && <Button onClick={handleDiscard}>{hotkeyFormat(discardButtonCaption)}</Button>}
+        {discardButtonCaption && (
+          <Button variant="outlined" color="error" onClick={handleDiscard}>
+            {hotkeyFormat(discardButtonCaption)}
+          </Button>
+        )}
         <Button onClick={handleCancel}>{hotkeyFormat(cancelButtonCaption)}</Button>
+        {acceptButtonCaption && (
+          <Button variant="contained" onClick={handleAccept}>
+            {hotkeyFormat(acceptButtonCaption)}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

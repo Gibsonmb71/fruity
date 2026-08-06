@@ -259,7 +259,13 @@ const yfTheme = createTheme({
     },
     MuiDialogActions: {
       styleOverrides: {
-        root: { padding: '12px 20px', gap: 8, '& > :not(style) ~ :not(style)': { marginLeft: 0 } },
+        root: {
+          padding: '12px 20px',
+          gap: 8,
+          justifyContent: 'flex-end',
+          '& > :not(style) ~ :not(style)': { marginLeft: 0 },
+          '& > .MuiButton-colorError': { marginRight: 'auto' },
+        },
       },
     },
     MuiDialogContentText: { styleOverrides: { root: { fontSize: '0.875rem' } } },

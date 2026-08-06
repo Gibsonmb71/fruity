@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import React, { forwardRef, useEffect, useState } from 'react';
 import Grid from '@mui/material/Grid';
-import { Close, Done, ExpandMore } from '@mui/icons-material';
+import { ExpandMore } from '@mui/icons-material';
 import { invalidInteger } from './GeneralUtils';
 
 export enum YfCssClasses {
@@ -117,13 +117,7 @@ export function YfNumericField(props: TextFieldProps) {
 export const YfAcceptButton = forwardRef((props: ButtonProps, buttonRef) => {
   const { ...other } = props;
   return (
-    <Button
-      variant="outlined"
-      color="success"
-      startIcon={<Done />}
-      {...other}
-      ref={buttonRef as React.RefObject<HTMLButtonElement>}
-    >
+    <Button variant="contained" {...other} ref={buttonRef as React.RefObject<HTMLButtonElement>}>
       {hotkeyFormat('&Accept')}
     </Button>
   );
@@ -132,7 +126,7 @@ export const YfAcceptButton = forwardRef((props: ButtonProps, buttonRef) => {
 export function YfCancelButton(props: ButtonProps) {
   const { ...other } = props;
   return (
-    <Button variant="outlined" color="error" startIcon={<Close />} {...other}>
+    <Button variant="text" {...other}>
       {hotkeyFormat('&Cancel')}
     </Button>
   );

@@ -92,7 +92,7 @@ function PoolEditDialogCore() {
           {allowCustomSched && (
             <Button
               variant="outlined"
-              color="warning"
+              color="error"
               disabled={deleteionDisabled}
               onClick={handleDelete}
               startIcon={<Delete />}
