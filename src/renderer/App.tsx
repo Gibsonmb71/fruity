@@ -54,6 +54,8 @@ import {
 } from './Services/NavigationPreferences';
 import { buildQuickFindItems, filterQuickFindItems } from './Services/QuickFind';
 import type { IQuickFindItem } from './Services/QuickFind';
+import { dispatchTournamentAction } from './Services/TournamentActions';
+import type { HelpTopicId } from './Components/PageLevelHelpText';
 
 window.onerror = () => window.electron.ipcRenderer.sendMessage(IpcRendToMain.WebPageCrashed);
 window.electron.ipcRenderer.removeAllListeners(); // needed in dev environemnt so that you don't end up with duplicate listers when the app reloads
@@ -250,24 +252,19 @@ function TournamentEditor() {
   });
 
   const handleQuickFindIntent = (intent: INavigationIntent) => {
-    if (intent.actionId === 'add-team') mgr.openTeamEditModalNewTeam();
-    if (intent.actionId === 'add-game' && intent.roundNumber !== undefined) {
-      const round = mgr.tournament.getRoundObjByNumber(intent.roundNumber);
-      if (round) mgr.openMatchModalNewMatchForRound(round);
-    }
-    if (intent.actionId === 'start-server' && readiness.primaryAction?.kind === 'start-server') {
-      service.startServer();
-    }
-    if (
-      intent.actionId === 'release-round' &&
-      readiness.primaryAction?.kind === 'release-round' &&
-      readiness.primaryAction.roundNumber === intent.roundNumber &&
-      intent.roundNumber !== undefined &&
-      service.canReleaseRound(intent.roundNumber).canRelease
-    ) {
-      service.releaseRound(intent.roundNumber);
-    }
-    openReadinessTarget(intent);
+    const dispatched = dispatchTournamentAction(intent, readiness, {
+      onAddTeam: () => mgr.openTeamEditModalNewTeam(),
+      onAddGame: (roundNumber) => {
+        const round = mgr.tournament.getRoundObjByNumber(roundNumber);
+        if (round) mgr.openMatchModalNewMatchForRound(round);
+      },
+      onStartServer: () => service.startServer(),
+      onReleaseRound: (roundNumber) => service.releaseRound(roundNumber),
+      onReviewResults: () => openControlSection(ControlPages.Live),
+      canReleaseRound: (roundNumber) =>
+        readiness.primaryAction?.roundNumber === roundNumber && service.canReleaseRound(roundNumber).canRelease,
+    });
+    if (!intent.actionId || dispatched) openReadinessTarget(intent);
   };
 
   return (
@@ -278,6 +275,7 @@ function TournamentEditor() {
         readiness={readiness}
         onNavigateTarget={openReadinessTarget}
         onOpenQuickFind={() => setQuickFindOpen(true)}
+        helpTopic={contextHelpTopic(activePage, setupSection, controlSection)}
       />
       <Box
         component="main"
@@ -351,6 +349,37 @@ function TournamentEditor() {
       <GenericToast />
     </>
   );
+}
+
+function contextHelpTopic(page: ApplicationPages, setupSection: SetupPages, controlSection: ControlPages): HelpTopicId {
+  if (page === ApplicationPages.Setup) {
+    switch (setupSection) {
+      case SetupPages.Rules:
+        return 'setup.rules';
+      case SetupPages.Teams:
+        return 'setup.teams';
+      case SetupPages.Format:
+        return 'setup.format';
+      case SetupPages.Tournament:
+      default:
+        return 'setup.tournament';
+    }
+  }
+  if (page === ApplicationPages.Control) {
+    switch (controlSection) {
+      case ControlPages.MatchPlan:
+        return 'control.match-plan';
+      case ControlPages.Rooms:
+        return 'control.rooms';
+      case ControlPages.Display:
+        return 'control.display';
+      case ControlPages.Live:
+      default:
+        return 'control.live';
+    }
+  }
+  if (page === ApplicationPages.Games) return 'games';
+  return 'reports';
 }
 
 interface IActivePageProps {

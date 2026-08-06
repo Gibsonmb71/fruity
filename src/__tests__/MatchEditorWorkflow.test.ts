@@ -1,11 +1,11 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { Match } from '../renderer/DataModel/Match';
 import { MatchValidationType } from '../renderer/DataModel/MatchValidationMessage';
 import { TempMatchManager } from '../renderer/Modal Managers/TempMatchManager';
 import { CommonRuleSets } from '../renderer/DataModel/ScoringRules';
 import AnswerType from '../renderer/DataModel/AnswerType';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
-import { ScheduledMatch } from '../renderer/DataModel/ScheduledMatch';
+import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { Phase, PhaseTypes } from '../renderer/DataModel/Phase';
 import { Pool } from '../renderer/DataModel/Pool';
 import { shouldExpandOvertime, shouldShowTiePrompt } from '../renderer/Services/MatchEditorPresentation';
@@ -186,6 +186,55 @@ describe('Game / Match Editor workflow model', () => {
     expect(manager.scheduledMatchContext?.roomNameAtPlay).toBe('Room 104');
     manager.openModal(undefined, round);
     expect(manager.scheduledMatchContext).toBeUndefined();
+  });
+
+  test('corrects an accepted result in place without reopening its schedule link', () => {
+    const { tournament, manager, round, left, right } = openMatchManager();
+    enterNaqtUntimedGame(manager);
+    expect(manager.preSaveValidation()).toBe(true);
+    manager.saveNewMatch();
+    const official = round.matches[0];
+    if (!official) throw new Error('Expected an official match');
+
+    const scheduled = new ScheduledMatch(round.number, left.name, right.name, 'scheduled-official');
+    scheduled.status = ScheduledMatchStatus.Accepted;
+    scheduled.resultMatchId = official.id;
+    scheduled.roomId = 'room-101';
+    tournament.scheduledMatches = [scheduled];
+
+    manager.openModal(official, round);
+    manager.setNotes('Corrected from the signed scoresheet.');
+    expect(manager.preSaveValidation()).toBe(true);
+    expect(manager.saveExistingMatch(official)).toBe(true);
+
+    expect(round.matches).toEqual([official]);
+    expect(official.notes).toBe('Corrected from the signed scoresheet.');
+    expect(scheduled.status).toBe(ScheduledMatchStatus.Accepted);
+    expect(scheduled.resultMatchId).toBe(official.id);
+  });
+
+  test('restores the authoritative match and round lists when moving a save fails', () => {
+    const { tournament, manager, round, left, right } = openMatchManager();
+    const destinationRound = tournament.phases[0].rounds[1];
+    if (!destinationRound) throw new Error('Expected a second round');
+    const existing = new Match(left, right, tournament.scoringRules.answerTypes);
+    existing.notes = 'Before edit';
+    round.addMatch(existing);
+    manager.openModal(existing, round);
+    manager.setNotes('Candidate edit');
+    const before = JSON.stringify(tournament.toFileObject(false, true));
+    const addMatch = vi.spyOn(tournament, 'addMatch').mockImplementation(() => {
+      throw new Error('injected destination failure');
+    });
+
+    manager.round = destinationRound;
+    expect(manager.saveExistingMatch(existing)).toBe(false);
+    addMatch.mockRestore();
+
+    expect(JSON.stringify(tournament.toFileObject(false, true))).toBe(before);
+    expect(round.matches).toEqual([existing]);
+    expect(destinationRound.matches).toEqual([]);
+    expect(existing.notes).toBe('Before edit');
   });
 
   test('supports nonnumeric rounds, derived stage, and carryover selection', () => {

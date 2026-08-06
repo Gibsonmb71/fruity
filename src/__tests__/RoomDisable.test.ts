@@ -98,4 +98,19 @@ describe('room disable planning', () => {
     expect(future.roomId).toBe('room-102');
     expect(future.roomAssignmentSource).toBe('auto');
   });
+
+  test('a disable plan with an active game fails without disabling or moving anything', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101', '102']);
+    const active = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], 'room-101');
+    active.status = ScheduledMatchStatus.Playing;
+    tournament.scheduledMatches = [active];
+
+    const plan = planRoomDisable(tournament, 'room-101', 'redistribute');
+    const applied = applyRebalance(tournament, plan);
+
+    expect(applied.ok).toBe(false);
+    expect(tournament.rooms[0].enabled).toBe(true);
+    expect(active.roomId).toBe('room-101');
+  });
 });

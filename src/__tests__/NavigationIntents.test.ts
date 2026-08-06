@@ -6,8 +6,26 @@ import { ScheduledMatch } from '../renderer/DataModel/ScheduledMatch';
 import { buildQuickFindItems } from '../renderer/Services/QuickFind';
 import { resolveTournamentReadiness } from '../renderer/Services/TournamentReadiness';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
+import { createNavigationIntent } from '../renderer/Services/Navigation';
 
 describe('structured navigation intents', () => {
+  test('normalizes destination context and drops incompatible legacy combinations', () => {
+    expect(
+      createNavigationIntent('control:rooms', {
+        roomId: 'room-101',
+        focus: 'room',
+        scheduledMatchId: 'must-not-cross-destination-boundary',
+      }),
+    ).toEqual({ target: 'control:rooms', roomId: 'room-101', focus: 'room' });
+    expect(
+      createNavigationIntent('control:match-plan', {
+        scheduledMatchId: 'scheduled-1',
+        focus: 'scheduled-match',
+        roomId: 'must-not-leak',
+      }),
+    ).toEqual({ target: 'control:match-plan', scheduledMatchId: 'scheduled-1', focus: 'scheduled-match' });
+  });
+
   test('single game validation issues retain game, round, and review context', () => {
     const tournament = makeTestTournament();
     const round = tournament.phases[0].rounds[0];

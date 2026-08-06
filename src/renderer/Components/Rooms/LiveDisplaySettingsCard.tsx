@@ -17,6 +17,7 @@ import { ContentCopy, Launch, QrCode2 } from '@mui/icons-material';
 import QRCode from 'qrcode';
 import { TournamentContext } from '../../TournamentManager';
 import { TournamentServerContext } from '../../Services/TournamentServerService';
+import { YfHelpPopover } from '../../Utils/GeneralReactUtils';
 import type { ILiveDisplaySettings } from '../../../shared/LiveTypes';
 
 const durationOptions = [5, 10, 15, 20, 30] as const;
@@ -31,6 +32,7 @@ export default function LiveDisplaySettingsCard() {
   const address = service.status.addresses[0] ?? '';
   const audienceUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live`;
   const displayUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live/display`;
+  const pairingsUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live/pairings`;
   const settings = manager.tournament.liveDisplaySettings;
 
   const update = (change: (current: ILiveDisplaySettings) => void) => {
@@ -54,6 +56,7 @@ export default function LiveDisplaySettingsCard() {
         <div className="rooms-panel-header">
           <div>
             <h2 id="live-display-heading">Live audience and display</h2>
+            <YfHelpPopover topic="control.display" label="Help for public display and pairings" />
             <p>Publish a read-only tournament view for spectators, a hallway screen, or a Smart Board.</p>
           </div>
           <FormControlLabel
@@ -68,6 +71,24 @@ export default function LiveDisplaySettingsCard() {
               />
             }
             label="Live display enabled"
+          />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={settings.publicPairingsEnabled === true}
+                onChange={(event) =>
+                  update((current) => {
+                    current.publicPairingsEnabled = event.target.checked;
+                  })
+                }
+              />
+            }
+            label={
+              <span>
+                Public pairings enabled{' '}
+                <YfHelpPopover topic="control.public-pairings" label="Help for public pairings" />
+              </span>
+            }
           />
         </div>
         <div className="rooms-live-settings-body">
@@ -198,6 +219,13 @@ export default function LiveDisplaySettingsCard() {
             onCopy={() => copy(displayUrl)}
             onOpen={() => manager.launchWebPageInBrowserWindow(displayUrl)}
             onQr={() => setQrUrl(displayUrl)}
+          />
+          <UrlRow
+            label="Public pairings URL"
+            url={pairingsUrl}
+            onCopy={() => copy(pairingsUrl)}
+            onOpen={() => manager.launchWebPageInBrowserWindow(pairingsUrl)}
+            onQr={() => setQrUrl(pairingsUrl)}
           />
           {address === '' && (
             <div className="rooms-inline-message">Start the Tournament Server to generate reachable LAN URLs.</div>

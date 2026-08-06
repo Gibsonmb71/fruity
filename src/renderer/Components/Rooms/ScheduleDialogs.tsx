@@ -80,7 +80,7 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
     return nextIssues;
   };
 
-  const save = () => {
+  const save = async () => {
     const nextIssues = runValidation();
     if (hasBlockingIssue(nextIssues)) return;
     if (match) {
@@ -91,7 +91,6 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
         roomId: match.roomId,
         generated: match.generated,
         phaseCode: match.phaseCode,
-        status: match.status,
         roomAssignmentLocked: match.roomAssignmentLocked,
         roomAssignmentSource: match.roomAssignmentSource,
       };
@@ -110,7 +109,6 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
         match.rightTeamName = previous.rightTeamName;
         match.generated = previous.generated;
         match.phaseCode = previous.phaseCode;
-        match.status = previous.status;
         assignRoom(tournament, match.id, previous.roomId, {
           source: previous.roomAssignmentSource,
           lock: previous.roomAssignmentLocked,
@@ -121,7 +119,6 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
         setIssues([...nextIssues, ...assignmentIssues]);
         return;
       }
-      if (match.status === ScheduledMatchStatus.NeedsAttention) match.status = ScheduledMatchStatus.Scheduled;
     } else {
       const created = new ScheduledMatch(round, leftTeam, rightTeam);
       created.generated = !isAdHoc;
@@ -134,12 +131,26 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
         return;
       }
     }
-    manager.setRoomScoringMode('browser');
+    const modeResult = await manager.setRoomScoringMode('browser');
+    if (!modeResult.ok) {
+      setIssues([
+        {
+          severity: ScheduleIssueSeverity.Error,
+          message: modeResult.reason ?? 'Browser room scoring could not be enabled.',
+          scheduledMatchIds: match ? [match.id] : [],
+        },
+      ]);
+      return;
+    }
     manager.markTournamentDataChanged();
     onClose();
   };
 
-  const isResolved = match?.isAccepted() || match?.status === ScheduledMatchStatus.Cancelled;
+  const isResolved =
+    match?.isAccepted() ||
+    match?.status === ScheduledMatchStatus.Cancelled ||
+    match?.status === ScheduledMatchStatus.Playing ||
+    match?.status === ScheduledMatchStatus.Submitted;
   const blocking = hasBlockingIssue(issues);
 
   return (

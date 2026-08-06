@@ -17,6 +17,8 @@ import {
   ITournamentSnapshot,
   RoomBlockedReason,
   SessionStatus,
+  deviceIdHeader,
+  operatorNameHeader,
   roomTokenHeader,
   sessionTokenHeader,
 } from '../main/server/ServerTypes';
@@ -27,8 +29,21 @@ import { makeModaqQbjMatch, testTeamNames } from './TestFixtures';
 
 /** Two rooms with fixed ids and tokens, so tests can address them directly */
 const rooms: IRoomDescriptor[] = [
-  { id: 'room-101', name: 'Room 101', accessToken: 'token-for-101', enabled: true },
-  { id: 'room-102', name: 'Room 102', accessToken: 'token-for-102', enabled: true },
+  {
+    id: 'room-101',
+    name: 'Room 101',
+    description: 'English Hall',
+    accessToken: 'token-for-101',
+    pairingCode: '48271934',
+    enabled: true,
+  },
+  {
+    id: 'room-102',
+    name: 'Room 102',
+    accessToken: 'token-for-102',
+    pairingCode: '61038821',
+    enabled: true,
+  },
 ];
 
 /** Room 101 plays rounds 1 and 2; room 102 plays round 1 */
@@ -174,6 +189,70 @@ describe('room authorization', () => {
   });
 });
 
+describe('human room pairing', () => {
+  test('code-only and room-selected joins exchange only the matched room identity', async () => {
+    const listResponse = await fetch(`${baseUrl}/api/v1/join/rooms`);
+    const listBody = await listResponse.json();
+    expect(listBody.rooms).toEqual([
+      { id: 'room-101', name: 'Room 101', description: 'English Hall' },
+      { id: 'room-102', name: 'Room 102' },
+    ]);
+    expect(JSON.stringify(listBody)).not.toContain('token-for-101');
+    expect(JSON.stringify(listBody)).not.toContain('48271934');
+
+    const codeOnly = await fetch(`${baseUrl}/api/v1/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '4827 1934' }),
+    });
+    expect(codeOnly.status).toBe(200);
+    expect(await codeOnly.json()).toEqual({
+      roomId: 'room-101',
+      roomName: 'Room 101',
+      roomDescription: 'English Hall',
+      accessToken: 'token-for-101',
+    });
+
+    const selected = await fetch(`${baseUrl}/api/v1/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '6103-8821', roomId: 'room-102' }),
+    });
+    expect(selected.status).toBe(200);
+    expect((await selected.json()).roomId).toBe('room-102');
+  });
+
+  test('wrong, mismatched, and disabled joins use one generic failure and failures throttle', async () => {
+    const disabledRooms = rooms.map((candidate) => ({ ...candidate, enabled: candidate.id !== 'room-101' }));
+    server.setTournamentSnapshot(makeSnapshot({ rooms: disabledRooms }));
+    const disabled = await fetch(`${baseUrl}/api/v1/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '48271934' }),
+    });
+    expect(disabled.status).toBe(404);
+    expect((await disabled.json()).error).toBe('That room code could not be verified.');
+    server.setTournamentSnapshot(makeSnapshot());
+
+    const wrong = () =>
+      fetch(`${baseUrl}/api/v1/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: '0000 0000' }),
+      });
+    const mismatch = await fetch(`${baseUrl}/api/v1/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: '48271934', roomId: 'room-102' }),
+    });
+    expect(mismatch.status).toBe(404);
+    expect((await mismatch.json()).error).toBe('That room code could not be verified.');
+    await Promise.all(Array.from({ length: 4 }, () => wrong()));
+    const throttled = await wrong();
+    expect(throttled.status).toBe(429);
+  });
+});
+
 describe('what a room is told to play', () => {
   test('the current game comes with both rosters, so MODAQ can be set up', async () => {
     const { body } = await getAssignment('room-101', 'token-for-101');
@@ -314,6 +393,40 @@ describe('operational safeguards', () => {
     expect(body.blockedReason).toBe(RoomBlockedReason.AlreadyResolved);
   });
 
+  test('a submitted game is blocked while its final awaits review', async () => {
+    const assignments = makeAssignments();
+    assignments[0].status = ScheduledMatchStatus.Submitted;
+    server.setTournamentSnapshot(makeSnapshot({ assignments }));
+
+    const { res, body } = await startMatch('room-101', 'token-for-101', 'sched-r1-101');
+
+    expect(res.status).toBe(409);
+    expect(body.blockedReason).toBe(RoomBlockedReason.Submitted);
+    expect(server.getSessionSummaries()).toHaveLength(0);
+  });
+
+  test('a rejected non-quarantined game can start a fresh retry session', async () => {
+    const assignments = makeAssignments();
+    assignments[0].status = ScheduledMatchStatus.NeedsAttention;
+    server.setTournamentSnapshot(makeSnapshot({ assignments }));
+
+    const { res } = await startMatch('room-101', 'token-for-101', 'sched-r1-101');
+
+    expect(res.status).toBe(201);
+  });
+
+  test('a quarantined needs-attention game remains blocked', async () => {
+    const assignments = makeAssignments();
+    assignments[0].status = ScheduledMatchStatus.NeedsAttention;
+    assignments[0].quarantined = true;
+    server.setTournamentSnapshot(makeSnapshot({ assignments }));
+
+    const { res, body } = await startMatch('room-101', 'token-for-101', 'sched-r1-101');
+
+    expect(res.status).toBe(409);
+    expect(body.blockedReason).toBe(RoomBlockedReason.NeedsAttention);
+  });
+
   test('a disabled room cannot start a game', async () => {
     server.setTournamentSnapshot(makeSnapshot({ rooms: [{ ...rooms[0], enabled: false }, rooms[1]] }));
 
@@ -359,6 +472,98 @@ describe('operational safeguards', () => {
 
     expect(body.blockedReason).toBe(RoomBlockedReason.RulesUnusable);
     expect(body.gameFormatErrors[0]).toContain('Lightning');
+  });
+
+  test('Hold blocks new sessions but an existing game can resume, snapshot, and submit', async () => {
+    const started = await startMatch('room-101', 'token-for-101', 'sched-r1-101');
+    server.setTournamentSnapshot(
+      makeSnapshot({ holdNewRoomStarts: true, holdMessage: 'Waiting for a disputed result' }),
+    );
+
+    const blocked = await startMatch('room-102', 'token-for-102', 'sched-r1-102');
+    expect(blocked.res.status).toBe(409);
+    expect(blocked.body.blockedReason).toBe(RoomBlockedReason.Hold);
+
+    const resumed = await startMatch('room-101', 'token-for-101', 'sched-r1-101');
+    expect(resumed.res.status).toBe(200);
+    expect(resumed.body.sessionId).toBe(started.body.sessionId);
+
+    const snapshotResponse = await fetch(`${baseUrl}/api/v1/sessions/${started.body.sessionId}/snapshot`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: started.body.token },
+      body: JSON.stringify(assignedMatchQbj()),
+    });
+    expect(snapshotResponse.status).toBe(200);
+    const finalResponse = await fetch(`${baseUrl}/api/v1/sessions/${started.body.sessionId}/final`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: started.body.token },
+      body: JSON.stringify(assignedMatchQbj()),
+    });
+    expect(finalResponse.status).toBe(200);
+    expect(submissions).toHaveLength(1);
+  });
+});
+
+describe('room presence and help', () => {
+  test('presence is authenticated, device-scoped, and Ready is rejected without usable rules', async () => {
+    const ready = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [roomTokenHeader]: 'token-for-101',
+        [deviceIdHeader]: 'device-a',
+        [operatorNameHeader]: 'Jordan',
+      },
+      body: JSON.stringify({ ready: true }),
+    });
+    expect(ready.status).toBe(200);
+    expect((await ready.json()).presence.readyDeviceCount).toBe(1);
+
+    const second = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'device-b', operatorName: 'Alex', ready: false }),
+    });
+    expect((await second.json()).presence.devices).toHaveLength(2);
+
+    server.setTournamentSnapshot(makeSnapshot({ gameFormat: null }));
+    const refused = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'device-c', ready: true }),
+    });
+    expect(refused.status).toBe(409);
+  });
+
+  test('help requests carry room/operator/match context and never expose credentials', async () => {
+    const created = await fetch(`${baseUrl}/api/v1/rooms/room-101/help`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [roomTokenHeader]: 'token-for-101',
+        [deviceIdHeader]: 'device-a',
+        [operatorNameHeader]: 'Jordan',
+      },
+      body: JSON.stringify({ category: 'team-missing', message: 'At registration' }),
+    });
+    expect(created.status).toBe(200);
+    const { request } = await created.json();
+    expect(request).toMatchObject({ roomId: 'room-101', operatorName: 'Jordan', category: 'team-missing' });
+    expect(request.currentMatchup).toMatchObject({ leftTeam: testTeamNames[0], rightTeam: testTeamNames[1] });
+    expect(JSON.stringify(request)).not.toContain('token-for-101');
+
+    const duplicate = await fetch(`${baseUrl}/api/v1/rooms/room-101/help`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101', [deviceIdHeader]: 'device-a' },
+      body: JSON.stringify({ category: 'wrong-room' }),
+    });
+    expect((await duplicate.json()).request.id).toBe(request.id);
+
+    const cancelled = await fetch(`${baseUrl}/api/v1/rooms/room-101/help/${request.id}`, {
+      method: 'DELETE',
+      headers: { [roomTokenHeader]: 'token-for-101', [deviceIdHeader]: 'device-a' },
+    });
+    expect((await cancelled.json()).request.status).toBe('cancelled');
   });
 });
 

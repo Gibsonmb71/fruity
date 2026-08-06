@@ -3,15 +3,32 @@ import SessionStore, { SessionWriteError, SessionWriteResult } from './SessionSt
 import normalizeQbjMatch from '../../renderer/Services/QbjMatchNormalizer';
 import { authorizeRoom, buildAssignmentResponse, checkCanStart, findAssignmentForRoom } from './RoomDirectory';
 import {
+  findRoomForPairing,
+  genericPairingFailureMessage,
+  listEnabledRooms,
+  PairingAttemptLimiter,
+  toJoinResponse,
+} from './RoomPairing';
+import {
   ICreateSessionRequest,
+  ICreateHelpRequest,
+  IHelpMatchupContext,
+  IHelpRequest,
   ISessionCreatedResponse,
+  IRoomPresence,
+  IRoomPresenceUpdateRequest,
   ITournamentSnapshot,
+  SessionStatus,
   apiPrefix,
+  deviceIdHeader,
   maxRequestBodyBytes,
+  operatorNameHeader,
   roomTokenHeader,
+  RoomBlockedReason,
   sessionTokenHeader,
 } from './ServerTypes';
-import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
+import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
+import { selectRoomAssignments } from '../../shared/RoomAssignmentState';
 
 /** A parsed request body, or the reason it was refused */
 type BodyResult = { ok: true; body: unknown } | { ok: false; status: number; message: string };
@@ -34,13 +51,23 @@ export interface IRouterHost {
    */
   onSessionStarted?: (sessionId: string) => void;
   /** Called when a permanent room page polls, including while it is waiting between games. */
-  onRoomCheckIn?: (roomId: string) => void;
+  onRoomCheckIn?: (roomId: string, deviceId?: string, operatorName?: string, ready?: boolean) => void;
   /** Called after any session mutation so transient recovery state can be flushed. */
   onSessionChanged?: () => void;
   /** Serve the browser room application for non-API routes */
   serveStatic: (req: IncomingMessage, res: ServerResponse, pathname: string) => void;
   /** Return the deliberately reduced public projection, or null while Live Display is disabled */
   getPublicLiveSnapshot: () => IPublicLiveSnapshot | null;
+  /** Return the separate public released-pairings projection, or null when disabled. */
+  getPublicPairingsSnapshot?: () => IPublicPairingsSnapshot | null;
+  /** Aggregate presence of all room browsers. */
+  getRoomPresence?: () => IRoomPresence[];
+  /** Current in-memory help requests. */
+  getHelpRequests?: () => IHelpRequest[];
+  /** Create a help request after its room token has been checked. */
+  createHelpRequest?: (roomId: string, request: ICreateHelpRequest) => IHelpRequest | null;
+  /** Resolve/cancel a help request after its owner has been checked. */
+  updateHelpRequest?: (id: string, status: 'resolved' | 'cancelled', note?: string) => IHelpRequest | null;
 }
 
 /** Longest URL we'll even look at, to avoid pathological parsing */
@@ -57,6 +84,7 @@ export function readJsonBody(req: IncomingMessage): Promise<BodyResult> {
     const contentType = (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
     if (contentType !== 'application/json') {
       resolve({ ok: false, status: 415, message: 'Request body must be application/json.' });
+      req.on('error', () => undefined);
       req.resume(); // drain so the connection can be reused
       return;
     }
@@ -64,6 +92,7 @@ export function readJsonBody(req: IncomingMessage): Promise<BodyResult> {
     const declaredLength = Number(req.headers['content-length']);
     if (Number.isFinite(declaredLength) && declaredLength > maxRequestBodyBytes) {
       resolve({ ok: false, status: 413, message: 'Request body is too large.' });
+      req.on('error', () => undefined);
       req.destroy();
       return;
     }
@@ -90,7 +119,7 @@ export function readJsonBody(req: IncomingMessage): Promise<BodyResult> {
       const text = Buffer.concat(chunks).toString('utf8');
       try {
         resolve({ ok: true, body: JSON.parse(text) });
-      } catch (err: any) {
+      } catch {
         resolve({ ok: false, status: 400, message: 'Request body is not valid JSON.' });
       }
     });
@@ -163,6 +192,15 @@ function sendSessionWriteError(res: ServerResponse, result: { error: SessionWrit
     case SessionWriteError.AlreadyResolved:
       sendError(res, 409, 'This game has already been resolved by tournament control.');
       break;
+    case SessionWriteError.FinalAwaitingReview:
+      sendError(res, 409, 'A final is already awaiting tournament-control review.');
+      break;
+    case SessionWriteError.DifferentFinal:
+      sendError(res, 409, 'A different final is already awaiting tournament-control review.');
+      break;
+    case SessionWriteError.DuplicateFinal:
+      sendError(res, 409, 'Another room session already submitted a final for this scheduled game.');
+      break;
     case SessionWriteError.TeamMismatch:
       sendError(
         res,
@@ -200,7 +238,12 @@ function validateCreateRequest(
   if (typeof roundNumber !== 'number' || !Number.isFinite(roundNumber)) {
     return { ok: false, message: 'roundNumber must be a number.' };
   }
-  if (typeof leftTeam !== 'string' || typeof rightTeam !== 'string') {
+  if (
+    typeof leftTeam !== 'string' ||
+    typeof rightTeam !== 'string' ||
+    leftTeam.trim() === '' ||
+    rightTeam.trim() === ''
+  ) {
     return { ok: false, message: 'leftTeam and rightTeam must be strings.' };
   }
   if (!snapshot.rounds.some((r) => r.number === roundNumber)) {
@@ -216,6 +259,27 @@ function validateCreateRequest(
   }
   if (snapshot.gameFormat === null) {
     return { ok: false, message: "This tournament's scoring rules cannot be used for room scorekeeping." };
+  }
+  if (snapshot.roomScoringMode === 'traditional') {
+    return { ok: false, message: 'The generic session endpoint is disabled for traditional YellowFruit scoring.' };
+  }
+
+  // Current snapshots carry an explicit release. Older server snapshots did not, so retain their
+  // current-round compatibility fallback while refusing an explicitly unreleased round.
+  const releasedRound =
+    snapshot.releasedRoundNumber === undefined ? snapshot.currentRoundNumber : snapshot.releasedRoundNumber;
+  if (releasedRound === null || roundNumber > releasedRound) {
+    return { ok: false, message: 'That round has not been released by tournament control.' };
+  }
+
+  const assigned = snapshot.assignments.find(
+    (assignment) =>
+      assignment.roundNumber === roundNumber &&
+      assignment.status !== 'cancelled' &&
+      [assignment.leftTeam, assignment.rightTeam].sort().join('\u0000') === [leftTeam, rightTeam].sort().join('\u0000'),
+  );
+  if (assigned) {
+    return { ok: false, message: 'That game is assigned to a room; use the assigned-room link.' };
   }
 
   return { ok: true, request: { roundNumber, leftTeam, rightTeam } };
@@ -238,6 +302,8 @@ function looksLikeQbjMatch(body: unknown): body is object {
 export default class Router {
   private host: IRouterHost;
 
+  private pairingAttempts = new PairingAttemptLimiter();
+
   constructor(host: IRouterHost) {
     this.host = host;
   }
@@ -245,7 +311,7 @@ export default class Router {
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       await this.route(req, res);
-    } catch (err: any) {
+    } catch {
       if (!res.headersSent) sendError(res, 500, 'The tournament server hit an unexpected error.');
       else res.end();
     }
@@ -262,7 +328,7 @@ export default class Router {
     try {
       // The base is only needed to parse a relative URL; it's never used to make a request.
       pathname = decodeURIComponent(new URL(rawUrl, 'http://localhost').pathname);
-    } catch (err: any) {
+    } catch {
       sendError(res, 400, 'Malformed request URL.');
       return;
     }
@@ -294,6 +360,37 @@ export default class Router {
         }
         sendJson(res, 200, snapshot);
       });
+      return;
+    }
+
+    // GET /api/v1/public/pairings
+    if (segments.length === 2 && segments[0] === 'public' && segments[1] === 'pairings') {
+      this.requireMethod(req, res, 'GET', () => {
+        const snapshot = this.host.getPublicPairingsSnapshot?.() ?? null;
+        if (!snapshot) {
+          sendError(res, 404, 'Public pairings are disabled for this tournament.');
+          return;
+        }
+        sendJson(res, 200, snapshot);
+      });
+      return;
+    }
+
+    // GET /api/v1/join/rooms — names only, for the optional room picker on the join screen.
+    if (segments.length === 2 && segments[0] === 'join' && segments[1] === 'rooms') {
+      this.requireMethod(req, res, 'GET', () =>
+        sendJson(res, 200, { rooms: listEnabledRooms(this.host.getSnapshot()) }),
+      );
+      return;
+    }
+
+    // POST /api/v1/join — exchange an 8-digit human code for the selected room's long token.
+    if (segments.length === 1 && segments[0] === 'join') {
+      if (method !== 'POST') {
+        sendError(res, 405, `${method} is not allowed for this endpoint.`);
+        return;
+      }
+      await this.joinRoom(req, res);
       return;
     }
 
@@ -352,6 +449,34 @@ export default class Router {
           return;
         }
         await this.startAssignedMatch(req, res, roomId);
+        return;
+      }
+
+      // GET /api/v1/rooms/:roomId/presence
+      if (segments.length === 3 && segments[2] === 'presence') {
+        if (method !== 'GET' && method !== 'POST') {
+          sendError(res, 405, `${method} is not allowed for this endpoint.`);
+          return;
+        }
+        await this.roomPresence(req, res, roomId, method === 'POST');
+        return;
+      }
+
+      // GET/POST /api/v1/rooms/:roomId/help and DELETE /api/v1/rooms/:roomId/help/:helpId
+      if (segments.length === 3 && segments[2] === 'help') {
+        if (method === 'GET') {
+          this.roomHelp(req, res, roomId);
+          return;
+        }
+        if (method === 'POST') {
+          await this.createRoomHelp(req, res, roomId);
+          return;
+        }
+        sendError(res, 405, `${method} is not allowed for this endpoint.`);
+        return;
+      }
+      if (segments.length === 4 && segments[2] === 'help' && method === 'DELETE') {
+        this.cancelRoomHelp(req, res, roomId, segments[3]);
         return;
       }
     }
@@ -418,6 +543,183 @@ export default class Router {
     handler();
   }
 
+  private static pairingSource(req: IncomingMessage): string {
+    return req.socket.remoteAddress ?? 'unknown-client';
+  }
+
+  private async joinRoom(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const source = Router.pairingSource(req);
+    if (!this.pairingAttempts.isAllowed(source)) {
+      req.resume();
+      sendError(res, 429, genericPairingFailureMessage);
+      return;
+    }
+
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) {
+      this.pairingAttempts.recordFailure(source);
+      sendError(res, 400, genericPairingFailureMessage);
+      return;
+    }
+
+    const body = bodyResult.body as Record<string, unknown>;
+    const room =
+      typeof body === 'object' && body !== null
+        ? findRoomForPairing(this.host.getSnapshot(), body.code, body.roomId)
+        : null;
+    if (!room) {
+      this.pairingAttempts.recordFailure(source);
+      // Do not distinguish malformed, disabled, unknown, or mismatched codes.
+      sendError(res, 404, genericPairingFailureMessage);
+      return;
+    }
+
+    this.pairingAttempts.recordSuccess(source);
+    sendJson(res, 200, toJoinResponse(room));
+  }
+
+  private roomPresenceValue(roomId: string): IRoomPresence {
+    return (
+      this.host.getRoomPresence?.().find((presence) => presence.roomId === roomId) ?? {
+        roomId,
+        lastSeenAt: null,
+        msSinceLastSeen: null,
+        connected: false,
+        devices: [],
+        readyDeviceCount: 0,
+      }
+    );
+  }
+
+  private async roomPresence(
+    req: IncomingMessage,
+    res: ServerResponse,
+    roomId: string,
+    hasBody: boolean,
+  ): Promise<void> {
+    const room = this.authorizeRoomOrRefuse(req, res, roomId);
+    if (!room) {
+      req.resume();
+      return;
+    }
+
+    let update: IRoomPresenceUpdateRequest = {};
+    if (hasBody) {
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) {
+        sendError(res, bodyResult.status, bodyResult.message);
+        return;
+      }
+      if (typeof bodyResult.body !== 'object' || bodyResult.body === null) {
+        sendError(res, 400, 'Presence update must be a JSON object.');
+        return;
+      }
+      const body = bodyResult.body as Record<string, unknown>;
+      update = {
+        deviceId: typeof body.deviceId === 'string' ? body.deviceId : headerToken(req, deviceIdHeader),
+        operatorName: typeof body.operatorName === 'string' ? body.operatorName : headerToken(req, operatorNameHeader),
+        ready: typeof body.ready === 'boolean' ? body.ready : undefined,
+      };
+    }
+
+    const snapshot = this.host.getSnapshot();
+    if (update.ready === true && snapshot.gameFormat === null) {
+      sendError(res, 409, 'This browser cannot be marked ready until usable scoring rules are loaded.');
+      return;
+    }
+    const deviceId = update.deviceId ?? headerToken(req, deviceIdHeader) ?? 'unidentified';
+    this.host.onRoomCheckIn?.(
+      roomId,
+      deviceId,
+      update.operatorName ?? headerToken(req, operatorNameHeader),
+      snapshot.gameFormat === null ? false : update.ready,
+    );
+    sendJson(res, 200, { presence: this.roomPresenceValue(roomId) });
+  }
+
+  private roomHelp(req: IncomingMessage, res: ServerResponse, roomId: string): void {
+    const room = this.authorizeRoomOrRefuse(req, res, roomId);
+    if (!room) return;
+    const request = this.openHelpForDevice(roomId, headerToken(req, deviceIdHeader));
+    sendJson(res, 200, { request: request ?? null });
+  }
+
+  private openHelpForDevice(roomId: string, deviceId: string | undefined): IHelpRequest | undefined {
+    return this.host
+      .getHelpRequests?.()
+      .find(
+        (candidate) =>
+          candidate.roomId === roomId &&
+          candidate.status === 'open' &&
+          (candidate.deviceId ?? undefined) === (deviceId ?? undefined),
+      );
+  }
+
+  private async createRoomHelp(req: IncomingMessage, res: ServerResponse, roomId: string): Promise<void> {
+    const room = this.authorizeRoomOrRefuse(req, res, roomId);
+    if (!room) {
+      req.resume();
+      return;
+    }
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) {
+      sendError(res, bodyResult.status, bodyResult.message);
+      return;
+    }
+    if (typeof bodyResult.body !== 'object' || bodyResult.body === null) {
+      sendError(res, 400, 'Help request must be a JSON object.');
+      return;
+    }
+    const body = bodyResult.body as Record<string, unknown>;
+    const snapshot = this.host.getSnapshot();
+    const currentAssignment = selectRoomAssignments(
+      snapshot.assignments.filter((assignment) => assignment.roomId === roomId),
+      snapshot.releasedRoundNumber,
+      snapshot.currentRoundNumber,
+    ).current;
+    const currentMatchup: IHelpMatchupContext | undefined = currentAssignment
+      ? {
+          roundNumber: currentAssignment.roundNumber,
+          roundName: currentAssignment.roundName,
+          leftTeam: currentAssignment.leftTeam,
+          rightTeam: currentAssignment.rightTeam,
+        }
+      : undefined;
+    const request: ICreateHelpRequest = {
+      category: body.category as ICreateHelpRequest['category'],
+      message: typeof body.message === 'string' ? body.message : undefined,
+      deviceId: headerToken(req, deviceIdHeader) ?? (typeof body.deviceId === 'string' ? body.deviceId : undefined),
+      operatorName: typeof body.operatorName === 'string' ? body.operatorName : headerToken(req, operatorNameHeader),
+      currentMatchup,
+    };
+    const created = this.host.createHelpRequest?.(roomId, request);
+    if (!created) {
+      sendError(res, 400, 'This help request could not be created.');
+      return;
+    }
+    sendJson(res, 200, { request: created });
+  }
+
+  private cancelRoomHelp(req: IncomingMessage, res: ServerResponse, roomId: string, helpId: string): void {
+    const room = this.authorizeRoomOrRefuse(req, res, roomId);
+    if (!room) return;
+    const request = this.host.getHelpRequests?.().find((candidate) => candidate.id === helpId);
+    if (
+      !request ||
+      request.roomId !== roomId ||
+      (request.deviceId ?? undefined) !== (headerToken(req, deviceIdHeader) ?? undefined)
+    ) {
+      sendError(res, 404, 'No such help request.');
+      return;
+    }
+    const updated = this.host.updateHelpRequest?.(helpId, 'cancelled');
+    if (!updated) {
+      sendError(res, 409, 'That help request is no longer open.');
+      return;
+    }
+    sendJson(res, 200, { request: updated });
+  }
+
   /**
    * Identify the calling room, or send the refusal.
    *
@@ -444,17 +746,41 @@ export default class Router {
     const room = this.authorizeRoomOrRefuse(req, res, roomId);
     if (!room) return;
 
-    this.host.onRoomCheckIn?.(roomId);
-
     const snapshot = this.host.getSnapshot();
+    this.host.onRoomCheckIn?.(
+      roomId,
+      headerToken(req, deviceIdHeader),
+      headerToken(req, operatorNameHeader),
+      snapshot.gameFormat === null ? false : undefined,
+    );
     const response = buildAssignmentResponse(snapshot, room);
 
     const scheduledMatchId = response.current?.scheduledMatchId;
     const existing = scheduledMatchId ? this.host.sessions.findResumableForScheduledMatch(scheduledMatchId) : undefined;
+    const outcomeMatchIds = [response.current?.scheduledMatchId, response.previous?.scheduledMatchId].filter(
+      (id): id is string => id !== undefined,
+    );
+    const latestOutcome = outcomeMatchIds
+      .map((id) => this.host.sessions.findLatestForScheduledMatch(id))
+      .filter((session): session is NonNullable<typeof session> => session !== undefined)
+      .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt) || b.createdAt.localeCompare(a.createdAt))[0];
+    if (existing?.status === SessionStatus.Submitted) {
+      sendJson(res, 409, {
+        error: 'This game has a final awaiting tournament-control review.',
+        blockedReason: 'submitted',
+      });
+      return;
+    }
 
     sendJson(res, 200, {
       ...response,
       session: existing ? SessionStore.toResumeInfo(existing) : null,
+      presence: this.roomPresenceValue(roomId),
+      helpRequest: this.openHelpForDevice(roomId, headerToken(req, deviceIdHeader)) ?? null,
+      lastOutcome:
+        latestOutcome?.status === SessionStatus.Accepted || latestOutcome?.status === SessionStatus.Rejected
+          ? { status: latestOutcome.status, rejectionReason: latestOutcome.rejectionReason }
+          : undefined,
     });
   }
 
@@ -492,19 +818,26 @@ export default class Router {
       return;
     }
 
+    // A hold blocks new sessions, not a reload of a game already in progress. Find the existing
+    // session before applying the start gate so an active room can recover during a hold.
+    const existing = this.host.sessions.findResumableForScheduledMatch(scheduledMatchId);
     const block = checkCanStart(snapshot, room, assignment);
-    if (block) {
+    const canResumeDuringHold =
+      existing !== undefined &&
+      (existing.status === SessionStatus.Created || existing.status === SessionStatus.Playing) &&
+      block?.reason === RoomBlockedReason.Hold;
+    if (block && !canResumeDuringHold) {
       sendJson(res, 409, { error: block.message, blockedReason: block.reason });
       return;
     }
 
     // A reload, or a second tab, must not produce a second session for the same game.
-    const existing = this.host.sessions.findResumableForScheduledMatch(scheduledMatchId);
     const session =
       existing ??
       this.host.sessions.create(assignment.roundNumber, assignment.leftTeam, assignment.rightTeam, {
         roomId,
         scheduledMatchId,
+        tournamentKey: snapshot.recoveryKey,
       });
 
     const payload: ISessionCreatedResponse = {
@@ -552,7 +885,9 @@ export default class Router {
     }
 
     const { roundNumber, leftTeam, rightTeam } = validated.request;
-    const session = this.host.sessions.create(roundNumber, leftTeam, rightTeam);
+    const session = this.host.sessions.create(roundNumber, leftTeam, rightTeam, {
+      tournamentKey: snapshot.recoveryKey,
+    });
     const payload: ISessionCreatedResponse = {
       sessionId: session.id,
       token: session.token,

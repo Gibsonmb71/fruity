@@ -73,6 +73,8 @@ export interface IRoomChange {
 export type RoomDisableMode = 'leave-unassigned' | 'redistribute';
 
 export interface IRebalancePlan {
+  /** Fingerprint of the room/schedule state used to produce the preview. */
+  snapshotFingerprint: string;
   roundNumbers: number[];
   unchanged: IRoomChange[];
   moved: IRoomChange[];
@@ -267,6 +269,28 @@ const error = (message: string, scheduledMatchIds: string[] = []): IScheduleIssu
 
 const warning = (message: string, scheduledMatchIds: string[] = []): IScheduleIssue =>
   ({ severity: 'warning', message, scheduledMatchIds }) as IScheduleIssue;
+
+function roomStateFingerprint(tournament: Tournament, roundNumbers: number[], disabledRoomId?: string): string {
+  const selected = new Set(roundNumbers);
+  return JSON.stringify({
+    disabledRoomId,
+    rooms: tournament.rooms
+      .map((room) => [room.id, room.enabled, room.sortOrder, room.availableRoundNumbers ?? []])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    matches: tournament.scheduledMatches
+      .filter((match) => selected.has(match.roundNumber))
+      .map((match) => [
+        match.id,
+        match.roundNumber,
+        match.roomId,
+        match.status,
+        match.quarantined,
+        match.roomAssignmentLocked,
+        match.roomAssignmentSource,
+      ])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  });
+}
 
 function orderedRooms(rooms: TournamentRoom[]): TournamentRoom[] {
   return rooms.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
@@ -499,6 +523,7 @@ function planRebalanceInternal(
 ): IRebalancePlan {
   const numbers = matchNumbersFor(tournament, roundNumbers);
   const plan: IRebalancePlan = {
+    snapshotFingerprint: roomStateFingerprint(tournament, numbers, disabledRoomId),
     roundNumbers: numbers,
     unchanged: [],
     moved: [],
@@ -561,18 +586,116 @@ export function planRebalance(tournament: Tournament, roundNumbers: number[]): I
   return planRebalanceInternal(tournament, roundNumbers);
 }
 
-/** Apply a previously reviewed plan. This is the only bulk-mutating entry point. */
-export function applyRebalance(tournament: Tournament, plan: IRebalancePlan): void {
-  if (plan.issues.some((issue) => issue.severity === 'error')) return;
+export interface IRebalanceApplyResult {
+  ok: boolean;
+  issues: IScheduleIssue[];
+}
+
+/** A preview with any unresolved assignment issue cannot be partially committed. */
+export function rebalancePlanHasBlockingIssues(plan: IRebalancePlan): boolean {
+  if (plan.issues.some((issue) => issue.severity === 'error')) return true;
+  // Leaving affected future games unassigned is the explicitly selected room-disable policy. Every
+  // other bulk operation is all-or-nothing, including an auto-assignment that can only fill some
+  // of its requested games.
+  if (plan.disableMode === 'leave-unassigned') return false;
+  return plan.issues.length > 0 || plan.unableToAssign.length > 0;
+}
+
+/** Apply a previously reviewed plan atomically. This is the only bulk-mutating entry point. */
+export function applyRebalance(tournament: Tournament, plan: IRebalancePlan): IRebalanceApplyResult {
+  const issues: IScheduleIssue[] = [];
+  if (rebalancePlanHasBlockingIssues(plan)) {
+    return {
+      ok: false,
+      issues:
+        plan.issues.length > 0
+          ? plan.issues.slice()
+          : [error('The room plan could not assign every requested game; nothing was changed.')],
+    };
+  }
+  if (plan.snapshotFingerprint !== roomStateFingerprint(tournament, plan.roundNumbers, plan.disabledRoomId)) {
+    return {
+      ok: false,
+      issues: [error('The room plan is stale because assignments changed while it was being reviewed.')],
+    };
+  }
+
+  const changes = new Map<string, IRoomChange>();
+  for (const change of plan.changes) {
+    if (changes.has(change.matchId)) {
+      issues.push(error('The room plan contains the same scheduled match more than once.', [change.matchId]));
+      continue;
+    }
+    changes.set(change.matchId, change);
+    const match = tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId);
+    if (!match) {
+      issues.push(error('A scheduled match in the room plan no longer exists.', [change.matchId]));
+      continue;
+    }
+    if (match.roomId !== change.fromRoomId) {
+      issues.push(error(`The room assignment for ${match.describe()} changed while the plan was open.`, [match.id]));
+    }
+    if (!plan.roundNumbers.includes(match.roundNumber)) {
+      issues.push(error(`${match.describe()} is outside the rounds covered by this room plan.`, [match.id]));
+    }
+    if (
+      match.roomAssignmentLocked ||
+      isLifecycleFrozen(match) ||
+      (match.status === ScheduledMatchStatus.Cancelled && change.toRoomId !== undefined)
+    ) {
+      issues.push(error(`${match.describe()} is no longer movable.`, [match.id]));
+      continue;
+    }
+    if (change.toRoomId) {
+      const room = tournament.rooms.find((candidate) => candidate.id === change.toRoomId);
+      const eligibility = resolveEligibleRooms(match, tournament);
+      if (!room || !room.enabled || !eligibility.eligibleRooms.some((candidate) => candidate.id === room.id)) {
+        issues.push(error(`The target room is no longer eligible for ${match.describe()}.`, [match.id]));
+      }
+    }
+  }
+
+  // Validate final occupancy, not each move in isolation. This permits a multi-way cycle while
+  // guaranteeing that the committed result has no duplicate room slot.
+  const finalSlots = new Map<string, string>();
+  for (const match of tournament.scheduledMatches) {
+    if (match.status === ScheduledMatchStatus.Cancelled) continue;
+    const target = changes.has(match.id) ? changes.get(match.id)?.toRoomId : match.roomId;
+    if (!target) continue;
+    const slot = `${match.roundNumber}\u0000${target}`;
+    const prior = finalSlots.get(slot);
+    if (prior && prior !== match.id)
+      issues.push(error('The final room plan would book two games into one room.', [prior, match.id]));
+    finalSlots.set(slot, match.id);
+  }
+  if (plan.disabledRoomId) {
+    const room = tournament.rooms.find((candidate) => candidate.id === plan.disabledRoomId);
+    if (!room) issues.push(error('The room being disabled no longer exists.'));
+    for (const match of tournament.scheduledMatches) {
+      if (
+        match.roomId === plan.disabledRoomId &&
+        !changes.has(match.id) &&
+        match.status !== ScheduledMatchStatus.Cancelled &&
+        match.status !== ScheduledMatchStatus.Accepted
+      ) {
+        issues.push(error(`${match.describe()} would remain assigned to the room being disabled.`, [match.id]));
+      }
+    }
+  }
+  if (issues.length > 0) return { ok: false, issues };
+
   if (plan.disabledRoomId) {
     const room = tournament.rooms.find((candidate) => candidate.id === plan.disabledRoomId);
     if (room) room.enabled = false;
   }
   for (const change of plan.changes) {
     const match = tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId);
-    if (!match || match.roomAssignmentLocked || isLifecycleFrozen(match)) continue;
-    assignRoom(tournament, match.id, change.toRoomId, { source: 'auto', unlock: true });
+    if (!match) continue;
+    match.roomId = change.toRoomId;
+    match.roomAssignmentSource = change.toRoomId ? 'auto' : undefined;
+    match.roomAssignmentLocked = undefined;
   }
+  return { ok: true, issues: [] };
 }
 
 /**
@@ -583,6 +706,7 @@ export function applyRebalance(tournament: Tournament, plan: IRebalancePlan): vo
 export function planAutoAssignUnassigned(tournament: Tournament, roundNumbers: number[] = []): AutoAssignPlan {
   const numbers = matchNumbersFor(tournament, roundNumbers);
   const plan: AutoAssignPlan = {
+    snapshotFingerprint: roomStateFingerprint(tournament, numbers),
     roundNumbers: numbers,
     unchanged: [],
     moved: [],
@@ -653,11 +777,7 @@ export function planRoomDisable(tournament: Tournament, roomId: string, mode: Ro
     plan.newlyAssigned = [];
     plan.unableToAssign = [];
     const affected = tournament.scheduledMatches.filter(
-      (match) =>
-        match.roomId === roomId &&
-        !match.roomAssignmentLocked &&
-        !isLifecycleFrozen(match) &&
-        match.status !== ScheduledMatchStatus.Cancelled,
+      (match) => match.roomId === roomId && !match.roomAssignmentLocked && !isLifecycleFrozen(match),
     );
     for (const match of affected) {
       const change = { matchId: match.id, fromRoomId: roomId, reason: 'room disabled; left unassigned' };
@@ -773,6 +893,20 @@ export function applySwapPlan(tournament: Tournament, plan: ISwapPlan): ISchedul
   if (plan.changes.length === 0) return [];
 
   const first = plan.changes[0];
+  const changedMatches = plan.changes.map((change) =>
+    tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId),
+  );
+  if (changedMatches.some((match) => !match)) {
+    return [
+      error(
+        'A scheduled match in this move no longer exists.',
+        plan.changes.map((change) => change.matchId),
+      ),
+    ];
+  }
+  if (plan.changes.some((change, index) => changedMatches[index]?.roomId !== change.fromRoomId)) {
+    return [error('The Match Plan changed while this move was being reviewed. Please try again.', [first.matchId])];
+  }
   if (!first.toRoomId) {
     return assignRoom(tournament, first.matchId, undefined);
   }
@@ -785,18 +919,6 @@ export function applySwapPlan(tournament: Tournament, plan: ISwapPlan): ISchedul
   const actual = new Map(currentPlan.changes.map((change) => [change.matchId, change.toRoomId]));
   if (expected.size !== actual.size || [...expected].some(([matchId, roomId]) => actual.get(matchId) !== roomId)) {
     return [error('The Match Plan changed while this move was being reviewed. Please try again.', [first.matchId])];
-  }
-
-  const changedMatches = plan.changes.map((change) =>
-    tournament.scheduledMatches.find((candidate) => candidate.id === change.matchId),
-  );
-  if (changedMatches.some((match) => !match)) {
-    return [
-      error(
-        'A scheduled match in this move no longer exists.',
-        plan.changes.map((change) => change.matchId),
-      ),
-    ];
   }
 
   plan.changes.forEach((change) => {

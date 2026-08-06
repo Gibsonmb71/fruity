@@ -2,6 +2,7 @@ import path from 'path';
 import { app, BrowserWindow, IpcMainEvent, dialog, IpcMainInvokeEvent, shell } from 'electron';
 import fs from 'fs';
 import { IpcBidirectional, IpcMainToRend } from '../IPCChannels';
+import { writeFileAtomically } from './AtomicFile';
 import {
   FileSwitchActions,
   IMatchImportFileRequest,
@@ -16,6 +17,13 @@ const backupFileDir = path.resolve(app.getPath('userData'), 'yfBackup');
 const backupFilePathProd = path.resolve(backupFileDir, 'prod_backup.yftbak');
 const backupFilePathDev = path.resolve(backupFileDir, 'dev_backup.yftbak');
 const curBackupFilePath = process.env.NODE_ENV === 'development' ? backupFilePathDev : backupFilePathProd;
+let backupWritePromise: Promise<void> = Promise.resolve();
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Unknown filesystem error.';
+}
 
 /** The path of the file being edited in the renderer process */
 let curYftFilePath: string = '';
@@ -27,6 +35,13 @@ function setCurYftFilePath(newPath: string) {
   curYftFilePath = newPath;
 }
 
+/** Serialize autosave writes so an older interval callback cannot finish after a newer backup. */
+function queueBackupWrite(contents: string): Promise<void> {
+  const next = backupWritePromise.catch(() => undefined).then(() => writeFileAtomically(curBackupFilePath, contents));
+  backupWritePromise = next;
+  return next;
+}
+
 export function handleSetYftFilePath(event: IpcMainEvent, filePath: string) {
   setCurYftFilePath(filePath);
 }
@@ -34,15 +49,15 @@ export function handleSetYftFilePath(event: IpcMainEvent, filePath: string) {
 /** Create necessary directories and files if they don't yet exist  */
 export function createDirectories() {
   if (!fs.existsSync(inAppStatReportDirectory)) {
-    fs.mkdirSync(inAppStatReportDirectory);
+    fs.mkdirSync(inAppStatReportDirectory, { recursive: true });
   }
   if (!fs.existsSync(backupFileDir)) {
-    fs.mkdirSync(backupFileDir);
+    fs.mkdirSync(backupFileDir, { recursive: true });
   }
   if (!fs.existsSync(curBackupFilePath)) {
-    fs.writeFile(curBackupFilePath, '', { encoding: 'utf8' }, (err) => {
+    queueBackupWrite('').catch((error: unknown) => {
       // eslint-disable-next-line no-console
-      if (err) console.log(err);
+      console.error(`Unable to create the autosave file: ${errorMessage(error)}`);
     });
   }
 }
@@ -85,9 +100,16 @@ function doFileSwitchAction(action: FileSwitchActions, window: BrowserWindow) {
 }
 
 function closeApplication() {
-  clearBackupFile();
-  appCanQuit = true;
-  app.quit();
+  return clearBackupFile()
+    .catch((error: unknown) => {
+      // Keep a previous complete backup if clearing it fails; this is safer than truncating it.
+      // eslint-disable-next-line no-console
+      console.error(`Autosave backup could not be cleared: ${errorMessage(error)}`);
+    })
+    .finally(() => {
+      appCanQuit = true;
+      app.quit();
+    });
 }
 
 function newYftFile(mainWindow: BrowserWindow) {
@@ -206,16 +228,17 @@ export function handleSaveFile(
   const filePath = filePathFromRenderer || promptForYftFile(window);
   if (!filePath) return;
 
-  fs.writeFile(filePath, fileContents, { encoding: 'utf8' }, (err) => {
-    if (err) {
-      dialog.showMessageBoxSync(window, { message: `Error saving file: \n\n ${err.message}` });
-      return;
-    }
-    window.webContents.send(IpcMainToRend.tournamentSavedSuccessfully, filePath);
-    if (subsequentAction !== undefined) {
-      doFileSwitchAction(subsequentAction, window);
-    }
-  });
+  writeFileAtomically(filePath, fileContents)
+    .then(() => {
+      // The renderer adopts the path and clears its dirty flag only after this message. A failed
+      // write never reaches this branch, including a failed Save As.
+      window.webContents.send(IpcMainToRend.tournamentSavedSuccessfully, filePath);
+      if (subsequentAction !== undefined) return doFileSwitchAction(subsequentAction, window);
+      return undefined;
+    })
+    .catch((error: unknown) => {
+      dialog.showMessageBoxSync(window, { message: `Error saving file: \n\n ${errorMessage(error)}` });
+    });
 }
 
 export function handleSetWindowTitle(event: IpcMainEvent, title: string) {
@@ -294,14 +317,14 @@ export function promptForStatReportLocation(window: BrowserWindow, fileNameFromR
 
   if (!fileName) return;
 
-  let fileStart = fileName.replace(/.html/i, '');
+  let fileStart = fileName.replace(/\.html$/i, '');
   fileStart = fileStart.replace(/_(standings|individuals|games|teamdetail|playerdetail|rounds)/i, '');
 
   window.webContents.send(IpcMainToRend.RequestStatReport, fileStart);
 }
 
 function stripYftExtension(filename: string) {
-  return filename.replace('.yft', '');
+  return filename.replace(/\.yft$/i, '');
 }
 
 export function generateBackup(window: BrowserWindow | null) {
@@ -313,14 +336,16 @@ export function handleSaveBackup(event: IpcMainEvent, fileContents: string) {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (!window) return;
 
-  fs.writeFile(curBackupFilePath, fileContents, { encoding: 'utf8' }, (err) => {
+  queueBackupWrite(fileContents).catch((error: unknown) => {
+    // Autosave is best effort, but its failure must be diagnosable without interrupting a live
+    // tournament every two minutes.
     // eslint-disable-next-line no-console
-    if (err) console.log(err);
+    console.error(`Autosave backup failed: ${errorMessage(error)}`);
   });
 }
 
 function clearBackupFile() {
-  fs.writeFileSync(curBackupFilePath, '');
+  return queueBackupWrite('');
 }
 
 function getBackupContents() {
@@ -328,8 +353,14 @@ function getBackupContents() {
 }
 
 export function handleLoadBackup(event: IpcMainEvent) {
-  const contents = getBackupContents();
-  event.reply(IpcBidirectional.LoadBackup, contents);
+  try {
+    event.reply(IpcBidirectional.LoadBackup, getBackupContents());
+  } catch (error: unknown) {
+    // A missing or unreadable transient backup must never block application startup.
+    // eslint-disable-next-line no-console
+    console.error(`Recovery backup could not be read: ${errorMessage(error)}`);
+    event.reply(IpcBidirectional.LoadBackup, '');
+  }
 }
 
 /** Tell renderer to export QBJ to the given path */

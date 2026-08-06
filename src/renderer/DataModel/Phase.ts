@@ -435,7 +435,8 @@ export class Phase implements IQbjPhase, IYftDataModelObject {
     const phasesFound: Phase[] = [];
     for (const rd of this.rounds) {
       for (const m of rd.matches) {
-        for (const coPh of m.carryoverPhases) {
+        const carryoverPhases = Array.isArray(m.carryoverPhases) ? m.carryoverPhases : [];
+        for (const coPh of carryoverPhases) {
           if (phasesFound.indexOf(coPh) === -1) phasesFound.push(coPh);
         }
       }

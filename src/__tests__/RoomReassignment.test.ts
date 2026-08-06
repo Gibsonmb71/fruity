@@ -11,6 +11,7 @@ import {
   planRebalance,
   planRoomDrop,
   planSwap,
+  rebalancePlanHasBlockingIssues,
   restoreRoomAssignmentSnapshot,
 } from '../renderer/Services/RoomAllocationService';
 
@@ -219,5 +220,69 @@ describe('room reassignment', () => {
     expect(first.roomId).toBe('room-101');
     expect(second.roomId).toBe('room-101');
     expect(second.roomAssignmentSource).toBe('manual');
+  });
+
+  test('applies a multi-way room cycle from final occupancy, not sequential occupancy', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101', '102', '103']);
+    const first = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], 'room-101');
+    const second = makeMatch(tournament, 1, testTeamNames[2], testTeamNames[3], 'room-102');
+    const third = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[2], 'room-103');
+    tournament.scheduledMatches = [first, second, third];
+
+    const reviewed = planRebalance(tournament, [1]);
+    const cyclePlan = {
+      ...reviewed,
+      issues: [],
+      changes: [
+        { matchId: first.id, fromRoomId: 'room-101', toRoomId: 'room-102' },
+        { matchId: second.id, fromRoomId: 'room-102', toRoomId: 'room-103' },
+        { matchId: third.id, fromRoomId: 'room-103', toRoomId: 'room-101' },
+      ],
+    };
+
+    expect(applyRebalance(tournament, cyclePlan).ok).toBe(true);
+    expect([first.roomId, second.roomId, third.roomId]).toEqual(['room-102', 'room-103', 'room-101']);
+  });
+
+  test('rejects a stale reviewed rebalance without changing assignments', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101', '102']);
+    const first = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], 'room-101');
+    const second = makeMatch(tournament, 1, testTeamNames[2], testTeamNames[3]);
+    tournament.scheduledMatches = [first, second];
+
+    const plan = planRebalance(tournament, [1]);
+    first.roomId = 'room-102';
+    const before = tournament.scheduledMatches.map((match) => match.roomId);
+
+    const result = applyRebalance(tournament, plan);
+
+    expect(result.ok).toBe(false);
+    expect(result.issues[0].message).toContain('stale');
+    expect(tournament.scheduledMatches.map((match) => match.roomId)).toEqual(before);
+  });
+
+  test('rejects a partially invalid bulk plan without applying its valid changes', () => {
+    const tournament = makeTestTournament();
+    tournament.rooms = makeRooms(['101', '102', '103']);
+    const first = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1]);
+    const second = makeMatch(tournament, 1, testTeamNames[2], testTeamNames[3]);
+    tournament.scheduledMatches = [first, second];
+
+    const reviewed = planRebalance(tournament, [1]);
+    expect(reviewed.changes).toHaveLength(2);
+    const invalid = {
+      ...reviewed,
+      changes: [reviewed.changes[0], { ...reviewed.changes[1], toRoomId: 'missing-room' }],
+    };
+    const before = tournament.scheduledMatches.map((match) => match.roomId);
+
+    expect(rebalancePlanHasBlockingIssues(invalid)).toBe(false);
+    const applied = applyRebalance(tournament, invalid);
+
+    expect(applied.ok).toBe(false);
+    expect(applied.issues[0].message).toContain('target room');
+    expect(tournament.scheduledMatches.map((match) => match.roomId)).toEqual(before);
   });
 });

@@ -25,7 +25,7 @@ export default function RoomQr({ room, serverAddress }: { room: TournamentRoom; 
         return nextUrl;
       })
       .catch(() => {
-        if (!cancelled) setError('Could not generate the QR code. Copy the room URL instead.');
+        if (!cancelled) setError('Could not generate the QR code. Try again or use the pairing code.');
       });
 
     return () => {

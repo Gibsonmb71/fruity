@@ -5,6 +5,12 @@ import { Round } from '../DataModel/Round';
 import { AggregateStandings, PhaseStandings } from '../DataModel/StatSummaries';
 import Tournament from '../DataModel/Tournament';
 
+const reportDiagnostics = new WeakMap<Tournament, string[]>();
+
+export function getReportDiagnostics(tournament: Tournament): string[] {
+  return reportDiagnostics.get(tournament) ?? [];
+}
+
 /** Ephemeral report selection; never serialized into .yft, QBJ, or SQBS. */
 export interface IReportScope {
   phaseCodes: string[];
@@ -18,18 +24,68 @@ export function isEntireReportScope(tournament: Tournament, scope: IReportScope 
   return selected.size === tournament.phases.length && tournament.phases.every((phase) => selected.has(phase.code));
 }
 
-function cloneRound(round: Round): Round {
-  const copy = Object.create(Object.getPrototypeOf(round)) as Round;
-  Object.assign(copy, round);
-  copy.matches = round.matches.slice();
+function cloneMatch(match: Match, tournament: Tournament): Match {
+  const copy = match.makeCopy();
+  const leftTeamName = match.leftTeam.team?.name;
+  const rightTeamName = match.rightTeam.team?.name;
+  if (leftTeamName) copy.leftTeam.team = tournament.findTeamByName(leftTeamName);
+  if (rightTeamName) copy.rightTeam.team = tournament.findTeamByName(rightTeamName);
   return copy;
 }
 
-function clonePhase(phase: Phase): Phase {
+function carryoverMatchesForReport(tournament: Tournament, phase: Phase, diagnostics: string[]): Match[] {
+  const malformedMatches = tournament.phases
+    .flatMap((candidate) => candidate.getAllMatches())
+    .filter((match) => !Array.isArray(match.carryoverPhases));
+  malformedMatches.forEach((match) => {
+    diagnostics.push(`Skipped carryover metadata for ${match.id}: the carryover list was malformed.`);
+  });
+
+  let matches: Match[];
+  try {
+    matches = tournament.getCarryoverMatches(phase);
+  } catch {
+    diagnostics.push(`Skipped carryover games for ${phase.name}: carryover metadata was malformed.`);
+    return [];
+  }
+
+  return matches.filter((match) => {
+    if (tournament.getRoundOfMatch(match)) return true;
+    diagnostics.push(`Skipped carryover game ${match.id}: it could not be resolved to a source round.`);
+    return false;
+  });
+}
+
+function cloneRound(round: Round, tournament: Tournament): Round {
+  const copy = Object.create(Object.getPrototypeOf(round)) as Round;
+  Object.assign(copy, round);
+  // Report generation is allowed to compile/rank its projection. Match copies keep validation and
+  // score calculations from ever writing into the authoritative Match objects.
+  copy.matches = round.matches.map((match) => cloneMatch(match, tournament));
+  copy.roomIds = round.roomIds?.slice();
+  return copy;
+}
+
+function clonePhase(phase: Phase, tournament: Tournament): Phase {
   const copy = Object.create(Object.getPrototypeOf(phase)) as Phase;
   Object.assign(copy, phase);
-  copy.rounds = phase.rounds.map((round) => cloneRound(round));
-  copy.pools = phase.pools.slice();
+  copy.rounds = phase.rounds.map((round) => cloneRound(round, tournament));
+  copy.pools = phase.pools.map((pool) => {
+    const poolCopy = Object.create(Object.getPrototypeOf(pool));
+    Object.assign(poolCopy, pool);
+    poolCopy.seeds = pool.seeds.slice();
+    poolCopy.preferredRoomIds = pool.preferredRoomIds?.slice();
+    poolCopy.autoAdvanceRules = pool.autoAdvanceRules.map((rule) => ({
+      ...rule,
+      ranksThatAdvance: rule.ranksThatAdvance.slice(),
+    }));
+    poolCopy.poolTeams = pool.poolTeams.map((poolTeam) => {
+      const poolTeamCopy = Object.create(Object.getPrototypeOf(poolTeam));
+      Object.assign(poolTeamCopy, poolTeam);
+      return poolTeamCopy;
+    });
+    return poolCopy;
+  });
   return copy;
 }
 
@@ -38,10 +94,11 @@ function clonePhase(phase: Phase): Phase {
  * modified; the existing HTML generator continues to own the output format and links.
  */
 export function projectTournamentForReport(tournament: Tournament, scope: IReportScope): Tournament {
+  const diagnostics: string[] = [];
   const selectedCodes =
     scope.phaseCodes.length > 0 ? new Set(scope.phaseCodes) : new Set(tournament.phases.map((p) => p.code));
   const selected = tournament.phases.filter((phase) => selectedCodes.has(phase.code));
-  const phases = selected.map((phase) => clonePhase(phase));
+  const phases = selected.map((phase) => clonePhase(phase, tournament));
   const phasePairs = selected.map((phase, index) => ({ original: phase, projected: phases[index] }));
   const projection = Object.create(Object.getPrototypeOf(tournament)) as Tournament;
   Object.assign(projection, tournament);
@@ -55,10 +112,11 @@ export function projectTournamentForReport(tournament: Tournament, scope: IRepor
   projection.finalRankingsReady =
     tournament.finalRankingsReady && selectedLastFullPhase === tournament.getLastFullPhase();
   const phaseStats: PhaseStandings[] = [];
+  const sourcePhaseCopies = new Map<Phase, Phase>();
   phasePairs.forEach(({ original, projected }) => {
     const carryoverMatches =
       scope.includeCarryover && original.phaseType === PhaseTypes.Playoff
-        ? tournament.getCarryoverMatches(original)
+        ? carryoverMatchesForReport(tournament, original, diagnostics).map((match) => cloneMatch(match, tournament))
         : [];
     if (projected.isFullPhase()) {
       const stats = new PhaseStandings(projected, carryoverMatches, tournament.scoringRules);
@@ -71,11 +129,23 @@ export function projectTournamentForReport(tournament: Tournament, scope: IRepor
     // cumulative projection when that source phase is outside the selected report scope.
     if (scope.includeCarryover && original.phaseType === PhaseTypes.Playoff) {
       carryoverMatches.forEach((match) => {
-        const sourcePhase = tournament.findPhaseByRound(tournament.getRoundOfMatch(match)!);
+        const originalMatch = carryoverMatchesForReport(tournament, original, diagnostics).find(
+          (candidate) => candidate.id === match.id,
+        );
+        const sourceRound = originalMatch ? tournament.getRoundOfMatch(originalMatch) : undefined;
+        const sourcePhase = sourceRound ? tournament.findPhaseByRound(sourceRound) : undefined;
         if (sourcePhase && !selectedCodes.has(sourcePhase.code)) {
-          const round = tournament.getRoundOfMatch(match);
-          if (round) {
-            additionalCarryoverMatches.push({ match, round, phase: sourcePhase });
+          const projectedSourcePhase =
+            sourcePhaseCopies.get(sourcePhase) ??
+            (() => {
+              const copy = clonePhase(sourcePhase, tournament);
+              sourcePhaseCopies.set(sourcePhase, copy);
+              return copy;
+            })();
+          const round = projectedSourcePhase.rounds.find((candidate) => candidate.number === sourceRound?.number);
+          const projectedMatch = round?.matches.find((candidate) => candidate.id === match.id);
+          if (round && projectedMatch) {
+            additionalCarryoverMatches.push({ match: projectedMatch, round, phase: projectedSourcePhase });
           }
         }
       });
@@ -92,5 +162,6 @@ export function projectTournamentForReport(tournament: Tournament, scope: IRepor
   else if (projection.scoringRules.useBonuses) projection.cumulativeStats.sortTeamsByPPB();
   else projection.cumulativeStats.sortTeamsByPptuh();
   projection.htmlGenerator = new HtmlReportGenerator(projection);
+  reportDiagnostics.set(projection, diagnostics);
   return projection;
 }

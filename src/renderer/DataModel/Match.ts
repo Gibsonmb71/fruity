@@ -181,7 +181,12 @@ export class Match implements IQbjMatch, IYftDataModelObject {
   copyFromMatch(source: Match) {
     this.leftTeam = source.leftTeam.makeCopy();
     this.rightTeam = source.rightTeam.makeCopy();
-    this.carryoverPhases = source.carryoverPhases.slice(); // don't need deep copy here
+    // A damaged legacy object can have omitted or non-array carryover metadata. Copies are used
+    // by report projections and the editor, so preserve only usable phase references rather than
+    // allowing malformed optional data to abort the whole operation.
+    this.carryoverPhases = Array.isArray(source.carryoverPhases)
+      ? source.carryoverPhases.filter((phase): phase is Phase => !!phase && typeof phase === 'object')
+      : [];
     this.idNumber = source.idNumber;
     this.tossupsRead = source.tossupsRead;
     this.overtimeTossupsRead = source.overtimeTossupsRead;
@@ -192,7 +197,7 @@ export class Match implements IQbjMatch, IYftDataModelObject {
     this.scorekeeper = source.scorekeeper;
     this.serial = source.serial;
     this.notes = source.notes;
-    this.matchQuestions = this.matchQuestions.map((mq) => mq.makeCopy());
+    this.matchQuestions = source.matchQuestions.map((mq) => mq.makeCopy());
     this.statsValidity = source.statsValidity;
     this.importedFile = source.importedFile;
 
@@ -202,9 +207,12 @@ export class Match implements IQbjMatch, IYftDataModelObject {
   }
 
   toFileObject(qbjOnly = false, isTopLevel = false, isReferenced = false): IQbjMatch {
+    const carryoverPhases = Array.isArray(this.carryoverPhases)
+      ? this.carryoverPhases.filter((phase): phase is Phase => !!phase && typeof phase === 'object')
+      : [];
     const qbjObject: IQbjMatch = {
       matchTeams: this.matchTeams.map((mt) => mt.toFileObject(qbjOnly)),
-      carryoverPhases: this.carryoverPhases.map((ph) => ph.toRefPointer()),
+      carryoverPhases: carryoverPhases.map((ph) => ph.toRefPointer()),
       tossupsRead: this.tossupsRead,
       overtimeTossupsRead: this.overtimeTossupsRead,
       tiebreaker: this.tiebreaker,

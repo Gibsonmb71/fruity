@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import MatchImportService from '../renderer/Services/MatchImportService';
-import { ScheduledMatch } from '../renderer/DataModel/ScheduledMatch';
+import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
-import buildPublicLiveSnapshot from '../renderer/Services/PublicLiveSnapshot';
+import buildPublicLiveSnapshot, { buildPublicPairingsSnapshot } from '../renderer/Services/PublicLiveSnapshot';
 import { makeModaqQbjMatch, makeStandardModaqMatch, makeTestTournament, testTeamNames } from './TestFixtures';
 import { makeSlides, parseDisplayRoute } from '../live/LiveApp';
 
@@ -136,6 +136,51 @@ describe('public live snapshot projection', () => {
     roundTwo.roomId = secondRoom.id;
     snapshot = buildPublicLiveSnapshot(tournament)!;
     expect(snapshot.nextRound?.assignments[0]?.roomName).toBe('Room 102');
+  });
+});
+
+describe('public pairings projection', () => {
+  test('is independent of Live Display and exposes only released, non-cancelled assignments', () => {
+    const tournament = makeTestTournament();
+    const firstRoom = new TournamentRoom('Room 101', 0, 'room-public-1', 'room-secret-1', '11112222');
+    const secondRoom = new TournamentRoom('Room 102', 1, 'room-public-2', 'room-secret-2', '33334444');
+    tournament.rooms = [firstRoom, secondRoom];
+    tournament.liveDisplaySettings.enabled = false;
+    tournament.liveDisplaySettings.publicPairingsEnabled = true;
+
+    const released = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+    released.roomId = firstRoom.id;
+    const cancelled = new ScheduledMatch(1, testTeamNames[2], testTeamNames[3]);
+    cancelled.roomId = secondRoom.id;
+    cancelled.status = ScheduledMatchStatus.Cancelled;
+    const future = new ScheduledMatch(2, testTeamNames[0], testTeamNames[2]);
+    future.roomId = secondRoom.id;
+    tournament.scheduledMatches = [released, cancelled, future];
+    tournament.releasedRoundNumber = 1;
+
+    const snapshot = buildPublicPairingsSnapshot(tournament, new Date('2026-08-05T15:00:00.000Z'))!;
+    expect(snapshot.round?.number).toBe(1);
+    expect(snapshot.assignments).toEqual([
+      {
+        roundNumber: 1,
+        roundName: 'Round 1',
+        leftTeam: testTeamNames[0],
+        rightTeam: testTeamNames[1],
+        roomName: 'Room 101',
+      },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain('room-secret');
+    expect(JSON.stringify(snapshot)).not.toContain('11112222');
+    expect(JSON.stringify(snapshot)).not.toContain(released.id);
+    expect(snapshot.teamNames).toEqual([testTeamNames[0], testTeamNames[1]].sort());
+  });
+
+  test('returns null when disabled and an empty released state before a round opens', () => {
+    const tournament = makeTestTournament();
+    expect(buildPublicPairingsSnapshot(tournament)).toBeNull();
+    tournament.liveDisplaySettings.publicPairingsEnabled = true;
+    expect(buildPublicPairingsSnapshot(tournament)?.round).toBeNull();
+    expect(buildPublicPairingsSnapshot(tournament)?.assignments).toEqual([]);
   });
 });
 

@@ -12,12 +12,19 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { ContentCopy, OpenInNew, Refresh, Settings, QrCode2 } from '@mui/icons-material';
+import { ContentCopy, OpenInNew, Print, Refresh, Settings, QrCode2 } from '@mui/icons-material';
 import { TournamentManager } from '../../TournamentManager';
 import Tournament from '../../DataModel/Tournament';
-import { TournamentRoom } from '../../DataModel/TournamentRoom';
-import { IRoomPresence, ISessionSummary, SessionStatus } from '../../../main/server/ServerTypes';
+import { formatPairingCode, TournamentRoom } from '../../DataModel/TournamentRoom';
+import {
+  helpRequestCategoryLabels,
+  IHelpRequest,
+  IRoomPresence,
+  ISessionSummary,
+  SessionStatus,
+} from '../../../main/server/ServerTypes';
 import RoomQr from './RoomQr';
+import { applyRebalance, planRoomDisable } from '../../Services/RoomAllocationService';
 
 export interface IConfirmDialogProps {
   open: boolean;
@@ -70,7 +77,7 @@ export function RoomEditorDialog(props: IRoomEditorDialogProps) {
     setError('');
   }, [open, room]);
 
-  const save = () => {
+  const save = async () => {
     const trimmedName = name.trim();
     if (trimmedName === '') {
       setError('Room name is required.');
@@ -78,16 +85,28 @@ export function RoomEditorDialog(props: IRoomEditorDialogProps) {
     }
 
     if (room) {
+      if (room.enabled && !enabled) {
+        const applied = applyRebalance(tournament, planRoomDisable(tournament, room.id, 'leave-unassigned'));
+        if (!applied.ok) {
+          setError(applied.issues[0]?.message ?? 'The room could not be disabled safely.');
+          return;
+        }
+      }
       room.name = trimmedName;
       room.description = description.trim();
-      room.enabled = enabled;
+      if (enabled) room.enabled = true;
     } else {
       const created = new TournamentRoom(trimmedName, tournament.rooms.length);
       created.description = description.trim();
       created.enabled = enabled;
       tournament.rooms.push(created);
+      TournamentRoom.ensureUniquePairingCodes(tournament.rooms);
     }
-    manager.setRoomScoringMode('browser');
+    const modeResult = await manager.setRoomScoringMode('browser');
+    if (!modeResult.ok) {
+      setError(modeResult.reason ?? 'Browser room scoring could not be enabled.');
+      return;
+    }
     manager.markTournamentDataChanged();
     onClose();
   };
@@ -139,11 +158,16 @@ interface IRoomDetailDialogProps {
   sessions: ISessionSummary[];
   // eslint-disable-next-line react/require-default-props
   presence?: IRoomPresence;
+  // eslint-disable-next-line react/require-default-props
+  helpRequest?: IHelpRequest;
   onClose: () => void;
   onEdit: (room: TournamentRoom) => void;
   onCopyUrl: (room: TournamentRoom) => void;
+  onCopyPairingCode: (room: TournamentRoom) => void;
+  onPrintRoom: (room: TournamentRoom) => void;
   onShowQr: (room: TournamentRoom) => void;
   onRegenerate: (room: TournamentRoom) => void;
+  onRegeneratePairingCode: (room: TournamentRoom) => void;
 }
 
 export function RoomDetailDialog(props: IRoomDetailDialogProps) {
@@ -155,11 +179,15 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
     serverAddress,
     sessions,
     presence,
+    helpRequest,
     onClose,
     onEdit,
     onCopyUrl,
+    onCopyPairingCode,
+    onPrintRoom,
     onShowQr,
     onRegenerate,
+    onRegeneratePairingCode,
   } = props;
   const session = room
     ? sessions
@@ -208,6 +236,18 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
           <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
             {checkInLabel}
           </Typography>
+          {presence?.devices && presence.devices.length > 0 && (
+            <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+              {presence.devices.filter((device) => device.connected).length} connected ·{' '}
+              {presence.readyDeviceCount ?? 0} ready
+              {' · '}
+              {presence.devices
+                .map(
+                  (device) => `${device.operatorName || 'Unnamed operator'} (${device.ready ? 'Ready' : 'Connected'})`,
+                )
+                .join(', ')}
+            </Typography>
+          )}
         </div>
 
         <div className="rooms-dialog-section">
@@ -230,15 +270,51 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
           )}
         </div>
 
-        <div className="rooms-dialog-section">
-          <h3>Permanent URL</h3>
-          {url === '' ? (
-            <Alert severity="info">Start the Tournament Server to see a reachable LAN URL.</Alert>
-          ) : (
-            <Typography variant="body2" sx={{ fontFamily: 'monospace', overflowWrap: 'anywhere' }}>
-              {url}
+        <div className="rooms-dialog-section rooms-pairing-summary">
+          <h3>Pair this room</h3>
+          <Typography variant="body2" color="text.secondary">
+            On a new browser, open <strong>/join</strong> and enter this code. The code is not the room&apos;s access
+            credential.
+          </Typography>
+          <Typography variant="h4" sx={{ fontFamily: 'monospace', letterSpacing: 2, my: 1 }}>
+            {formatPairingCode(room.pairingCode)}
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button size="small" startIcon={<ContentCopy />} onClick={() => onCopyPairingCode(room)}>
+              Copy pairing code
+            </Button>
+            <Button size="small" startIcon={<Refresh />} onClick={() => onRegeneratePairingCode(room)}>
+              New pairing code
+            </Button>
+          </Stack>
+        </div>
+
+        {helpRequest && helpRequest.status === 'open' && (
+          <div className="rooms-dialog-section">
+            <h3>Needs help</h3>
+            <Typography variant="body2">
+              {helpRequestCategoryLabels[helpRequest.category]}
+              {helpRequest.operatorName ? ` · ${helpRequest.operatorName}` : ''}
             </Typography>
-          )}
+            {helpRequest.currentMatchup && (
+              <Typography variant="body2" color="text.secondary">
+                Round {helpRequest.currentMatchup.roundName} · {helpRequest.currentMatchup.leftTeam} vs{' '}
+                {helpRequest.currentMatchup.rightTeam}
+              </Typography>
+            )}
+            {helpRequest.message && <Typography variant="body2">{helpRequest.message}</Typography>}
+          </div>
+        )}
+
+        <div className="rooms-dialog-section">
+          <h3>Advanced access</h3>
+          <Typography variant="body2" color="text.secondary">
+            Resetting access disconnects previously paired browsers and invalidates old QR codes. It does not change the
+            pairing code or tournament results.
+          </Typography>
+          <Button sx={{ mt: 1 }} startIcon={<Refresh />} color="warning" onClick={() => onRegenerate(room)}>
+            Reset room access…
+          </Button>
         </div>
 
         <div className="rooms-dialog-section">
@@ -276,7 +352,10 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
           Edit room
         </Button>
         <Button startIcon={<ContentCopy />} onClick={() => onCopyUrl(room)} disabled={url === ''}>
-          Copy URL
+          Copy QR link
+        </Button>
+        <Button startIcon={<Print />} onClick={() => onPrintRoom(room)}>
+          Print room sheet
         </Button>
         <Button
           startIcon={<OpenInNew />}
@@ -287,9 +366,6 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
         </Button>
         <Button startIcon={<QrCode2 />} onClick={() => onShowQr(room)}>
           Show QR
-        </Button>
-        <Button startIcon={<Refresh />} color="warning" onClick={() => onRegenerate(room)}>
-          Regenerate token
         </Button>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
@@ -311,11 +387,12 @@ export function RoomQrDialog({ open, room, serverAddress, onClose }: IRoomQrDial
       <DialogTitle>{room.name} room QR</DialogTitle>
       <DialogContent sx={{ textAlign: 'center' }}>
         <RoomQr room={room} serverAddress={serverAddress} />
-        {serverAddress !== '' && (
-          <Typography variant="caption" component="div" sx={{ mt: 1, overflowWrap: 'anywhere' }} color="text.secondary">
-            {room.url(serverAddress)}
-          </Typography>
-        )}
+        <Typography variant="body2" sx={{ mt: 1 }}>
+          Pairing code: <strong>{formatPairingCode(room.pairingCode)}</strong>
+        </Typography>
+        <Typography variant="caption" component="div" sx={{ mt: 0.5 }} color="text.secondary">
+          Scan this code or open <strong>/join</strong> and enter the pairing code.
+        </Typography>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Done</Button>
@@ -327,37 +404,74 @@ export function RoomQrDialog({ open, room, serverAddress, onClose }: IRoomQrDial
 interface IRoomSetupDialogProps {
   open: boolean;
   rooms: TournamentRoom[];
+  tournamentName: string;
   serverAddress: string;
+  // eslint-disable-next-line react/require-default-props
+  autoPrintRoomId?: string | null;
   onClose: () => void;
 }
 
-export function RoomSetupDialog({ open, rooms, serverAddress, onClose }: IRoomSetupDialogProps) {
+export function RoomSetupDialog({
+  open,
+  rooms,
+  tournamentName,
+  serverAddress,
+  autoPrintRoomId = null,
+  onClose,
+}: IRoomSetupDialogProps) {
+  const [printRoomId, setPrintRoomId] = useState<string | null>(null);
+  const joinUrl = serverAddress === '' ? '/join' : `${serverAddress.replace(/\/$/, '')}/join`;
+
+  useEffect(() => {
+    const clearPrintSelection = () => setPrintRoomId(null);
+    window.addEventListener('afterprint', clearPrintSelection);
+    return () => window.removeEventListener('afterprint', clearPrintSelection);
+  }, []);
+
+  useEffect(() => {
+    if (!open || !autoPrintRoomId) return undefined;
+    setPrintRoomId(autoPrintRoomId);
+    const handle = window.setTimeout(() => window.print(), 100);
+    return () => window.clearTimeout(handle);
+  }, [autoPrintRoomId, open]);
+
+  const print = (roomId: string | null = null) => {
+    setPrintRoomId(roomId);
+    window.setTimeout(() => window.print(), 0);
+  };
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle>Room setup</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Print this page or scan each code from the Chromebook that will stay in the physical room.
+          One room per printed page. Scan the QR code, or open the join URL and enter the pairing code.
         </Typography>
         {rooms.length === 0 ? (
           <Alert severity="info">Add rooms before printing the setup sheet.</Alert>
         ) : (
-          <div className="rooms-qr-grid">
+          <div className="rooms-qr-grid" data-print-room={printRoomId ?? ''}>
             {rooms.map((room) => (
-              <div className="rooms-qr-card" key={room.id}>
+              <div
+                className={`rooms-qr-card${printRoomId === room.id ? ' is-print-selected' : ''}`}
+                data-room-id={room.id}
+                key={room.id}
+              >
+                <p className="rooms-qr-tournament">{tournamentName}</p>
                 <h2>{room.name}</h2>
                 <RoomQr room={room} serverAddress={serverAddress} />
-                <div className="rooms-qr-url">
-                  {serverAddress === '' ? 'Start server to show URL' : room.url(serverAddress)}
-                </div>
+                <div className="rooms-qr-code">{formatPairingCode(room.pairingCode)}</div>
+                <div className="rooms-qr-url">{joinUrl}</div>
+                <Button size="small" onClick={() => print(room.id)}>
+                  Print this room
+                </Button>
               </div>
             ))}
           </div>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => window.print()} disabled={rooms.length === 0}>
-          Print setup sheet
+        <Button onClick={() => print()} disabled={rooms.length === 0}>
+          Print all room sheets
         </Button>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>

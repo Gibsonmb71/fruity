@@ -18,6 +18,8 @@ export interface ILiveDisplaySlides {
 
 export interface ILiveDisplaySettings {
   enabled: boolean;
+  /** Separate audience-facing pairings page; it does not imply the slideshow is enabled. */
+  publicPairingsEnabled?: boolean;
   slides: ILiveDisplaySlides;
   slideDurationSeconds: 5 | 10 | 15 | 20 | 30;
   rowsPerSlide: number;
@@ -27,6 +29,7 @@ export interface ILiveDisplaySettings {
 
 export const defaultLiveDisplaySettings: ILiveDisplaySettings = {
   enabled: false,
+  publicPairingsEnabled: false,
   slides: {
     teamStandings: true,
     individuals: true,
@@ -123,6 +126,25 @@ export interface IPublicNextRound {
   assignments: IPublicNextRoundAssignment[];
 }
 
+/** One released/current matchup on the intentionally separate public pairings page. */
+export interface IPublicPairingAssignment {
+  roundNumber: number;
+  roundName: string;
+  leftTeam: string;
+  rightTeam: string;
+  roomName: string;
+}
+
+/** Public pairings contain only released matchups and display names—never room credentials or state. */
+export interface IPublicPairingsSnapshot {
+  version: 1;
+  tournamentName: string;
+  lastUpdatedAt: string;
+  round: IPublicRoundSummary | null;
+  assignments: IPublicPairingAssignment[];
+  teamNames: string[];
+}
+
 /** The complete public read-only view. It intentionally contains no IDs, tokens, sessions, or QBJ. */
 export interface IPublicLiveSnapshot {
   version: 1;
@@ -145,6 +167,7 @@ export interface IPublicLiveSnapshot {
 export function makeDefaultLiveDisplaySettings(): ILiveDisplaySettings {
   return {
     enabled: defaultLiveDisplaySettings.enabled,
+    publicPairingsEnabled: defaultLiveDisplaySettings.publicPairingsEnabled,
     slides: { ...defaultLiveDisplaySettings.slides },
     slideDurationSeconds: defaultLiveDisplaySettings.slideDurationSeconds,
     rowsPerSlide: defaultLiveDisplaySettings.rowsPerSlide,

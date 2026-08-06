@@ -71,7 +71,7 @@ export interface IReadinessServerState {
   inboxCount: number;
   conflictCount?: number;
   sessions?: IReadinessSession[];
-  roomPresence?: Array<{ roomId: string; connected: boolean }>;
+  roomPresence?: Array<{ roomId: string; connected: boolean; readyDeviceCount?: number }>;
   inboxScheduledMatchIds?: string[];
 }
 
@@ -104,6 +104,11 @@ export interface ITournamentReadiness {
     matchPlanConfigured: boolean;
     serverRunning: boolean;
     currentAssignmentsValid: boolean;
+    configuredRoomCount: number;
+    configuredRoomsConnected: boolean;
+    configuredRoomsReady: boolean;
+    connectedRoomCount: number;
+    readyRoomCount: number;
   };
   issues: ITournamentIssue[];
   activeIssues: ITournamentIssue[];
@@ -339,7 +344,6 @@ function groupActiveIssues(issues: ITournamentIssue[], currentRoundNumber: numbe
           phaseCode: first.navigation?.phaseCode,
           roomId: first.navigation?.roomId,
           gamesReviewFilter: first.navigation?.gamesReviewFilter,
-          controlFocus: first.navigation?.controlFocus,
           focus: first.navigation?.focus,
           roundNumber: currentRoundNumber ?? first.navigation?.roundNumber ?? first.roundNumber,
         }),
@@ -410,6 +414,14 @@ export function resolveTournamentReadiness(
   const rooms = tournament.rooms.slice();
   const coreReady = tournamentReady && rulesReady && teamsReady && formatReady;
   const roomOperationsEnabled = tournament.roomScoringMode === 'browser';
+  const configuredRooms = rooms.filter((room) => room.enabled);
+  const presenceByRoom = new Map((server?.roomPresence ?? []).map((presence) => [presence.roomId, presence]));
+  const connectedRoomCount = configuredRooms.filter((room) => presenceByRoom.get(room.id)?.connected === true).length;
+  const readyRoomCount = configuredRooms.filter(
+    (room) => (presenceByRoom.get(room.id)?.readyDeviceCount ?? 0) > 0,
+  ).length;
+  const configuredRoomsConnected = configuredRooms.length === 0 || connectedRoomCount === configuredRooms.length;
+  const configuredRoomsReady = configuredRooms.length === 0 || readyRoomCount === configuredRooms.length;
 
   if (!tournamentReady) {
     issues.push(
@@ -533,6 +545,34 @@ export function resolveTournamentReadiness(
       ),
     );
   }
+  if (roomOperationsEnabled && server?.running && configuredRooms.length > 0 && !configuredRoomsConnected) {
+    issues.push(
+      issue(
+        'rooms-not-connected',
+        'warning',
+        'Room browsers are not all connected',
+        `${configuredRooms.length - connectedRoomCount} configured room${
+          configuredRooms.length - connectedRoomCount === 1 ? '' : 's'
+        } need to open /join and pair before browser scoring starts.`,
+        'control:rooms',
+        'Open Rooms',
+      ),
+    );
+  }
+  if (roomOperationsEnabled && server?.running && configuredRooms.length > 0 && !configuredRoomsReady) {
+    issues.push(
+      issue(
+        'rooms-not-ready',
+        'warning',
+        'Room operators are not all ready',
+        `${configuredRooms.length - readyRoomCount} configured room${
+          configuredRooms.length - readyRoomCount === 1 ? '' : 's'
+        } still need a scorekeeper to mark Ready.`,
+        'control:rooms',
+        'Open Rooms',
+      ),
+    );
+  }
 
   const rebracketBoundary = findRebracketBoundary(tournament, scheduledMatches);
   const rebracketNextPhase = rebracketBoundary ? tournament.getNextFullPhase(rebracketBoundary) ?? null : null;
@@ -593,14 +633,12 @@ export function resolveTournamentReadiness(
     state = 'results-awaiting-review';
     primaryAction = readinessAction('review-results', 'Review conflicts', 'control:live', {
       focus: 'result-inbox',
-      controlFocus: 'inbox',
       scheduledMatchId: server?.inboxScheduledMatchIds?.[0],
     });
   } else if (conflictIds.length > 0 || roomOffline) {
     state = 'schedule-blocked';
     primaryAction = readinessAction('navigate', 'Fix assignment', 'control:match-plan', {
       focus: 'scheduled-match',
-      controlFocus: 'match-plan',
       scheduledMatchIds: conflictIds,
       scheduledMatchId: conflictIds[0],
       roundNumber: currentRoundNumber ?? undefined,
@@ -609,7 +647,6 @@ export function resolveTournamentReadiness(
     state = 'results-awaiting-review';
     primaryAction = readinessAction('review-results', 'Review results', 'control:live', {
       focus: 'result-inbox',
-      controlFocus: 'inbox',
       scheduledMatchId: server?.inboxScheduledMatchIds?.[0],
     });
   } else if (currentComplete) {
@@ -617,13 +654,11 @@ export function resolveTournamentReadiness(
       state = 'rebracket-required';
       primaryAction = readinessAction('open-rebracket', 'Review standings & rebracket', 'control:live', {
         phaseCode: rebracketBoundary.code,
-        controlFocus: 'current-round',
       });
     } else if (nextRound !== null) {
       state = 'next-round-preparation';
       primaryAction = readinessAction('navigate', `Prepare Round ${nextRound}`, 'control:match-plan', {
         roundNumber: nextRound,
-        controlFocus: 'match-plan',
       });
     } else {
       state = 'tournament-complete';
@@ -635,7 +670,6 @@ export function resolveTournamentReadiness(
     state = 'round-ready';
     primaryAction = readinessAction('release-round', `Release Round ${currentRoundNumber}`, 'control:live', {
       roundNumber: currentRoundNumber,
-      controlFocus: 'current-round',
     });
   } else if (currentRoundNumber !== null) {
     state = 'round-ready';
@@ -654,6 +688,11 @@ export function resolveTournamentReadiness(
       matchPlanConfigured: scheduledMatches.length > 0,
       serverRunning: server?.running === true,
       currentAssignmentsValid,
+      configuredRoomCount: configuredRooms.length,
+      configuredRoomsConnected,
+      configuredRoomsReady,
+      connectedRoomCount,
+      readyRoomCount,
     },
     issues,
     activeIssues,

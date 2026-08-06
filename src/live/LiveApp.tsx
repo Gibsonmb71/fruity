@@ -3,6 +3,7 @@ import type {
   IPublicIndividualStanding,
   IPublicLiveSnapshot,
   IPublicNextRoundAssignment,
+  IPublicPairingsSnapshot,
   IPublicPhaseStanding,
   IPublicRecentResult,
   IPublicTeamStanding,
@@ -14,6 +15,11 @@ type AudienceView = 'standings' | 'individuals' | 'pools' | 'results' | 'next-ro
 
 const pollIntervalMs = 4000;
 const validModes: LiveDisplayMode[] = ['standings', 'individuals', 'pools', 'results', 'next-round'];
+
+function pairingsEmptyMessage(hasRound: boolean, hasQuery: boolean): string {
+  if (!hasRound) return 'Tournament control has not released a round yet.';
+  return hasQuery ? 'No released game found for this team.' : 'No room pairings are currently published.';
+}
 
 interface DisplaySlide {
   kind: LiveDisplayMode;
@@ -74,11 +80,135 @@ function usePublicSnapshot() {
 }
 
 export default function LiveApp() {
+  if (window.location.pathname === '/live/pairings' || window.location.pathname === '/live/pairings/') {
+    return <PublicPairingsApp />;
+  }
+  return <PublicLiveApp />;
+}
+
+function PublicLiveApp() {
   const { snapshot, connection } = usePublicSnapshot();
   const isDisplay = window.location.pathname === '/live/display' || window.location.pathname === '/live/display/';
 
   if (isDisplay) return <DisplayApp snapshot={snapshot} connection={connection} />;
   return <AudienceApp snapshot={snapshot} connection={connection} />;
+}
+
+function usePublicPairingsSnapshot() {
+  const [snapshot, setSnapshot] = useState<IPublicPairingsSnapshot | null>(null);
+  const [connection, setConnection] = useState<ConnectionState>('loading');
+  const requestInFlight = useRef(false);
+
+  useEffect(() => {
+    let stopped = false;
+    const refresh = async () => {
+      if (stopped || requestInFlight.current) return;
+      requestInFlight.current = true;
+      try {
+        const response = await fetch('/api/v1/public/pairings', { cache: 'no-store' });
+        if (response.status === 404) {
+          if (!stopped) setConnection('disabled');
+          return;
+        }
+        if (!response.ok) throw new Error(`Public pairings request failed: ${response.status}`);
+        const next = (await response.json()) as IPublicPairingsSnapshot;
+        if (!stopped) {
+          setSnapshot(next);
+          setConnection('connected');
+        }
+      } catch {
+        if (!stopped) setConnection('reconnecting');
+      } finally {
+        requestInFlight.current = false;
+      }
+    };
+    refresh();
+    const interval = window.setInterval(refresh, pollIntervalMs);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  return { snapshot, connection };
+}
+
+function PublicPairingsApp() {
+  const { snapshot, connection } = usePublicPairingsSnapshot();
+  const [query, setQuery] = useState('');
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const assignments =
+    snapshot?.assignments.filter(
+      (assignment) =>
+        normalizedQuery === '' ||
+        assignment.leftTeam.toLocaleLowerCase().includes(normalizedQuery) ||
+        assignment.rightTeam.toLocaleLowerCase().includes(normalizedQuery),
+    ) ?? [];
+  return (
+    <div className="live-site" data-theme="system">
+      <header className="live-site-header">
+        <div className="live-brand-mark" aria-hidden="true">
+          YF
+        </div>
+        <div className="live-header-copy">
+          <p className="live-kicker">Public pairings</p>
+          <h1>{snapshot?.tournamentName ?? 'YellowFruit Pairings'}</h1>
+        </div>
+        <ConnectionStatus state={connection} />
+      </header>
+      <main className="live-audience-main live-pairings-main">
+        {!snapshot ? (
+          <ConnectionPanel connection={connection} />
+        ) : (
+          <section className="live-section" aria-labelledby="public-pairings-title">
+            <div className="live-section-heading">
+              <p className="live-kicker">Released room assignments</p>
+              <h2 id="public-pairings-title">
+                {snapshot.round ? `Round ${snapshot.round.number} · ${snapshot.round.name}` : 'Pairings not released'}
+              </h2>
+            </div>
+            <div className="live-pairings-search">
+              <span>Find a team</span>
+              <input
+                id="public-pairings-search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Team name"
+                aria-label="Find a team"
+              />
+            </div>
+            {assignments.length === 0 ? (
+              <EmptyMessage message={pairingsEmptyMessage(Boolean(snapshot.round), normalizedQuery !== '')} />
+            ) : (
+              <div className="live-table-wrap">
+                <table className="live-table live-results-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Room</th>
+                      <th scope="col" className="live-name-cell">
+                        Match
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignments.map((assignment) => (
+                      <tr key={`${assignment.roomName}-${assignment.leftTeam}-${assignment.rightTeam}`}>
+                        <th scope="row">{assignment.roomName}</th>
+                        <td className="live-name-cell">
+                          {assignment.leftTeam} <span className="live-vs">vs</span> {assignment.rightTeam}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+      </main>
+      <footer className="live-site-footer">Pairings update when tournament control releases the current round.</footer>
+    </div>
+  );
 }
 
 function AudienceApp({ snapshot, connection }: { snapshot: IPublicLiveSnapshot | null; connection: ConnectionState }) {

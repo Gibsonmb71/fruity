@@ -66,7 +66,7 @@ export default class MatchImportService {
         if (MatchImportService.isNameOfDateField(key)) return dayjs(value).toDate(); // must be ISO 8601 format
         return value;
       });
-    } catch (err: any) {
+    } catch {
       return null;
     }
   }
@@ -152,8 +152,10 @@ export default class MatchImportService {
     let refTargets: IRefTargetDict = {};
     try {
       refTargets = collectRefTargets(objectList);
-    } catch (err: any) {
-      wholeFileFailureResult.markFatal(err.message);
+    } catch (error: unknown) {
+      wholeFileFailureResult.markFatal(
+        error instanceof Error && error.message ? error.message : 'The file references could not be collected safely.',
+      );
       importResults.push(wholeFileFailureResult);
       return importResults;
     }
@@ -199,8 +201,10 @@ export default class MatchImportService {
     let yfMatch;
     try {
       yfMatch = parser.parseMatch(match as IIndeterminateQbj);
-    } catch (err: any) {
-      importResult.markFatal(err.message);
+    } catch (error: unknown) {
+      importResult.markFatal(
+        error instanceof Error && error.message ? error.message : 'The match could not be parsed.',
+      );
       return;
     }
     if (yfMatch) {

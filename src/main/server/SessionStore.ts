@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from 'crypto';
+import { createHash, randomUUID, randomBytes } from 'crypto';
 import {
   ISession,
   ISessionResumeInfo,
@@ -15,6 +15,12 @@ export enum SessionWriteError {
   NotFound = 'NotFound',
   BadToken = 'BadToken',
   AlreadyResolved = 'AlreadyResolved',
+  /** A final is already awaiting director review and the new payload is different. */
+  DifferentFinal = 'DifferentFinal',
+  /** Another session already submitted a final for the same scheduled game. */
+  DuplicateFinal = 'DuplicateFinal',
+  /** Live snapshots are no longer accepted once a final is under review. */
+  FinalAwaitingReview = 'FinalAwaitingReview',
   /** The submitted QBJ is for different teams than the session's assignment */
   TeamMismatch = 'TeamMismatch',
 }
@@ -59,7 +65,7 @@ export default class SessionStore {
     roundNumber: number,
     leftTeam: string,
     rightTeam: string,
-    linkage: { roomId?: string; scheduledMatchId?: string } = {},
+    linkage: { roomId?: string; scheduledMatchId?: string; tournamentKey?: string } = {},
   ): ISession {
     const timestamp = this.now().toISOString();
     const session: ISession = {
@@ -75,6 +81,8 @@ export default class SessionStore {
       status: SessionStatus.Created,
       latestQbj: null,
       finalReceived: false,
+      finalRevision: 0,
+      tournamentKey: linkage.tournamentKey,
     };
     this.sessions.set(session.id, session);
     return session;
@@ -95,6 +103,13 @@ export default class SessionStore {
     );
   }
 
+  /** Most recent terminal room outcome, used to explain accepted/rejected transitions after polling. */
+  findLatestForScheduledMatch(scheduledMatchId: string): ISession | undefined {
+    return this.getAll()
+      .filter((session) => session.scheduledMatchId === scheduledMatchId)
+      .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt) || b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
   get(sessionId: string): ISession | undefined {
     return this.sessions.get(sessionId);
   }
@@ -110,10 +125,12 @@ export default class SessionStore {
    * opening the tournament. Invalid entries are skipped, while valid sessions retain their original
    * ids and capability tokens so a room can resume its existing game.
    */
-  restore(source: unknown) {
-    if (!Array.isArray(source)) return;
+  restore(source: unknown): string[] {
+    const diagnostics: string[] = [];
+    if (!Array.isArray(source)) return diagnostics;
     const knownStatuses = new Set(Object.values(SessionStatus));
-    for (const candidate of source) {
+    const restoredIds = new Set<string>();
+    for (const [index, candidate] of source.entries()) {
       if (typeof candidate !== 'object' || candidate === null) continue;
       const value = candidate as Partial<ISession>;
       if (
@@ -127,10 +144,48 @@ export default class SessionStore {
         typeof value.rightTeam !== 'string' ||
         typeof value.createdAt !== 'string' ||
         typeof value.lastSeenAt !== 'string' ||
+        !isValidTimestamp(value.createdAt) ||
+        !isValidTimestamp(value.lastSeenAt) ||
         typeof value.status !== 'string' ||
         !knownStatuses.has(value.status as SessionStatus)
       ) {
+        diagnostics.push(`Recovery session ${index + 1} was discarded because its shape or timestamps were invalid.`);
         continue;
+      }
+
+      if (restoredIds.has(value.id) || this.sessions.has(value.id)) {
+        diagnostics.push(`Recovery session ${value.id} was discarded because its id was duplicated.`);
+        continue;
+      }
+      restoredIds.add(value.id);
+
+      const status = value.status as SessionStatus;
+      const latestQbj = value.latestQbj && typeof value.latestQbj === 'object' ? value.latestQbj : null;
+      if (
+        (status === SessionStatus.Submitted || status === SessionStatus.Accepted) &&
+        (value.finalReceived !== true || latestQbj === null)
+      ) {
+        diagnostics.push(`Recovery session ${value.id} was discarded because its ${status} final was incomplete.`);
+        continue;
+      }
+      if (status === SessionStatus.Rejected && value.finalReceived === true) {
+        diagnostics.push(`Recovery session ${value.id} was discarded because Rejected had a live final flag.`);
+        continue;
+      }
+
+      let restoredFinalFingerprint: string | undefined;
+      if (typeof value.finalFingerprint === 'string') restoredFinalFingerprint = value.finalFingerprint;
+      else if (value.finalReceived === true && latestQbj !== null)
+        restoredFinalFingerprint = fingerprintFinal(latestQbj);
+      let restoredFinalRevision = 0;
+      if (
+        typeof value.finalRevision === 'number' &&
+        Number.isInteger(value.finalRevision) &&
+        value.finalRevision >= 0
+      ) {
+        restoredFinalRevision = value.finalRevision;
+      } else if (value.finalReceived === true) {
+        restoredFinalRevision = 1;
       }
 
       const session: ISession = {
@@ -143,13 +198,17 @@ export default class SessionStore {
         scheduledMatchId: typeof value.scheduledMatchId === 'string' ? value.scheduledMatchId : undefined,
         createdAt: value.createdAt,
         lastSeenAt: value.lastSeenAt,
-        status: value.status as SessionStatus,
-        latestQbj: value.latestQbj && typeof value.latestQbj === 'object' ? value.latestQbj : null,
+        status,
+        latestQbj,
         finalReceived: value.finalReceived === true,
+        finalFingerprint: restoredFinalFingerprint,
+        finalRevision: restoredFinalRevision,
+        tournamentKey: typeof value.tournamentKey === 'string' ? value.tournamentKey : undefined,
         rejectionReason: typeof value.rejectionReason === 'string' ? value.rejectionReason : undefined,
       };
       this.sessions.set(session.id, session);
     }
+    return diagnostics;
   }
 
   /** Plain JSON representation for the app-data recovery store. */
@@ -179,7 +238,12 @@ export default class SessionStore {
     if (!auth.ok) return auth;
 
     const { session } = auth;
-    // Once the statskeeper has accepted or rejected the game, stop taking updates for it.
+    // Once a final is under review, ordinary live snapshots must never overwrite the payload the
+    // director is looking at. A rejected session is deliberately closed too; the room starts a new
+    // reviewable session through the assigned-match endpoint.
+    if (session.status === SessionStatus.Submitted) {
+      return { ok: false, error: SessionWriteError.FinalAwaitingReview };
+    }
     if (session.status === SessionStatus.Accepted || session.status === SessionStatus.Rejected) {
       return { ok: false, error: SessionWriteError.AlreadyResolved };
     }
@@ -240,27 +304,68 @@ export default class SessionStore {
     if (!SessionStore.qbjTeamsMatchSession(session, qbj)) {
       return { ok: false, error: SessionWriteError.TeamMismatch };
     }
+    const fingerprint = fingerprintFinal(qbj);
+    if (session.scheduledMatchId) {
+      const competing = this.getAll().find(
+        (candidate) =>
+          candidate.id !== session.id &&
+          candidate.scheduledMatchId === session.scheduledMatchId &&
+          (candidate.status === SessionStatus.Submitted || candidate.status === SessionStatus.Accepted) &&
+          candidate.finalReceived,
+      );
+      if (competing) {
+        // Idempotency is scoped to one session. A second session for the same assignment is an
+        // explicit conflict even when it carries byte-for-byte identical QBJ; otherwise two room
+        // credentials could both appear successfully submitted and race the director's decision.
+        return { ok: false, error: SessionWriteError.DuplicateFinal };
+      }
+    }
     if (session.status === SessionStatus.Accepted) {
       // Already a real match in the tournament. Acknowledge without doing anything, so a room
       // retrying after a flaky network doesn't produce a duplicate game.
-      return { ok: true, session, isNew: false };
+      if (session.finalFingerprint === fingerprint) return { ok: true, session, isNew: false };
+      return { ok: false, error: SessionWriteError.AlreadyResolved };
     }
 
-    const alreadyHadFinal = session.finalReceived;
+    if (session.status === SessionStatus.Submitted && session.finalReceived) {
+      if (session.finalFingerprint === fingerprint) return { ok: true, session, isNew: false };
+      return { ok: false, error: SessionWriteError.DifferentFinal };
+    }
+
     session.latestQbj = qbj;
     session.lastSeenAt = this.now().toISOString();
     session.finalReceived = true;
     session.status = SessionStatus.Submitted;
+    session.finalFingerprint = fingerprint;
+    session.finalRevision += 1;
     delete session.rejectionReason;
-    return { ok: true, session, isNew: !alreadyHadFinal };
+    return { ok: true, session, isNew: true };
   }
 
   /** Mark a session accepted after the statskeeper approved it */
   markAccepted(sessionId: string): ISession | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
+    if (session.status === SessionStatus.Accepted) return session;
+    if (session.status !== SessionStatus.Submitted || !session.finalReceived || session.latestQbj === null) {
+      return undefined;
+    }
     session.status = SessionStatus.Accepted;
     delete session.rejectionReason;
+    return session;
+  }
+
+  /**
+   * If the recovery file says Accepted but the durable tournament cannot prove the result was
+   * written, downgrade the transient verdict to Submitted so the renderer can review the retained
+   * QBJ again. This is deliberately one-way and only applies to an otherwise complete final.
+   */
+  demoteAcceptedForRecovery(sessionId: string): ISession | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status !== SessionStatus.Accepted || !session.finalReceived || session.latestQbj === null) {
+      return undefined;
+    }
+    session.status = SessionStatus.Submitted;
     return session;
   }
 
@@ -268,6 +373,12 @@ export default class SessionStore {
   markRejected(sessionId: string, reason?: string): ISession | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
+    if (session.status === SessionStatus.Accepted) return undefined;
+    if (session.status === SessionStatus.Rejected) {
+      if (reason) session.rejectionReason = reason;
+      return session;
+    }
+    if (session.status !== SessionStatus.Submitted) return undefined;
     session.status = SessionStatus.Rejected;
     session.finalReceived = false;
     if (reason) session.rejectionReason = reason;
@@ -380,8 +491,28 @@ export default class SessionStore {
           msSinceLastSeen,
           score: SessionStore.deriveScore(session),
           rejectionReason: session.rejectionReason,
+          tournamentKey: session.tournamentKey,
         };
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
+}
+
+function isValidTimestamp(value: string): boolean {
+  return Number.isFinite(new Date(value).getTime());
+}
+
+/** Stable enough for retries even when a browser serializes object keys in a different order. */
+export function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry)).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`);
+  return `{${entries.join(',')}}`;
+}
+
+export function fingerprintFinal(value: object): string {
+  return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }

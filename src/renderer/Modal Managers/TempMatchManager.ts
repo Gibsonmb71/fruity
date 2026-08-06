@@ -129,14 +129,44 @@ export class TempMatchManager {
   }
 
   /** Transfer data from temp objects to real objects */
-  saveExistingMatch(targetMatch: Match) {
+  saveExistingMatch(targetMatch: Match): boolean {
     this.tempMatch.clearInactivePlayers();
-    if (!!this.round && !!this.originalRoundOpened && this.round !== this.originalRoundOpened) {
-      this.originalRoundOpened.deleteMatch(targetMatch);
-      this.tournament.addMatch(targetMatch, this.round);
+    const originalRound = this.originalRoundOpened;
+    const destinationRound = this.round;
+    const officialCorrection = this.scheduledMatchContext?.isAccepted() === true;
+    if (officialCorrection) {
+      // An official correction changes the recorded Match in place. It must not silently turn into
+      // a new pairing, move the result to another round, or change the teams behind the schedule's
+      // durable resultMatchId link.
+      const originalLeft = targetMatch.leftTeam.team?.name;
+      const originalRight = targetMatch.rightTeam.team?.name;
+      const editedLeft = this.tempMatch.leftTeam.team?.name;
+      const editedRight = this.tempMatch.rightTeam.team?.name;
+      if (originalLeft !== editedLeft || originalRight !== editedRight) return false;
+      if (originalRound && destinationRound && originalRound !== destinationRound) return false;
     }
-    targetMatch.copyFromMatch(this.tempMatch);
-    targetMatch.statsValidity = StatsValidity.valid;
+    const originalMatches = originalRound?.matches.slice();
+    const destinationMatches =
+      destinationRound && destinationRound !== originalRound ? destinationRound.matches.slice() : undefined;
+    const originalTarget = targetMatch.makeCopy();
+    try {
+      // Copy the complete candidate before changing round membership. If any nested copy or future
+      // invariant fails, the original object and both round lists are restored together.
+      targetMatch.copyFromMatch(this.tempMatch);
+      targetMatch.statsValidity = StatsValidity.valid;
+      if (destinationRound && originalRound && destinationRound !== originalRound) {
+        originalRound.deleteMatch(targetMatch);
+        this.tournament.addMatch(targetMatch, destinationRound);
+        if (!destinationRound.matches.includes(targetMatch))
+          throw new Error('The destination round rejected the match.');
+      }
+      return true;
+    } catch {
+      targetMatch.copyFromMatch(originalTarget);
+      if (originalRound && originalMatches) originalRound.matches = originalMatches;
+      if (destinationRound && destinationMatches) destinationRound.matches = destinationMatches;
+      return false;
+    }
   }
 
   saveNewMatch() {

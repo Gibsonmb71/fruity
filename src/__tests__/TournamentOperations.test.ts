@@ -27,6 +27,7 @@ describe('tournament operations release state', () => {
 
   test('releasing a round makes scheduled assignments ready without changing history', () => {
     const tournament = makeTestTournament();
+    tournament.roomScoringMode = 'browser';
     const accepted = scheduled(1, 0, 1, ScheduledMatchStatus.Accepted);
     const future = scheduled(2, 0, 2);
     const room = new TournamentRoom('101', 0, 'room-101');

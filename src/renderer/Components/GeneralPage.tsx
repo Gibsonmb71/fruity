@@ -37,7 +37,11 @@ function GeneralPage({ showPageHeader = true }: IGeneralPageProps) {
   return (
     <>
       {showPageHeader && (
-        <YfPageHeader title="Tournament" description="What, where and when this tournament is, and what you track." />
+        <YfPageHeader
+          title="Tournament"
+          description="What, where and when this tournament is, and what you track."
+          helpTopic="setup.tournament"
+        />
       )}
       <BackupRecoveryNotice />
       {/*
@@ -163,7 +167,7 @@ function TournamentPanel() {
   return (
     <YfCard title="Tournament" fullHeight>
       <YfFieldGrid>
-        <YfFieldRow label="Name">
+        <YfFieldRow label="Name" helpTopic="setup.tournament">
           <TextField
             hiddenLabel
             placeholder="Ninety Six Invitational"

@@ -187,14 +187,40 @@ describe('duplicate-safe final submission', () => {
     expect(third.ok && third.isNew).toBe(false);
   });
 
-  test('a resubmission still refreshes the stored QBJ, so late corrections land', () => {
+  test('a different resubmission is refused so the reviewed QBJ cannot be replaced', () => {
     const { store } = makeStore();
     const session = newSession(store);
 
     store.submitFinal(session.id, session.token, { match_teams: [], marker: 'first' });
-    store.submitFinal(session.id, session.token, { match_teams: [], marker: 'corrected' });
+    const result = store.submitFinal(session.id, session.token, { match_teams: [], marker: 'corrected' });
 
-    expect((session.latestQbj as any).marker).toBe('corrected');
+    expect(result.ok === false && result.error).toBe(SessionWriteError.DifferentFinal);
+    expect((session.latestQbj as any).marker).toBe('first');
+  });
+
+  test('canonical fingerprints make reordered object keys an exact retry', () => {
+    const { store } = makeStore();
+    const session = newSession(store);
+    const first = { match_teams: [], nested: { z: 2, a: 1 }, marker: 'same' };
+    const retry = { marker: 'same', nested: { a: 1, z: 2 }, match_teams: [] };
+
+    expect(store.submitFinal(session.id, session.token, first)).toMatchObject({ ok: true, isNew: true });
+    expect(store.submitFinal(session.id, session.token, retry)).toMatchObject({ ok: true, isNew: false });
+    expect(session.finalRevision).toBe(1);
+  });
+
+  test('a second session for one scheduled game is an explicit duplicate conflict', () => {
+    const { store } = makeStore();
+    const first = store.create(1, testTeamNames[0], testTeamNames[1], { scheduledMatchId: 'scheduled-1' });
+    const second = store.create(1, testTeamNames[0], testTeamNames[1], { scheduledMatchId: 'scheduled-1' });
+    const qbj = makeStandardModaqMatch();
+
+    expect(store.submitFinal(first.id, first.token, qbj)).toMatchObject({ ok: true, isNew: true });
+    const result = store.submitFinal(second.id, second.token, qbj);
+
+    expect(result.ok ? undefined : result.error).toBe(SessionWriteError.DuplicateFinal);
+    expect(second.status).toBe(SessionStatus.Created);
+    expect(second.finalReceived).toBe(false);
   });
 
   test('resubmitting after acceptance changes nothing', () => {
@@ -212,16 +238,16 @@ describe('duplicate-safe final submission', () => {
 });
 
 describe('accepted transition', () => {
-  test('accepting sets the status and clears any rejection reason', () => {
+  test('accepting after rejection is refused and preserves the rejection reason', () => {
     const { store } = makeStore();
     const session = newSession(store);
     store.submitFinal(session.id, session.token, makeStandardModaqMatch());
     store.markRejected(session.id, 'wrong round');
 
-    store.markAccepted(session.id);
+    expect(store.markAccepted(session.id)).toBeUndefined();
 
-    expect(session.status).toBe(SessionStatus.Accepted);
-    expect(session.rejectionReason).toBeUndefined();
+    expect(session.status).toBe(SessionStatus.Rejected);
+    expect(session.rejectionReason).toBe('wrong round');
   });
 
   test('an accepted session refuses further snapshots', () => {
@@ -262,6 +288,7 @@ describe('rejected transition', () => {
   test('a rejected session refuses snapshots until it resubmits', () => {
     const { store } = makeStore();
     const session = newSession(store);
+    store.submitFinal(session.id, session.token, makeStandardModaqMatch());
     store.markRejected(session.id);
 
     const result = store.updateSnapshot(session.id, session.token, makeStandardModaqMatch());
