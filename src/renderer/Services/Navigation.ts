@@ -15,11 +15,13 @@ export interface INavigationIntent {
   teamName?: string;
   phaseCode?: string;
   roomId?: string;
-  gamesReviewFilter?: 'all' | 'needs-review' | 'errors' | 'warnings';
+  gamesReviewFilter?: GamesReviewFilter;
   controlFocus?: 'inbox' | 'current-round' | 'match-plan';
   /** Legacy focus vocabulary kept as a wire-compatible alias while callers migrate. */
   focus?: 'result-inbox' | 'scheduled-match' | 'room' | 'round';
 }
+
+export type GamesReviewFilter = 'all' | 'needs-review' | 'errors' | 'warnings';
 
 /** Metadata accepted by helpers before the destination is attached. */
 export type INavigationPayload = Omit<INavigationIntent, 'target'>;

@@ -22,6 +22,10 @@ function statusForProblem(problem: boolean, unknown: boolean): VerificationStatu
   return unknown ? 'unknown' : 'verified';
 }
 
+function pluralizeGameCount(count: number, suffix: string): string {
+  return `${count} game${count === 1 ? '' : 's'}${suffix}`;
+}
+
 /**
  * Resolve only facts that can be established from the tournament model. Manual entry has no
  * external expected-game list, so its completeness check is deliberately unknown.
@@ -43,10 +47,7 @@ export function resolvePublicationReadiness(
     {
       id: 'game-data',
       status: statusForProblem(invalidMatches.length > 0, matches.length === 0),
-      text:
-        invalidMatches.length > 0
-          ? `${invalidMatches.length} invalid game${invalidMatches.length === 1 ? '' : 's'}`
-          : 'Game data valid',
+      text: invalidMatches.length > 0 ? pluralizeGameCount(invalidMatches.length, ' invalid') : 'Game data valid',
     },
     {
       id: 'statistics',
@@ -61,7 +62,7 @@ export function resolvePublicationReadiness(
       status: statusForProblem(missingTossups.length > 0, matches.length === 0),
       text:
         missingTossups.length > 0
-          ? `${missingTossups.length} game${missingTossups.length === 1 ? '' : 's'} lack tossups heard`
+          ? pluralizeGameCount(missingTossups.length, ' lack tossups heard')
           : 'Tossups heard recorded',
     });
   }
@@ -69,18 +70,17 @@ export function resolvePublicationReadiness(
   const completenessUnknown = !browserRoomScoringEnabled || scheduled.length === 0;
   const completenessProblem =
     browserRoomScoringEnabled && scheduled.length > 0 && acceptedScheduled.length !== scheduled.length;
+  let completenessText = 'Game completeness cannot be verified automatically for manual entry';
+  if (browserRoomScoringEnabled) {
+    if (scheduled.length === 0) completenessText = 'Game completeness cannot be verified without a Match Plan';
+    else if (completenessProblem) {
+      completenessText = pluralizeGameCount(scheduled.length - acceptedScheduled.length, ' not accepted');
+    } else completenessText = 'All scheduled games are accepted';
+  }
   checks.push({
     id: 'completeness',
     status: statusForProblem(completenessProblem, completenessUnknown),
-    text: browserRoomScoringEnabled
-      ? scheduled.length === 0
-        ? 'Game completeness cannot be verified without a Match Plan'
-        : completenessProblem
-        ? `${scheduled.length - acceptedScheduled.length} scheduled game${
-            scheduled.length - acceptedScheduled.length === 1 ? '' : 's'
-          } not accepted`
-        : 'All scheduled games are accepted'
-      : 'Game completeness cannot be verified automatically for manual entry',
+    text: completenessText,
   });
 
   checks.push({
@@ -92,10 +92,8 @@ export function resolvePublicationReadiness(
     text: 'Forfeits are represented in the game data',
   });
 
-  const status = checks.some((check) => check.status === 'problem')
-    ? 'problem'
-    : checks.some((check) => check.status === 'unknown')
-    ? 'unknown'
-    : 'verified';
+  let status: VerificationStatus = 'verified';
+  if (checks.some((check) => check.status === 'problem')) status = 'problem';
+  else if (checks.some((check) => check.status === 'unknown')) status = 'unknown';
   return { checks, status, applicableNaqt };
 }

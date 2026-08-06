@@ -139,7 +139,9 @@ export default function MatchInboxCard({
   navigation,
   onNavigationHandled,
 }: {
+  // eslint-disable-next-line react/require-default-props
   navigation?: INavigationIntent;
+  // eslint-disable-next-line react/require-default-props
   onNavigationHandled?: () => void;
 }) {
   const service = useContext(TournamentServerContext);

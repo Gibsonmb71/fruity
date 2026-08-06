@@ -79,7 +79,9 @@ function GameEntryPanel() {
       <FormControl component="fieldset" fullWidth>
         <RadioGroup
           value={mode}
-          onChange={(event) => void changeMode(event.target.value as typeof mode)}
+          onChange={(event) => {
+            changeMode(event.target.value as typeof mode);
+          }}
           aria-label="Game entry mode"
           sx={{ gap: 0.5 }}
         >
@@ -114,7 +116,14 @@ function GameEntryPanel() {
         </RadioGroup>
       </FormControl>
       {mode === 'traditional' && (
-        <Button size="small" variant="outlined" sx={{ mt: 1 }} onClick={() => void changeMode('browser')}>
+        <Button
+          size="small"
+          variant="outlined"
+          sx={{ mt: 1 }}
+          onClick={() => {
+            changeMode('browser');
+          }}
+        >
           Enable browser room scoring
         </Button>
       )}
@@ -124,7 +133,9 @@ function GameEntryPanel() {
           variant="text"
           color="warning"
           sx={{ mt: 1 }}
-          onClick={() => void changeMode('traditional')}
+          onClick={() => {
+            changeMode('traditional');
+          }}
         >
           Disable browser room scoring
         </Button>

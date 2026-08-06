@@ -5,7 +5,7 @@ import { ReadinessTarget } from './TournamentReadiness';
 import { INavigationIntent } from './Navigation';
 import { validateSchedule } from './ScheduleService';
 
-export type QuickFindCategory = 'PAGE' | 'TEAM' | 'GAME' | 'SCHEDULED GAME' | 'ROUND' | 'ROOM' | 'ACTION';
+export type QuickFindCategory = 'PAGE' | 'TEAM' | 'GAME' | 'ROUND' | 'ROOM' | 'ACTION';
 export type QuickFindAction =
   | 'add-game'
   | 'add-team'
@@ -287,7 +287,7 @@ export function buildQuickFindItems(tournament: Tournament, context: IQuickFindC
   const scheduledItems = tournament.scheduledMatches.map((match) =>
     item({
       id: `scheduled-${match.id}`,
-      category: 'SCHEDULED GAME',
+      category: 'GAME',
       label: `${match.leftTeamName} vs ${match.rightTeamName}`,
       detail: `Scheduled · Round ${match.roundNumber} · ${match.phaseCode || 'Match Plan'}`,
       target: 'control:match-plan',
@@ -342,7 +342,10 @@ export function filterQuickFindItems(items: IQuickFindItem[], query: string): IQ
       if (index >= 0) score = index === 0 ? 0 : 1;
       else if (detailIndex >= 0) score = detailIndex === 0 ? 2 : 3;
       else score = 4;
-      return { item: currentItem, score, index: index >= 0 ? index : detailIndex >= 0 ? detailIndex : categoryIndex };
+      let resultIndex = categoryIndex;
+      if (index >= 0) resultIndex = index;
+      else if (detailIndex >= 0) resultIndex = detailIndex;
+      return { item: currentItem, score, index: resultIndex };
     })
     .filter((result): result is { item: IQuickFindItem; score: number; index: number } => result !== null)
     .sort((a, b) => a.score - b.score || a.index - b.index || a.item.label.localeCompare(b.item.label))

@@ -184,12 +184,11 @@ export default class FileParser {
         this.tourn.releasedRoundNumber !== null ||
         this.tourn.autoReleaseNextRound ||
         this.tourn.rebracketedPhaseCodes.length > 0;
-      this.tourn.roomScoringMode =
-        yfExtraData.roomScoringMode === 'browser' || yfExtraData.roomScoringMode === 'traditional'
-          ? yfExtraData.roomScoringMode
-          : hasLegacyRoomConfiguration
-          ? 'browser'
-          : 'traditional';
+      if (yfExtraData.roomScoringMode === 'browser' || yfExtraData.roomScoringMode === 'traditional') {
+        this.tourn.roomScoringMode = yfExtraData.roomScoringMode;
+      } else {
+        this.tourn.roomScoringMode = hasLegacyRoomConfiguration ? 'browser' : 'traditional';
+      }
       this.tourn.liveDisplaySettings = FileParser.parseLiveDisplaySettings(yfExtraData.liveDisplay);
     } else {
       this.tourn.inferCarryoverStatus();

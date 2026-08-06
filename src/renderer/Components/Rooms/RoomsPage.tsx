@@ -161,6 +161,7 @@ interface IRoomsPageProps {
   onTabChange?: (tab: ControlPages) => void;
   // eslint-disable-next-line react/require-default-props
   onNavigateTarget?: (intent: INavigationIntent) => void;
+  // eslint-disable-next-line react/require-default-props
   navigation?: INavigationIntent;
   onNavigationHandled: () => void;
 }
@@ -207,8 +208,8 @@ export default function RoomsPage({
   }, [service]);
 
   useEffect(() => {
-    if (!navigation) return;
-    if (navigation.target === 'control:match-plan' || navigation.focus === 'result-inbox') return;
+    if (!navigation) return undefined;
+    if (navigation.target === 'control:match-plan' || navigation.focus === 'result-inbox') return undefined;
     const timer = window.setTimeout(() => onNavigationHandled(), 0);
     return () => window.clearTimeout(timer);
   }, [navigation, onNavigationHandled]);

@@ -6,6 +6,7 @@ interface IControlPageProps {
   section: ControlPages;
   onSectionChange: (section: ControlPages) => void;
   onNavigateTarget: (intent: INavigationIntent) => void;
+  // eslint-disable-next-line react/require-default-props
   navigation?: INavigationIntent;
   // eslint-disable-next-line react/require-default-props
   onNavigationHandled: () => void;

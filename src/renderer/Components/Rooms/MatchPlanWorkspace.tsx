@@ -43,9 +43,13 @@ interface IMatchPlanWorkspaceProps {
   onEdit: (match: ScheduledMatch) => void;
   onCancel: (match: ScheduledMatch) => void;
   onToggleLock: (match: ScheduledMatch) => void;
+  // eslint-disable-next-line react/require-default-props
   navigation?: INavigationIntent;
+  // eslint-disable-next-line react/require-default-props
   onNavigationHandled?: () => void;
+  // eslint-disable-next-line react/require-default-props
   undoLabel?: string;
+  // eslint-disable-next-line react/require-default-props
   onUndo?: () => void;
 }
 
@@ -120,11 +124,12 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
     if (!navigation) return undefined;
     const handle = window.setTimeout(() => {
       const matchId = navigation.scheduledMatchId ?? navigation.scheduledMatchIds?.[0];
-      const target = matchId
-        ? document.querySelector<HTMLElement>(`[data-match-plan-match-id="${matchId}"]`)
-        : navigation.roundNumber !== undefined
-        ? document.querySelector<HTMLElement>(`[data-match-plan-round="${navigation.roundNumber}"]`)
-        : null;
+      let target: HTMLElement | null = null;
+      if (matchId) {
+        target = document.querySelector<HTMLElement>(`[data-match-plan-match-id="${matchId}"]`);
+      } else if (navigation.roundNumber !== undefined) {
+        target = document.querySelector<HTMLElement>(`[data-match-plan-round="${navigation.roundNumber}"]`);
+      }
       target?.scrollIntoView({ block: 'center' });
       target?.focus({ preventScroll: true });
       onNavigationHandled?.();

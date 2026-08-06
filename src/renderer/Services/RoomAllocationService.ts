@@ -704,12 +704,13 @@ export function planSwap(tournament: Tournament, matchId: string, targetRoomId: 
   if (!match) return { kind: 'illegal', issues: [error('That scheduled match no longer exists.')], changes: [] };
   if (!targetRoom) return { kind: 'illegal', issues: [error('That room no longer exists.', [match.id])], changes: [] };
   if (match.status === ScheduledMatchStatus.Playing) {
-    const roomName = tournament.rooms.find((room) => room.id === match.roomId)?.name ?? match.roomId ?? 'its room';
+    const currentRoomName =
+      tournament.rooms.find((room) => room.id === match.roomId)?.name ?? match.roomId ?? 'its room';
     return {
       kind: 'illegal',
       issues: [
         error(
-          `Game is already in progress in ${roomName}. Room assignment cannot be changed while scoring is active.`,
+          `Game is already in progress in ${currentRoomName}. Room assignment cannot be changed while scoring is active.`,
           [match.id],
         ),
       ],
@@ -933,11 +934,13 @@ export function assignRoom(
   const match = tournament.scheduledMatches.find((candidate) => candidate.id === matchId);
   if (!match) return [error('That scheduled match no longer exists.')];
   if (match.status === ScheduledMatchStatus.Playing) {
-    const roomName = tournament.rooms.find((room) => room.id === match.roomId)?.name ?? match.roomId ?? 'its room';
+    const currentRoomName =
+      tournament.rooms.find((room) => room.id === match.roomId)?.name ?? match.roomId ?? 'its room';
     return [
-      error(`Game is already in progress in ${roomName}. Room assignment cannot be changed while scoring is active.`, [
-        match.id,
-      ]),
+      error(
+        `Game is already in progress in ${currentRoomName}. Room assignment cannot be changed while scoring is active.`,
+        [match.id],
+      ),
     ];
   }
   if (match.status === ScheduledMatchStatus.Submitted || match.status === ScheduledMatchStatus.Accepted) {

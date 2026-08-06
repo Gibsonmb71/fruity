@@ -314,12 +314,11 @@ function PublicationReadiness({
 }
 
 function VerificationItem({ status, text }: { status: 'verified' | 'problem' | 'unknown'; text: string }) {
+  let color: 'warning.main' | 'success.main' | 'text.secondary' = 'text.secondary';
+  if (status === 'problem') color = 'warning.main';
+  else if (status === 'verified') color = 'success.main';
   return (
-    <Typography
-      variant="body2"
-      color={status === 'problem' ? 'warning.main' : status === 'verified' ? 'success.main' : 'text.secondary'}
-      sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
-    >
+    <Typography variant="body2" color={color} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
       <ReadinessMark status={status} />
       {text}
     </Typography>
