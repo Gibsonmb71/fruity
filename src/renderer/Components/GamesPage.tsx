@@ -161,7 +161,7 @@ function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
   const { phase, filterTeam } = props;
 
   return (
-    <YfCard title={phase.name} flush>
+    <YfCard title={phase.name} variant="flush">
       <Box sx={{ '& > * + *': { borderTop: 1, borderColor: 'divider' } }}>
         {phase.rounds.map((round) => (
           <SingleRound

@@ -1,7 +1,7 @@
 import { Switch } from '@mui/material';
 import { ChangeEvent, useContext } from 'react';
-import YfCard from './YfCard';
 import { TournamentContext } from '../TournamentManager';
+import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import { ScoringRules } from '../DataModel/ScoringRules';
 import { SettingRow, SettingsList, YfNumericField } from '../Utils/GeneralReactUtils';
@@ -56,7 +56,7 @@ function OvertimeSettingsCard() {
   };
 
   return (
-    <YfCard title="Overtime">
+    <YfCard title="Overtime" variant="rows" fullHeight>
       <SettingsList>
         <SettingRow label="Sudden death" description="Overtime ends as soon as one team converts a toss-up.">
           <Switch checked={suddenDeath} disabled={readOnly} onChange={handleSuddenDeathChange} />

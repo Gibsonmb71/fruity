@@ -1,5 +1,5 @@
+import { Box } from '@mui/material';
 import Grid from '@mui/material/Grid';
-import { Alert, Stack } from '@mui/material';
 import { useContext } from 'react';
 import { Lock } from '@mui/icons-material';
 import StandardRuleSetCard from './StandardRuleSetCard';
@@ -11,7 +11,7 @@ import RoundLengthSettingsCard from './RoundLengthSettingsCard';
 import LightningRoundSettingsCard from './LightningRoundSettingsCard';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
-import { YfPageHeader } from '../Utils/GeneralReactUtils';
+import { YfNotice, YfPageHeader } from '../Utils/GeneralReactUtils';
 
 function RulesPage() {
   const tournManager = useContext(TournamentContext);
@@ -19,35 +19,49 @@ function RulesPage() {
 
   return (
     <>
-      <YfPageHeader title="Rules" description="How games are scored. Start from a standard rule set, then adjust." />
+      <YfPageHeader
+        title="Rules"
+        description="How games are scored. Start from a standard rule set, then adjust whatever differs."
+      />
       {readOnly && (
-        <Alert severity="info" icon={<Lock fontSize="small" />} sx={{ mb: 2 }}>
-          Games have already been entered, so scoring rules are read-only.
-        </Alert>
+        <Box sx={{ mb: 2 }}>
+          <YfNotice
+            icon={<Lock fontSize="small" />}
+            title="Scoring rules are locked"
+            description="Games have already been entered. Changing how games are scored now would quietly invalidate
+              them, so these settings unlock again only if every game is deleted."
+          />
+        </Box>
       )}
-      <Stack spacing={2}>
-        <StandardRuleSetCard />
-        <Grid container spacing={2}>
-          <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-            <Stack spacing={2}>
-              <RoundLengthSettingsCard />
-              <TossupSettingsCard />
-            </Stack>
-          </Grid>
-          <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-            <Stack spacing={2}>
-              <BonusSettingsCard />
-              <LightningRoundSettingsCard />
-            </Stack>
-          </Grid>
-          <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-            <Stack spacing={2}>
-              <OvertimeSettingsCard />
-              <MaxPlayersSettingsCard />
-            </Stack>
-          </Grid>
+      {/*
+        Paired the way a format actually gets settled — ruleset first, then match length beside what a
+        toss-up is worth, bonuses beside overtime, roster limits beside anything unusual. The previous
+        three-column grid distributed panels arbitrarily, so the reading order changed with the window
+        width and unrelated settings ended up as neighbors.
+      */}
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12 }}>
+          <StandardRuleSetCard />
         </Grid>
-      </Stack>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <RoundLengthSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <TossupSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <BonusSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <OvertimeSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <MaxPlayersSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <LightningRoundSettingsCard />
+        </Grid>
+      </Grid>
     </>
   );
 }

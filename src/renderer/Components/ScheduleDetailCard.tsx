@@ -54,7 +54,7 @@ export default function ScheduleDetailCard() {
   return (
     <YfCard
       title={cardTitle}
-      secondaryHeader={
+      actions={
         <Tooltip title={tooltip}>
           <span>
             <Button

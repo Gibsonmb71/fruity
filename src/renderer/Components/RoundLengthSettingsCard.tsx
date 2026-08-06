@@ -1,8 +1,8 @@
 import { Switch } from '@mui/material';
 import { useState, ChangeEvent, useContext } from 'react';
-import YfCard from './YfCard';
 import { TournamentContext } from '../TournamentManager';
 import { ScoringRules } from '../DataModel/ScoringRules';
+import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import { SettingRow, SettingsList, YfNumericField } from '../Utils/GeneralReactUtils';
 
@@ -54,7 +54,7 @@ function RoundLengthSettingsCard() {
   };
 
   return (
-    <YfCard title="Regulation">
+    <YfCard title="Match" description="How long a game of regulation runs." variant="rows" fullHeight>
       <SettingsList>
         <SettingRow label="Timed rounds" description="Rounds end on the clock rather than after a fixed count.">
           <Switch disabled={readOnly} checked={timedRoundsChecked} onChange={handleTimedRoundsChange} />

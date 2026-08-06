@@ -1,20 +1,26 @@
-import { Add, ArrowDropDown, CopyAll, Delete, Edit } from '@mui/icons-material';
+import { Add, Delete, Edit, FileUpload, MoreVert, PersonAdd, Search } from '@mui/icons-material';
 import {
   Box,
   Button,
-  ButtonGroup,
-  ClickAwayListener,
   IconButton,
+  InputAdornment,
+  Menu,
   MenuItem,
-  MenuList,
   Paper,
-  Popper,
+  Stack,
   Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Tabs,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useContext, useRef, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import Registration from '../DataModel/Registration';
 import useSubscription from '../Utils/CustomHooks';
 import { TournamentContext } from '../TournamentManager';
@@ -22,10 +28,13 @@ import { Team } from '../DataModel/Team';
 import { nextAlphabetLetter } from '../Utils/GeneralUtils';
 import SeedingView from './TeamsPageSeedingView';
 import StandingsView from './TeamsPageStandingsView';
-import { YfPageHeader } from '../Utils/GeneralReactUtils';
+import { YfEmptyState, YfPageHeader } from '../Utils/GeneralReactUtils';
 
 // Defines the order the tabs should be in
 const viewList = ['Registration', 'Prelim assignments', 'Rebracket / final ranks'];
+
+/** Above this many teams, finding one by eye stops being reasonable. */
+const searchThreshold = 12;
 
 function TeamsPage() {
   const tournManager = useContext(TournamentContext);
@@ -41,7 +50,8 @@ function TeamsPage() {
   return (
     <>
       <YfPageHeader title="Teams" description="Registrations, pool assignments and final ranks." />
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+      {/* Page-level sub-navigation: these are three different jobs, not three settings. */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2.5 }}>
         <Tabs value={curView} onChange={(e, newValue) => setView(newValue)}>
           {viewList.map((val) => (
             <Tab key={val} label={val} />
@@ -55,233 +65,312 @@ function TeamsPage() {
   );
 }
 
+/** One row of the roster table: a single team, plus the registration it belongs to. */
+interface ITeamRow {
+  registration: Registration;
+  team: Team;
+  /** Is this the first team listed for its registration? Only that row prints the org name. */
+  isFirstForReg: boolean;
+  /** The letter a new sibling team would get, or '' if this isn't the last team of the reg. */
+  nextLetter: string;
+}
+
 function RegistrationView() {
   const tournManager = useContext(TournamentContext);
   const thisTournament = tournManager.tournament;
   const [registrations] = useSubscription(thisTournament.registrations);
   const [numberOfTeams] = useSubscription(thisTournament.getNumberOfTeams());
   const [expectedNumTeams] = useSubscription(thisTournament.getExpectedNumberOfTeams());
+  const [search, setSearch] = useState('');
 
-  const teamTotDisp = numberOfTeamsDisplay(numberOfTeams, expectedNumTeams);
   const cantAddMoreTeams = expectedNumTeams !== null && numberOfTeams >= expectedNumTeams;
+  const showSearch = numberOfTeams > searchThreshold;
+
+  const allRows = useMemo(() => {
+    const result: ITeamRow[] = [];
+    for (const reg of registrations) {
+      reg.teams.forEach((team, idx) => {
+        const isLastForReg = idx === reg.teams.length - 1;
+        let nextLetter = '';
+        if (isLastForReg) nextLetter = team.letter === '' ? 'B' : nextAlphabetLetter(team.letter);
+        result.push({ registration: reg, team, isFirstForReg: idx === 0, nextLetter });
+      });
+    }
+    return result;
+  }, [registrations]);
+
+  const needle = search.trim().toLowerCase();
+  const rows =
+    needle === ''
+      ? allRows
+      : allRows
+          .filter(
+            (row) =>
+              row.team.name.toLowerCase().includes(needle) || row.registration.name.toLowerCase().includes(needle),
+          )
+          // A filtered list has no reliable "first of its group", so every visible row names its org.
+          .map((row) => ({ ...row, isFirstForReg: true }));
 
   return (
-    <Paper variant="outlined">
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 2,
-          px: 2,
-          py: 1.25,
-          borderBottom: numberOfTeams > 0 ? 1 : 0,
-          borderColor: 'divider',
-        }}
-      >
-        <Typography variant="subtitle2">{teamTotDisp}</Typography>
-        <ImportButtons disabled={cantAddMoreTeams} />
+    <Stack spacing={2}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1 }}>
+          <Typography variant="h3" component="h2">
+            {numberOfTeams}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {teamCountCaption(numberOfTeams, expectedNumTeams)}
+          </Typography>
+        </Stack>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          {showSearch && (
+            <TextField
+              hiddenLabel
+              placeholder="Search teams"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              sx={{ width: 220 }}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search fontSize="small" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+          )}
+          <ImportMenuButton disabled={cantAddMoreTeams} />
+          <Tooltip title={cantAddMoreTeams ? scheduleFullReason(expectedNumTeams) : ''}>
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                disabled={cantAddMoreTeams}
+                onClick={() => tournManager.openTeamEditModalNewTeam()}
+              >
+                Add team
+              </Button>
+            </span>
+          </Tooltip>
+        </Stack>
       </Box>
+
       {numberOfTeams === 0 ? (
-        <EmptyState title="No teams yet" body="Add teams one at a time, or import them from a QBJ or SQBS file." />
+        <Paper variant="outlined">
+          <YfEmptyState
+            title="No teams registered yet"
+            description="Add teams one at a time, or bring in a whole field from a QBJ or SQBS file you already have."
+            action={
+              <Stack direction="row" sx={{ gap: 1, justifyContent: 'center' }}>
+                <Button variant="contained" startIcon={<Add />} onClick={() => tournManager.openTeamEditModalNewTeam()}>
+                  Add team
+                </Button>
+                <ImportMenuButton disabled={false} />
+              </Stack>
+            }
+          />
+        </Paper>
       ) : (
-        <Box sx={{ '& > * + *': { borderTop: 1, borderColor: 'divider' } }}>
-          {registrations.map((reg) => (
-            <RegistrationList key={reg.name} registration={reg} cantAddMoreTeams={cantAddMoreTeams} />
-          ))}
-        </Box>
+        <TableContainer component={Paper} variant="outlined">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Organization</TableCell>
+                <TableCell sx={{ width: '7rem' }}>Team</TableCell>
+                <TableCell align="right" sx={{ width: '6rem' }}>
+                  Players
+                </TableCell>
+                <TableCell sx={{ width: '9rem' }}>Attributes</TableCell>
+                <TableCell align="right" sx={{ width: '5.5rem' }} aria-label="Actions" />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} sx={{ borderBottom: 0, p: 0 }}>
+                    <YfEmptyState
+                      compact
+                      title="No teams match that search"
+                      description={`Nothing is registered under "${search.trim()}".`}
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((row) => <TeamTableRow key={row.team.name} row={row} cantAddMoreTeams={cantAddMoreTeams} />)
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
-    </Paper>
+    </Stack>
   );
 }
 
-interface IEmptyStateProps {
-  title: string;
-  body: string;
-}
-
-/** Quiet placeholder for a panel with nothing in it yet. */
-export function EmptyState(props: IEmptyStateProps) {
-  const { title, body } = props;
-  return (
-    <Box sx={{ px: 2, py: 5, textAlign: 'center' }}>
-      <Typography variant="subtitle2">{title}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-        {body}
-      </Typography>
-    </Box>
-  );
-}
-
-interface IImportButtonsProps {
+interface IImportMenuButtonProps {
   disabled: boolean;
 }
 
-function ImportButtons(props: IImportButtonsProps) {
+/**
+ * Importing is a secondary path, so it gets its own menu instead of hiding under an arrow attached to
+ * "Add team" — in a split button that arrow reads as part of the primary action.
+ */
+function ImportMenuButton(props: IImportMenuButtonProps) {
   const { disabled } = props;
   const tournManager = useContext(TournamentContext);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const anchorRef = useRef<HTMLDivElement>(null);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
-  const handleDropDownClose = (event: Event) => {
-    if (anchorRef && anchorRef.current?.contains(event.target as HTMLElement)) {
-      return;
-    }
-    setDropdownOpen(false);
+  const runAndClose = (action: () => void) => {
+    setAnchorEl(null);
+    action();
   };
 
   return (
     <>
-      <ButtonGroup ref={anchorRef} size="small" variant="contained">
-        <Tooltip placement="top" title="Enter a new team">
-          <span>
-            <Button startIcon={<Add />} disabled={disabled} onClick={() => tournManager.openTeamEditModalNewTeam()}>
-              Add team
-            </Button>
-          </span>
-        </Tooltip>
-        <Button
-          disabled={disabled}
-          aria-label="more ways to add teams"
-          sx={{ px: 0.25 }}
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-        >
-          <ArrowDropDown fontSize="small" />
-        </Button>
-      </ButtonGroup>
-      <Popper open={dropdownOpen} anchorEl={anchorRef.current} placement="bottom-end" sx={{ zIndex: 'modal' }}>
-        <Paper variant="outlined" sx={{ mt: 0.5, boxShadow: 5 }}>
-          <ClickAwayListener onClickAway={handleDropDownClose}>
-            <MenuList id="split-button-menu">
-              <MenuItem onClick={() => tournManager.launchImportQbjTeamsWorkflow()}>
-                Import teams from QBJ/JSON (MODAQ) file
-              </MenuItem>
-              <MenuItem onClick={() => tournManager.launchImportSqbsTeamsWorkflow()}>
-                Import teams from SQBS file
-              </MenuItem>
-            </MenuList>
-          </ClickAwayListener>
-        </Paper>
-      </Popper>
+      <Button
+        variant="outlined"
+        startIcon={<FileUpload />}
+        disabled={disabled}
+        aria-haspopup="true"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+      >
+        Import
+      </Button>
+      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+        <MenuItem onClick={() => runAndClose(() => tournManager.launchImportQbjTeamsWorkflow())}>
+          From a QBJ / MODAQ file
+        </MenuItem>
+        <MenuItem onClick={() => runAndClose(() => tournManager.launchImportSqbsTeamsWorkflow())}>
+          From an SQBS file
+        </MenuItem>
+      </Menu>
     </>
   );
 }
 
-interface IRegistrationListProps {
-  registration: Registration;
+interface ITeamTableRowProps {
+  row: ITeamRow;
   cantAddMoreTeams: boolean;
 }
 
-/** The list of teams within one Registration object */
-function RegistrationList(props: IRegistrationListProps) {
-  const { registration, cantAddMoreTeams } = props;
-  const [teams] = useSubscription(registration.teams);
-
-  return (
-    <Box sx={{ '& > * + *': { borderTop: 1, borderColor: 'divider' } }}>
-      {teams.map((team, idx) => (
-        <TeamListItem
-          key={team.name}
-          registration={registration}
-          team={team}
-          isLastForReg={idx === teams.length - 1}
-          cantAddMoreTeams={cantAddMoreTeams}
-        />
-      ))}
-    </Box>
-  );
-}
-
-interface ITeamListItemProps {
-  registration: Registration;
-  team: Team;
-  /** Is this the last team in the registration? e.g. C team with no D, E, etc teams */
-  isLastForReg: boolean;
-  cantAddMoreTeams: boolean;
-}
-
-function TeamListItem(props: ITeamListItemProps) {
-  const { registration, team, isLastForReg, cantAddMoreTeams } = props;
+function TeamTableRow(props: ITeamTableRowProps) {
+  const { row, cantAddMoreTeams } = props;
+  const { registration, team, isFirstForReg, nextLetter } = row;
   const tournManager = useContext(TournamentContext);
   const hasPlayed = tournManager.tournament.teamHasPlayedAnyMatch(team);
 
-  let nextLetter = '';
-  if (isLastForReg) nextLetter = team.letter === '' ? 'B' : nextAlphabetLetter(team.letter);
+  const openEditor = () => tournManager.openTeamEditModalExistingTeam(registration, team);
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 2,
-        px: 2,
-        py: 1,
-        '&:hover': { backgroundColor: 'action.hover' },
-      }}
-      onDoubleClick={() => tournManager.openTeamEditModalExistingTeam(registration, team)}
+    <TableRow
+      hover
+      onDoubleClick={openEditor}
+      // A hairline above each new organization groups its A/B/C teams without indenting them into a
+      // nested container of their own.
+      sx={isFirstForReg ? { '& td': { borderTop: 1, borderTopColor: 'divider' } } : undefined}
     >
-      <Box sx={{ minWidth: 0 }}>
-        <Typography variant="subtitle1" noWrap>
-          {team.name}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {teamInfoDisplay(registration, team)}
-        </Typography>
-      </Box>
-      <Box sx={{ display: 'flex', gap: 0.25, flexShrink: 0 }}>
-        {nextLetter && !cantAddMoreTeams && (
-          <Tooltip title={`Add ${nextLetter} team`}>
-            <IconButton
-              size="small"
-              onClick={() => tournManager.startNextTeamForRegistration(registration, nextLetter)}
-            >
-              <CopyAll fontSize="small" />
+      <TableCell>
+        {isFirstForReg && (
+          <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
+            {registration.name}
+          </Typography>
+        )}
+      </TableCell>
+      <TableCell sx={{ color: team.letter === '' ? 'text.secondary' : undefined }}>
+        {team.letter === '' ? 'Only team' : team.letter}
+      </TableCell>
+      <TableCell align="right" sx={{ color: team.players.length === 0 ? 'error.main' : undefined }}>
+        {team.players.length}
+      </TableCell>
+      <TableCell sx={{ color: 'text.secondary' }}>{teamAttributeDisplay(registration, team) || '—'}</TableCell>
+      <TableCell align="right">
+        <Stack direction="row" sx={{ justifyContent: 'flex-end', gap: 0.25 }}>
+          <Tooltip title="Edit team and roster">
+            <IconButton size="small" onClick={openEditor} aria-label={`Edit ${team.name}`}>
+              <Edit fontSize="small" />
             </IconButton>
           </Tooltip>
-        )}
-        <Tooltip title="Edit team">
-          <IconButton size="small" onClick={() => tournManager.openTeamEditModalExistingTeam(registration, team)}>
-            <Edit fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={hasPlayed ? 'You cannot delete a team for which games have been entered' : 'Delete team'}>
-          <span>
-            <IconButton
-              size="small"
-              disabled={hasPlayed}
-              onClick={() => tournManager.tryDeleteTeam(registration, team)}
-            >
-              <Delete fontSize="small" />
-            </IconButton>
-          </span>
-        </Tooltip>
-      </Box>
-    </Box>
+          <TeamRowMenu
+            teamName={team.name}
+            hasPlayed={hasPlayed}
+            nextLetter={cantAddMoreTeams ? '' : nextLetter}
+            onAddSibling={() => tournManager.startNextTeamForRegistration(registration, nextLetter)}
+            onDelete={() => tournManager.tryDeleteTeam(registration, team)}
+          />
+        </Stack>
+      </TableCell>
+    </TableRow>
   );
 }
 
-function numberOfTeamsDisplay(numTeams: number, numTeamsForSchedule: number | null) {
-  if (numTeamsForSchedule === null) {
-    return `${numTeams} team${numTeams !== 1 ? 's' : ''}`;
-  }
-  return `${numTeams} of ${numTeamsForSchedule} teams registered`;
+interface ITeamRowMenuProps {
+  teamName: string;
+  hasPlayed: boolean;
+  /** '' when another team for this organization can't be started from here. */
+  nextLetter: string;
+  onAddSibling: () => void;
+  onDelete: () => void;
 }
 
-function teamInfoDisplay(reg: Registration, team: Team) {
+/**
+ * The less-used per-team actions. These were three or four naked icon buttons on every row, which
+ * turned a 30-team field into a wall of icons.
+ */
+function TeamRowMenu(props: ITeamRowMenuProps) {
+  const { teamName, hasPlayed, nextLetter, onAddSibling, onDelete } = props;
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
+  const runAndClose = (action: () => void) => {
+    setAnchorEl(null);
+    action();
+  };
+
+  return (
+    <>
+      <IconButton
+        size="small"
+        aria-label={`More actions for ${teamName}`}
+        aria-haspopup="true"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+      >
+        <MoreVert fontSize="small" />
+      </IconButton>
+      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+        {nextLetter !== '' && (
+          <MenuItem onClick={() => runAndClose(onAddSibling)}>
+            <PersonAdd fontSize="small" sx={{ mr: 1 }} />
+            {`Add ${nextLetter} team for this organization`}
+          </MenuItem>
+        )}
+        {/* Disabled with the reason spelled out, rather than a dead icon plus a tooltip. */}
+        <MenuItem disabled={hasPlayed} onClick={() => runAndClose(onDelete)}>
+          <Delete fontSize="small" sx={{ mr: 1 }} />
+          {hasPlayed ? "Can't delete — games entered" : 'Delete team'}
+        </MenuItem>
+      </Menu>
+    </>
+  );
+}
+
+function teamCountCaption(numTeams: number, numTeamsForSchedule: number | null) {
+  const noun = numTeams === 1 ? 'team' : 'teams';
+  if (numTeamsForSchedule === null) return `${noun} registered`;
+  return `${noun} registered of the ${numTeamsForSchedule} this schedule expects`;
+}
+
+function scheduleFullReason(expectedNumTeams: number | null) {
+  return `The schedule is built for ${expectedNumTeams} teams and they're all registered. Change the schedule to fit more.`;
+}
+
+function teamAttributeDisplay(reg: Registration, team: Team) {
   const attributes: string[] = [];
   if (reg.isSmallSchool) attributes.push('SS');
   if (team.isJV) attributes.push('JV');
   if (team.isUG) attributes.push('UG');
   if (team.isD2) attributes.push('D2');
-  attributes.push(numPlayersDisplay(team.players.length));
 
   return attributes.join(' · ');
-}
-
-function numPlayersDisplay(num: number) {
-  if (num === 1) return `${num} player`;
-  return `${num} players`;
 }
 
 export default TeamsPage;

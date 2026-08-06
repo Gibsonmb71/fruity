@@ -47,7 +47,7 @@ export default function ServerControlCard() {
   );
 
   return (
-    <YfCard title="Tournament Server" secondaryHeader={statusChip}>
+    <YfCard title="Tournament Server" actions={statusChip}>
       <Typography variant="body2" sx={{ mb: 2 }}>
         Runs a scorekeeping page on this computer that other devices on the same network can open in a browser. It is
         off until you start it, and stops when you close YellowFruit.

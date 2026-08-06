@@ -17,8 +17,8 @@ import {
 import { Add, Delete } from '@mui/icons-material';
 import { useContext, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import YfCard from './YfCard';
 import { TournamentContext } from '../TournamentManager';
+import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import AnswerType, { sortAnswerTypes } from '../DataModel/AnswerType';
 import { hotkeyFormat, SettingRow, SettingsList } from '../Utils/GeneralReactUtils';
@@ -66,32 +66,32 @@ function TossupSettingsCard() {
   };
 
   return (
-    <YfCard title="Toss-ups">
-      <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
-        Point values
-      </Typography>
+    <YfCard
+      title="Toss-ups"
+      description="Every point value a toss-up can be worth. At least one has to be positive."
+      variant="rows"
+      fullHeight
+    >
       <ActivePointValueList answerTypes={activeAnswerTypes} deleteItem={deleteAnswerType} allDisabled={readOnly} />
       {canAddMoreValues && (
-        <>
-          <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-            Add a point value
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, py: 1.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            Add:
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, pt: 1 }}>
-            <AvailableStandardPtValuesList
-              pointValues={pointValuesForChips}
-              addPointValue={addAnswerType}
-              disabled={readOnly}
-            />
-            <Chip
-              key="custom"
-              variant="outlined"
-              label="Custom..."
-              disabled={readOnly}
-              onDelete={() => setCustomPtValFormOpen(true)}
-              deleteIcon={<Add />}
-            />
-          </Box>
-        </>
+          <AvailableStandardPtValuesList
+            pointValues={pointValuesForChips}
+            addPointValue={addAnswerType}
+            disabled={readOnly}
+          />
+          <Chip
+            key="custom"
+            variant="outlined"
+            label="Other…"
+            disabled={readOnly}
+            onDelete={() => setCustomPtValFormOpen(true)}
+            deleteIcon={<Add />}
+          />
+        </Box>
       )}
       <CustomPtValDialog
         isOpen={customPtValFormOpen}
@@ -124,11 +124,15 @@ function ActivePointValueList(props: IActivePointValueListProps) {
     <SettingsList>
       {answerTypes.map((answerType) => {
         const disableDelete = cantDeletePositive && answerType.value > 0;
-        const tooltip = disableDelete ? 'You must have at least one positive point value' : 'Delete this point value';
+        // Say why the button is dead rather than leaving the user to poke at it. The last positive
+        // value can't go, and nothing about the rules can change once games exist.
+        let description: string | undefined;
+        if (allDisabled) description = undefined;
+        else if (disableDelete) description = 'A tournament needs at least one positive value.';
 
         return (
-          <SettingRow key={answerType.value} label={`${answerType.value} pts`}>
-            <Tooltip title={tooltip} placement="left">
+          <SettingRow key={answerType.value} label={`${answerType.value} pts`} description={description}>
+            <Tooltip title={disableDelete ? '' : 'Remove this point value'} placement="left">
               <span>
                 <IconButton
                   size="small"

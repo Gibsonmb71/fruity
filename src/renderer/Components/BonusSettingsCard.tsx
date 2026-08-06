@@ -1,16 +1,18 @@
-import { Divider, Switch, Typography } from '@mui/material';
-import { ChangeEvent, useContext, useEffect, useState } from 'react';
+import { Switch } from '@mui/material';
+import { ChangeEvent, useContext } from 'react';
 import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import { TournamentContext } from '../TournamentManager';
-import { parseAndValidateStringToInt, invalidInteger } from '../Utils/GeneralUtils';
-import { CollapsibleArea, SettingRow, SettingsList, YfNumericField } from '../Utils/GeneralReactUtils';
+import { parseAndValidateStringToInt } from '../Utils/GeneralUtils';
+import { AdvancedNumericRuleField, SettingRow, SettingsList, YfDisclosureRow } from '../Utils/GeneralReactUtils';
 
 function BonusSettingsCard() {
   const tournManager = useContext(TournamentContext);
   const thisTournamentRules = tournManager.tournament.scoringRules;
   const [useBonuses, setUseBonuses] = useSubscription(thisTournamentRules.useBonuses);
   const [bonusesBounce, setBonusesBounce] = useSubscription(thisTournamentRules.bonusesBounceBack);
+  const [maxBonusScore] = useSubscription(thisTournamentRules.maximumBonusScore);
+  const [maxBonusParts] = useSubscription(thisTournamentRules.maximumPartsPerBonus);
   const readOnly = tournManager.tournament.hasMatchData;
 
   const handleUseBonusesChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -24,23 +26,26 @@ function BonusSettingsCard() {
   };
 
   return (
-    <YfCard title="Bonuses">
+    <YfCard title="Bonuses" variant="rows" fullHeight>
       <SettingsList>
-        <SettingRow label="Bonuses" description="Teams answer a bonus after converting a toss-up.">
+        <SettingRow label="Use bonuses" description="Teams answer a bonus after converting a toss-up.">
           <Switch disabled={readOnly} checked={useBonuses} onChange={handleUseBonusesChange} />
         </SettingRow>
-        <SettingRow label="Bouncebacks">
+        <SettingRow
+          label="Bouncebacks"
+          description={useBonuses ? 'Unanswered parts go to the other team.' : 'Requires bonuses to be turned on.'}
+        >
           <Switch disabled={readOnly || !useBonuses} checked={bonusesBounce} onChange={handleBonusesBounceChange} />
         </SettingRow>
-      </SettingsList>
-      {useBonuses && (
-        <>
-          <Divider sx={{ mt: 1 }} />
-          <CollapsibleArea title={<Typography variant="subtitle2">Advanced</Typography>} secondaryTitle={null}>
+        {useBonuses && (
+          <YfDisclosureRow
+            label="Bonus structure"
+            summary={`${maxBonusScore} pts over ${maxBonusParts} part${maxBonusParts === 1 ? '' : 's'}`}
+          >
             <AdvancedBonusSection />
-          </CollapsibleArea>
-        </>
-      )}
+          </YfDisclosureRow>
+        )}
+      </SettingsList>
     </YfCard>
   );
 }
@@ -168,56 +173,6 @@ function AdvancedBonusSection() {
         onBlur={() => handleDivisorChange(divisor)}
       />
     </SettingsList>
-  );
-}
-
-interface IAdvancedNumericRuleFieldProps {
-  label: string;
-  required: boolean;
-  value: string;
-  onChange: (val: string) => void;
-  onBlur: (val: string) => void;
-  disabled: boolean;
-  minValue: number;
-  maxValue: number;
-}
-
-/** small numeric field used for advanced settings like divisors */
-export function AdvancedNumericRuleField(props: IAdvancedNumericRuleFieldProps) {
-  const { label, required, value, onChange, onBlur, disabled, minValue, maxValue } = props;
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!invalidInteger(value, minValue, maxValue)) setError(false);
-  }, [value, minValue, maxValue]);
-
-  const handleChange = (str: string) => {
-    if (required && str === '') {
-      setError(true);
-    } else if (invalidInteger(str, minValue, maxValue)) {
-      setError(true);
-    } else {
-      setError(false);
-    }
-    onChange(str);
-  };
-
-  return (
-    <SettingRow label={label}>
-      <YfNumericField
-        hiddenLabel
-        sx={{ width: '9ch' }}
-        slotProps={{ htmlInput: { min: 0 } }}
-        disabled={disabled}
-        error={error}
-        value={value}
-        onChange={(e) => handleChange(e.target.value)}
-        onBlur={() => onBlur(value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') onBlur(value);
-        }}
-      />
-    </SettingRow>
   );
 }
 
