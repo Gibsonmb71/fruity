@@ -17,6 +17,8 @@ import StandardSchedule from './StandardSchedule';
 import { AggregateStandings, PhaseStandings } from './StatSummaries';
 import { Team } from './Team';
 import { IQbjTournamentSite, TournamentSite } from './TournamentSite';
+import { IYftFileScheduledMatch, ScheduledMatch } from './ScheduledMatch';
+import { IYftFileRoom, TournamentRoom } from './TournamentRoom';
 
 /**
  * Represents the data for a tournament.
@@ -73,6 +75,16 @@ interface ITournamentExtraData {
   trackDiv2: boolean;
   finalRankingsReady?: boolean;
   usingScheduleTemplate?: boolean;
+  /** Physical playing locations, for the tournament server's room workflow */
+  rooms?: IYftFileRoom[];
+  /** Games the tournament intends to play, as opposed to ones it has played */
+  scheduledMatches?: IYftFileScheduledMatch[];
+  /** The last round explicitly released to room scorekeepers */
+  releasedRoundNumber?: number;
+  /** Whether control should release the next round after the current one is complete */
+  autoReleaseNextRound?: boolean;
+  /** Full phases whose advancement checkpoint has already been confirmed */
+  rebracketedPhaseCodes?: string[];
 }
 
 /** YellowFruit implementation of the Tournament object */
@@ -130,6 +142,31 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
 
   finalRankingsReady: boolean = false;
 
+  /**
+   * Physical playing locations for the tournament server's room workflow.
+   *
+   * Configuration only. A room's live state — connected, what it's playing, how far in — is server
+   * session state and is deliberately not part of the tournament file.
+   */
+  rooms: TournamentRoom[] = [];
+
+  /**
+   * Games the tournament intends to play.
+   *
+   * Kept separate from `Match`, which always means a game that happened and has statistics. A
+   * scheduled match points at its `Match` through `resultMatchId` once one has been accepted.
+   */
+  scheduledMatches: ScheduledMatch[] = [];
+
+  /** The highest round rooms are currently allowed to start. Null means no round is released. */
+  releasedRoundNumber: number | null = null;
+
+  /** Optional convenience for continuous prelims; rebracket boundaries still require confirmation. */
+  autoReleaseNextRound: boolean = false;
+
+  /** Explicit confirmation history for phase boundaries; never inferred from generated schedules. */
+  rebracketedPhaseCodes: string[] = [];
+
   htmlGenerator: HtmlReportGenerator;
 
   appVersion: string = '';
@@ -175,6 +212,14 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
       trackDiv2: this.trackDiv2,
       finalRankingsReady: this.finalRankingsReady,
       usingScheduleTemplate: this.usingScheduleTemplate,
+      // Omitted entirely when there are none, so a tournament that never used the server writes the
+      // same file it always did.
+      rooms: this.rooms.length > 0 ? this.rooms.map((room) => room.toYftFileObject()) : undefined,
+      scheduledMatches:
+        this.scheduledMatches.length > 0 ? this.scheduledMatches.map((match) => match.toYftFileObject()) : undefined,
+      releasedRoundNumber: this.releasedRoundNumber ?? undefined,
+      autoReleaseNextRound: this.autoReleaseNextRound || undefined,
+      rebracketedPhaseCodes: this.rebracketedPhaseCodes.length > 0 ? this.rebracketedPhaseCodes : undefined,
     };
     const yftFileObj = { YfData: metadata, ...qbjObject };
 

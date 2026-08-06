@@ -1,5 +1,5 @@
-import Grid from '@mui/material/Unstable_Grid2';
-import { Alert, Stack } from '@mui/material';
+import { Box } from '@mui/material';
+import Grid from '@mui/material/Grid';
 import { useContext } from 'react';
 import { Lock } from '@mui/icons-material';
 import StandardRuleSetCard from './StandardRuleSetCard';
@@ -11,42 +11,58 @@ import RoundLengthSettingsCard from './RoundLengthSettingsCard';
 import LightningRoundSettingsCard from './LightningRoundSettingsCard';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
+import { YfNotice, YfPageHeader } from '../Utils/GeneralReactUtils';
 
 function RulesPage() {
   const tournManager = useContext(TournamentContext);
   const [readOnly] = useSubscription(tournManager.tournament.hasMatchData);
 
   return (
-    <Grid container spacing={2}>
+    <>
+      <YfPageHeader
+        title="Rules"
+        description="How games are scored. Start from a standard rule set, then adjust whatever differs."
+      />
       {readOnly && (
-        <Grid xs={12}>
-          <Alert variant="filled" severity="info" icon={<Lock fontSize="small" />}>
-            Settings are read-only
-          </Alert>
-        </Grid>
+        <Box sx={{ mb: 2 }}>
+          <YfNotice
+            icon={<Lock fontSize="small" />}
+            title="Scoring rules are locked"
+            description="Games have already been entered. Changing how games are scored now would quietly invalidate
+              them, so these settings unlock again only if every game is deleted."
+          />
+        </Box>
       )}
-      <Grid xs={12}>
-        <StandardRuleSetCard />
-      </Grid>
-      <Grid xs={12} sm={4}>
-        <Stack spacing={2}>
+      {/*
+        Paired the way a format actually gets settled — ruleset first, then match length beside what a
+        toss-up is worth, bonuses beside overtime, roster limits beside anything unusual. The previous
+        three-column grid distributed panels arbitrarily, so the reading order changed with the window
+        width and unrelated settings ended up as neighbors.
+      */}
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12 }}>
+          <StandardRuleSetCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
           <RoundLengthSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
           <TossupSettingsCard />
-        </Stack>
-      </Grid>
-      <Grid xs={12} sm={4}>
-        <Stack spacing={2}>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
           <BonusSettingsCard />
-          <LightningRoundSettingsCard />
-        </Stack>
-      </Grid>
-      <Grid xs={12} sm={4}>
-        <Stack spacing={2}>
-          <MaxPlayersSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
           <OvertimeSettingsCard />
-        </Stack>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <MaxPlayersSettingsCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <LightningRoundSettingsCard />
+        </Grid>
       </Grid>
-    </Grid>
+    </>
   );
 }
 

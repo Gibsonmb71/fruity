@@ -1,16 +1,16 @@
-import { FormGroup, FormControlLabel, Switch, Box, Typography } from '@mui/material';
+import { Switch } from '@mui/material';
 import { ChangeEvent, useContext } from 'react';
 import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import { TournamentContext } from '../TournamentManager';
 import { parseAndValidateStringToInt } from '../Utils/GeneralUtils';
-import { AdvancedNumericRuleField } from './BonusSettingsCard';
-import { CollapsibleArea } from '../Utils/GeneralReactUtils';
+import { AdvancedNumericRuleField, SettingRow, SettingsList, YfDisclosureRow } from '../Utils/GeneralReactUtils';
 
 function LightningRoundSettingsCard() {
   const tournManager = useContext(TournamentContext);
   const thisTournamentRules = tournManager.tournament.scoringRules;
   const [useLightning, setUseLightning] = useSubscription(thisTournamentRules.lightningCountPerTeam > 0);
+  const [divisor] = useSubscription(thisTournamentRules.lightningDivisor);
   const readOnly = tournManager.tournament.hasMatchData;
 
   const handleUseLightningChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -19,23 +19,30 @@ function LightningRoundSettingsCard() {
   };
 
   return (
-    <YfCard title="Lightning Round">
-      <FormGroup sx={{ paddingBottom: useLightning ? 2 : 0 }}>
-        <FormControlLabel
-          label="Use Lightning Round"
-          control={<Switch checked={useLightning} disabled={readOnly} onChange={handleUseLightningChange} />}
-        />
-      </FormGroup>
-      {useLightning && (
-        <CollapsibleArea title={<Typography variant="subtitle2">Advanced</Typography>} secondaryTitle={null}>
-          <AdvancedSection />
-        </CollapsibleArea>
-      )}
+    <YfCard
+      title="Special formats"
+      description="Extra scoring outside the normal toss-up and bonus cycle."
+      variant="rows"
+      fullHeight
+    >
+      <SettingsList>
+        <SettingRow
+          label="Lightning round"
+          description="Each team gets its own timed round, entered as a single point total."
+        >
+          <Switch checked={useLightning} disabled={readOnly} onChange={handleUseLightningChange} />
+        </SettingRow>
+        {useLightning && (
+          <YfDisclosureRow label="Lightning scoring" summary={`Divisor ${divisor}`}>
+            <LightningAdvancedSection />
+          </YfDisclosureRow>
+        )}
+      </SettingsList>
     </YfCard>
   );
 }
 
-function AdvancedSection() {
+function LightningAdvancedSection() {
   const tournManager = useContext(TournamentContext);
   const [divisor, setDivisor] = useSubscription(tournManager.tournament.scoringRules.lightningDivisor.toString());
 
@@ -47,7 +54,7 @@ function AdvancedSection() {
   };
 
   return (
-    <Box sx={{ '& .MuiInputBase-root': { fontSize: 12 } }}>
+    <SettingsList>
       <AdvancedNumericRuleField
         label="Divisor"
         required
@@ -58,7 +65,7 @@ function AdvancedSection() {
         onChange={setDivisor}
         onBlur={() => handleDivisorChange(divisor)}
       />
-    </Box>
+    </SettingsList>
   );
 }
 

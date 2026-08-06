@@ -1,12 +1,9 @@
 import { MemoryRouter as Router, Routes, Route } from 'react-router-dom';
 
-import '@fontsource/roboto/300.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
 import './App.css';
 
 import CssBaseline from '@mui/material/CssBaseline';
+import { ThemeProvider } from '@mui/material/styles';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import Box from '@mui/material/Box';
@@ -34,6 +31,9 @@ import PoolAssignmentDialog from './Components/PoolAssignmentDialog';
 import MatchImportResultDialog from './Components/MatchImportResultDialog';
 import SqbsExportDialog from './Components/SqbsExportDialog';
 import AboutYfDialog from './Components/AboutYfDialog';
+import RoomsPage from './Components/Rooms/RoomsPage';
+import yfTheme from './Theme/yfTheme';
+import { headerHeight } from './Theme/tokens';
 
 window.onerror = () => window.electron.ipcRenderer.sendMessage(IpcRendToMain.WebPageCrashed);
 window.electron.ipcRenderer.removeAllListeners(); // needed in dev environemnt so that you don't end up with duplicate listers when the app reloads
@@ -60,14 +60,14 @@ function YellowFruit() {
   }, [mgr]);
 
   return (
-    <>
+    <ThemeProvider theme={yfTheme} defaultMode="system">
       <CssBaseline />
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <TournamentContext.Provider value={mgr}>
           <TournamentEditor />
         </TournamentContext.Provider>
       </LocalizationProvider>
-    </>
+    </ThemeProvider>
   );
 }
 
@@ -112,8 +112,20 @@ function TournamentEditor() {
   return (
     <>
       <NavBar activePage={activePage} setActivePage={changePage} />
-      <Box sx={{ p: 3 }}>
-        <ActivePage whichPage={activePage} />
+      <Box
+        component="main"
+        sx={{
+          // The header is exactly `headerHeight` tall on every platform (it reserves horizontal room
+          // for the macOS traffic lights, not vertical), so this is the whole of the remaining
+          // viewport. If the two ever disagree the page grows a scrollbar it doesn't need.
+          minHeight: `calc(100vh - ${headerHeight}px)`,
+          px: { xs: 2, md: 3 },
+          py: 2.5,
+        }}
+      >
+        <Box sx={{ maxWidth: 1500, mx: 'auto' }}>
+          <ActivePage whichPage={activePage} onNavigate={setactivePage} />
+        </Box>
       </Box>
       <GenericDialog />
       <TeamEditDialog />
@@ -132,14 +144,15 @@ function TournamentEditor() {
 
 interface IActivePageProps {
   whichPage: ApplicationPages;
+  onNavigate: (page: ApplicationPages) => void;
 }
 
 /** A switch statement for which page to show */
 function ActivePage(props: IActivePageProps) {
-  const { whichPage } = props;
+  const { whichPage, onNavigate } = props;
   switch (whichPage) {
     case ApplicationPages.General:
-      return <GeneralPage />;
+      return <GeneralPage onNavigate={onNavigate} />;
     case ApplicationPages.Rules:
       return <RulesPage />;
     case ApplicationPages.Schedule:
@@ -147,7 +160,9 @@ function ActivePage(props: IActivePageProps) {
     case ApplicationPages.Teams:
       return <TeamsPage />;
     case ApplicationPages.Games:
-      return <GamesPage />;
+      return <GamesPage onNavigate={onNavigate} />;
+    case ApplicationPages.Rooms:
+      return <RoomsPage />;
     case ApplicationPages.StatReport:
       return <StatReportPage />;
     default:

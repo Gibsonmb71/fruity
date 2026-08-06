@@ -1,6 +1,6 @@
 import { IconButton, Stack, Table, TableBody, TableCell, TableContainer, TableRow, Tooltip } from '@mui/material';
 import { useContext, useMemo } from 'react';
-import Grid from '@mui/material/Unstable_Grid2';
+import Grid from '@mui/material/Grid';
 import { Add, Edit, JoinRight } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import YfCard from './YfCard';
@@ -61,8 +61,8 @@ function NullMatrix(props: INullMatrixProps) {
   const { message } = props;
 
   return (
-    <Grid xs={12}>
-      <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'lightgray' }}>
+    <Grid size={{ xs: 12 }}>
+      <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
         <Table size="small">
           <TableBody>
             <TableRow>
@@ -87,8 +87,8 @@ function PoolMatrix(props: IPoolMatrixProps) {
   if (pool.poolTeams.length === 0) return null;
 
   return (
-    <Grid xs={12}>
-      <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'lightgray' }}>
+    <Grid size={{ xs: 12 }}>
+      <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
         <Table size="small">
           <TableBody>
             <TableRow>
@@ -139,7 +139,7 @@ function MatrixCell(props: IMatrixCellProps) {
   const canAddMatch = useMemo(() => tournManager.tournament.readyToAddMatches(), [tournManager]);
 
   if (team === opponent) {
-    return <TableCell sx={{ backgroundColor: 'lightgray' }} />;
+    return <TableCell sx={{ backgroundColor: 'action.disabledBackground' }} />;
   }
   const match = tournManager.tournament.findMatchBetweenTeams(team, opponent, phase, nthRoundRobin);
   if (!match) {

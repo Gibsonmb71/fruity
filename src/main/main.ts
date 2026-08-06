@@ -9,7 +9,7 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain, protocol, net, dialog } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, protocol, net, dialog, nativeTheme } from 'electron';
 import { pathToFileURL } from 'url';
 import { IpcMainEvent } from 'electron/main';
 import MenuBuilder from './menu';
@@ -40,7 +40,8 @@ import {
 } from './FileUtils';
 import { IpcBidirectional, IpcRendToMain } from '../IPCChannels';
 import { FileSwitchActions, statReportProtocol } from '../SharedUtils';
-import { checkForNewVersions } from './UpdateChecker';
+import checkForNewVersions from './UpdateChecker';
+import registerTournamentServerIpc, { shutDownTournamentServer } from './server/ServerIpc';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -50,6 +51,11 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+
+// Kept in sync with the renderer theme's header surface (see src/renderer/Theme/yfTheme.ts) so the
+// window chrome doesn't flash a different color while the page loads.
+const headerSurfaceLight = '#ffffff';
+const headerSurfaceDark = '#171b1f';
 
 ipcMain.on(IpcBidirectional.ipcExample, async (event, arg) => {
   const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
@@ -96,17 +102,33 @@ const createWindow = async () => {
     return path.join(RESOURCES_PATH, ...paths);
   };
 
+  const isMac = process.platform === 'darwin';
+  if (isMac) {
+    app.dock?.setIcon(getAssetPath('icon-macos.png'));
+  }
+
   mainWindow = new BrowserWindow({
     show: false,
     width: 1200,
     height: 728,
+    minWidth: 900,
+    minHeight: 600,
     icon: getAssetPath('icon.png'),
+    // Match the app header's neutral surface so there's no colored flash before the renderer paints.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? headerSurfaceDark : headerSurfaceLight,
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       preload: app.isPackaged ? path.join(__dirname, 'preload.js') : path.join(__dirname, '../../.erb/dll/preload.js'),
     },
   });
 
   mainWindow.loadURL(resolveHtmlPath('index.html'));
+
+  const syncWindowBackground = () => {
+    mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? headerSurfaceDark : headerSurfaceLight);
+  };
+  nativeTheme.on('updated', syncWindowBackground);
+  mainWindow.on('closed', () => nativeTheme.off('updated', syncWindowBackground));
 
   mainWindow.on('ready-to-show', () => {
     if (!mainWindow) {
@@ -158,6 +180,11 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Release the tournament server's port rather than leaving it bound after the app closes.
+app.on('will-quit', () => {
+  shutDownTournamentServer();
+});
+
 app
   .whenReady()
   .then(() => {
@@ -186,6 +213,8 @@ app
     ipcMain.on(IpcBidirectional.GetAppVersion, (event) =>
       event.reply(IpcBidirectional.GetAppVersion, app.getVersion()),
     );
+    // Registers handlers only. The tournament server binds a port only when the user starts it.
+    registerTournamentServerIpc(() => mainWindow);
 
     protocol.handle(statReportProtocol, (request) => {
       const url = pathToFileURL(path.resolve(inAppStatReportDirectory, parseStatReportPath(request.url)));

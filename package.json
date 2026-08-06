@@ -12,10 +12,11 @@
   },
   "main": "./.erb/dll/main.bundle.dev.js",
   "scripts": {
-    "build": "concurrently \"npm run build:main\" \"npm run build:renderer\"",
+    "build": "concurrently \"npm run build:main\" \"npm run build:renderer\" \"npm run build:room\"",
     "build:dll": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.renderer.dev.dll.ts",
     "build:main": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.main.prod.ts",
     "build:renderer": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.renderer.prod.ts",
+    "build:room": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.room.prod.ts",
     "postinstall": "ts-node .erb/scripts/check-native-dep.js && electron-builder install-app-deps && npm run build:dll",
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "package": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish never && npm run build:dll",
@@ -27,7 +28,9 @@
     "start:preload": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true webpack --config ./.erb/configs/webpack.config.preload.dev.ts",
     "start:renderer": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true webpack serve --config ./.erb/configs/webpack.config.renderer.dev.ts",
     "jesttest": "jest",
-    "test": "vitest"
+    "room:harness": "ts-node --compiler-options {\\\"module\\\":\\\"commonjs\\\"} src/room/devHarness.ts",
+    "test": "vitest",
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "browserslist": [],
   "prettier": {
@@ -79,17 +82,18 @@
     }
   },
   "dependencies": {
-    "@emotion/react": "^11.11.1",
-    "@emotion/styled": "^11.11.0",
-    "@fontsource/roboto": "^5.0.8",
-    "@mui/icons-material": "^5.14.16",
-    "@mui/material": "^5.14.17",
-    "@mui/x-date-pickers": "^6.18.4",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.2.0",
+    "@mui/material": "^9.2.0",
+    "@mui/x-date-pickers": "^9.10.1",
     "dayjs": "^1.11.10",
     "electron-debug": "^3.2.0",
     "electron-log": "^4.4.8",
     "electron-updater": "^6.3.0",
+    "modaq": "^1.41.1",
     "octokit": "^5.0.3",
+    "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hotkeys-hook": "^4.5.0",
@@ -107,6 +111,7 @@
     "@testing-library/react": "^14.0.0",
     "@types/jest": "^29.5.5",
     "@types/node": "22.16.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.2.21",
     "@types/react-dom": "^18.2.7",
     "@types/react-test-renderer": "^18.0.1",
@@ -177,6 +182,7 @@
     ],
     "afterSign": ".erb/scripts/notarize.js",
     "mac": {
+      "icon": "assets/icon-macos.icns",
       "target": {
         "target": "default",
         "arch": [
@@ -192,7 +198,7 @@
       "notarize": false
     },
     "dmg": {
-      "icon": "assets/icon.icns",
+      "icon": "assets/icon-macos.icns",
       "contents": [
         {
           "x": 130,

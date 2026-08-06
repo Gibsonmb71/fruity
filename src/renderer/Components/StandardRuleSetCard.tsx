@@ -1,8 +1,8 @@
 import { ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { useContext } from 'react';
-import YfCard from './YfCard';
 import { CommonRuleSets, ScoringRules } from '../DataModel/ScoringRules';
 import { TournamentContext } from '../TournamentManager';
+import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 
 // Defines the order the buttons should be in
@@ -14,9 +14,11 @@ function StandardRuleSetCard() {
   const readOnly = tournManager.tournament.hasMatchData;
 
   return (
-    <YfCard title="Standard Rule Sets">
+    <YfCard
+      title="Ruleset"
+      description="Start here. Picking one applies a full set of defaults; every section below can still be changed."
+    >
       <ToggleButtonGroup
-        size="small"
         color="primary"
         exclusive
         disabled={readOnly}

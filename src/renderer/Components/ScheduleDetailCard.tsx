@@ -1,5 +1,5 @@
 import { useContext, useState } from 'react';
-import Grid from '@mui/material/Unstable_Grid2';
+import Grid from '@mui/material/Grid';
 import {
   Accordion,
   AccordionDetails,
@@ -30,7 +30,7 @@ import { Phase, PhaseTypes, WildCardRankingMethod } from '../DataModel/Phase';
 import { Pool, advOpportunityDisplay } from '../DataModel/Pool';
 import { LinkButton } from '../Utils/GeneralReactUtils';
 
-const cardTitle = 'Schedule Detail';
+const cardTitle = 'Schedule detail';
 const unlockCustSchedTooltip =
   'Add, remove, or modify stages and pools. Seeding and rebracketing assistance is not available for custom schedules.';
 const usingCustSchedTooltip = 'Using a custom schedule. Seeding and rebracketing assistance are not available.';
@@ -54,7 +54,7 @@ export default function ScheduleDetailCard() {
   return (
     <YfCard
       title={cardTitle}
-      secondaryHeader={
+      actions={
         <Tooltip title={tooltip}>
           <span>
             <Button
@@ -87,7 +87,7 @@ export default function ScheduleDetailCard() {
             onClick={() => tournManager.addPlayoffPhase()}
             startIcon={<Add />}
           >
-            Add Playoff Stage
+            Add playoff stage
           </Button>
         </Tooltip>
       )}
@@ -233,9 +233,12 @@ function PhaseEditor(props: IPhaseEditorProps) {
   return (
     <Grid container spacing={2}>
       {wcRules.length > 0 && phase.pools.length > 1 && (
-        <Grid xs={12} sx={{ '& .MuiFormControlLabel-label': { typography: 'body2' }, '& .MuiRadio-root': { py: 0.5 } }}>
+        <Grid
+          sx={{ '& .MuiFormControlLabel-label': { typography: 'body2' }, '& .MuiRadio-root': { py: 0.5 } }}
+          size={{ xs: 12 }}
+        >
           <FormControl>
-            <FormLabel>Cross-Pool (Wild Card) Ranking Method</FormLabel>
+            <FormLabel>Cross-pool (wild card) ranking method</FormLabel>
             <RadioGroup
               value={wcRankValue}
               onChange={(e) => handleWcRankMethodChange(e.target.value as WildCardRankingMethod)}
@@ -254,13 +257,13 @@ function PhaseEditor(props: IPhaseEditorProps) {
           </FormControl>
         </Grid>
       )}
-      <Grid xs={5}>
+      <Grid size={{ xs: 5 }}>
         <Box
           sx={{
             marginTop: 1,
             border: 1,
             borderRadius: 1,
-            borderColor: 'lightgray',
+            borderColor: 'divider',
             '& .MuiListItem-root': { p: 0 },
             '& .MuiSvgIcon-root': { fontSize: '1.2rem' },
           }}
@@ -304,20 +307,20 @@ function PhaseEditor(props: IPhaseEditorProps) {
           </List>
         </Box>
       </Grid>
-      <Grid xs={7}>
+      <Grid size={{ xs: 7 }}>
         <Typography sx={{ marginTop: 1 }} variant="subtitle2">
           {selectedPool?.name}
         </Typography>
         {selectedPool && <PoolDetail selectedPool={selectedPool} hasWildCardAdvancement={wcRules.length > 0} />}
       </Grid>
-      <Grid xs>
+      <Grid size={{ xs: 'grow' }}>
         {!usingTemplate && (
           <Button size="small" variant="outlined" startIcon={<Add />} onClick={() => tournManager.addPool(phase)}>
             Add Pool
           </Button>
         )}
       </Grid>
-      <Grid xs="auto">
+      <Grid size={{ xs: 'auto' }}>
         {canAddTB && (
           <LinkButton onClick={() => tournManager.addTiebreakerAfter(phase)}>
             <Add fontSize="small" />
@@ -345,7 +348,11 @@ function PoolDetail(props: IPoolDetailProps) {
   const { selectedPool, hasWildCardAdvancement } = props;
 
   return (
-    <Box typography="body2">
+    <Box
+      sx={{
+        typography: 'body2',
+      }}
+    >
       <List dense>
         <ListItem disableGutters>{roundRobinDisplay(selectedPool)}</ListItem>
         {selectedPool.seeds.length > 0 && <ListItem disableGutters>Seeds {selectedPool.seeds.join(', ')}</ListItem>}
@@ -405,8 +412,8 @@ function ScheduleZeroState() {
 
   return (
     <Grid container>
-      <Grid xs />
-      <Grid xs="auto">
+      <Grid size={{ xs: 'grow' }} />
+      <Grid size={{ xs: 'auto' }}>
         <Box sx={{ py: 13 }}>
           <div>
             <Typography variant="body2" sx={{ marginBottom: 1 }}>
@@ -420,7 +427,7 @@ function ScheduleZeroState() {
           </div>
         </Box>
       </Grid>
-      <Grid xs />
+      <Grid size={{ xs: 'grow' }} />
     </Grid>
   );
 }

@@ -1,17 +1,18 @@
-import Grid from '@mui/material/Unstable_Grid2';
-import { FormGroup, FormControlLabel, Switch, Typography, Stack, Box } from '@mui/material';
-import { ChangeEvent, useContext, useEffect, useState } from 'react';
+import { Switch } from '@mui/material';
+import { ChangeEvent, useContext } from 'react';
 import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import { TournamentContext } from '../TournamentManager';
-import { parseAndValidateStringToInt, invalidInteger } from '../Utils/GeneralUtils';
-import { CollapsibleArea, YfNumericField } from '../Utils/GeneralReactUtils';
+import { parseAndValidateStringToInt } from '../Utils/GeneralUtils';
+import { AdvancedNumericRuleField, SettingRow, SettingsList, YfDisclosureRow } from '../Utils/GeneralReactUtils';
 
 function BonusSettingsCard() {
   const tournManager = useContext(TournamentContext);
   const thisTournamentRules = tournManager.tournament.scoringRules;
   const [useBonuses, setUseBonuses] = useSubscription(thisTournamentRules.useBonuses);
   const [bonusesBounce, setBonusesBounce] = useSubscription(thisTournamentRules.bonusesBounceBack);
+  const [maxBonusScore] = useSubscription(thisTournamentRules.maximumBonusScore);
+  const [maxBonusParts] = useSubscription(thisTournamentRules.maximumPartsPerBonus);
   const readOnly = tournManager.tournament.hasMatchData;
 
   const handleUseBonusesChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -25,24 +26,26 @@ function BonusSettingsCard() {
   };
 
   return (
-    <YfCard title="Bonuses">
-      <FormGroup sx={{ paddingBottom: useBonuses ? 2 : 0 }}>
-        <FormControlLabel
-          label="Bonuses"
-          control={<Switch disabled={readOnly} checked={useBonuses} onChange={handleUseBonusesChange} />}
-        />
-        <FormControlLabel
+    <YfCard title="Bonuses" variant="rows" fullHeight>
+      <SettingsList>
+        <SettingRow label="Use bonuses" description="Teams answer a bonus after converting a toss-up.">
+          <Switch disabled={readOnly} checked={useBonuses} onChange={handleUseBonusesChange} />
+        </SettingRow>
+        <SettingRow
           label="Bouncebacks"
-          control={
-            <Switch disabled={readOnly || !useBonuses} checked={bonusesBounce} onChange={handleBonusesBounceChange} />
-          }
-        />
-      </FormGroup>
-      {useBonuses && (
-        <CollapsibleArea title={<Typography variant="subtitle2">Advanced</Typography>} secondaryTitle={null}>
-          <AdvancedBonusSection />
-        </CollapsibleArea>
-      )}
+          description={useBonuses ? 'Unanswered parts go to the other team.' : 'Requires bonuses to be turned on.'}
+        >
+          <Switch disabled={readOnly || !useBonuses} checked={bonusesBounce} onChange={handleBonusesBounceChange} />
+        </SettingRow>
+        {useBonuses && (
+          <YfDisclosureRow
+            label="Bonus structure"
+            summary={`${maxBonusScore} pts over ${maxBonusParts} part${maxBonusParts === 1 ? '' : 's'}`}
+          >
+            <AdvancedBonusSection />
+          </YfDisclosureRow>
+        )}
+      </SettingsList>
     </YfCard>
   );
 }
@@ -118,124 +121,58 @@ function AdvancedBonusSection() {
   };
 
   return (
-    <Box sx={{ '& .MuiInputBase-root': { fontSize: 12 } }}>
-      <Stack>
-        <AdvancedNumericRuleField
-          label="Max bonus score"
-          required
-          value={maxBonusScore}
-          disabled={readOnly || ptsPerPart !== ''}
-          minValue={1}
-          maxValue={1000}
-          onChange={setMaxBonusScore}
-          onBlur={() => handleMaxBonusScoreChange(maxBonusScore)}
-        />
-        <AdvancedNumericRuleField
-          label="Min parts per bonus"
-          required
-          value={minBonusParts}
-          disabled={readOnly}
-          minValue={1}
-          maxValue={parseInt(maxBonusParts, 10)}
-          onChange={setMinBonusParts}
-          onBlur={() => handleMinBonusPartsChange(minBonusParts)}
-        />
-        <AdvancedNumericRuleField
-          label="Max parts per bonus"
-          required
-          value={maxBonusParts}
-          disabled={readOnly}
-          minValue={parseInt(minBonusParts, 10)}
-          maxValue={1000}
-          onChange={setMaxBonusParts}
-          onBlur={() => handleMaxBonusPartsChange(maxBonusParts)}
-        />
-        <AdvancedNumericRuleField
-          label="Pts per bonus part"
-          required={false}
-          value={ptsPerPart}
-          disabled={readOnly}
-          minValue={1}
-          maxValue={1000}
-          onChange={setPtsPerPart}
-          onBlur={() => handlePtsPerPartChange(ptsPerPart)}
-        />
-        <AdvancedNumericRuleField
-          label="Divisor"
-          required
-          value={divisor}
-          disabled={readOnly || ptsPerPart !== ''}
-          minValue={1}
-          maxValue={parseInt(maxBonusScore, 10)}
-          onChange={setDivisor}
-          onBlur={() => handleDivisorChange(divisor)}
-        />
-      </Stack>
-    </Box>
-  );
-}
-
-interface IAdvancedNumericRuleFieldProps {
-  label: string;
-  required: boolean;
-  value: string;
-  onChange: (val: string) => void;
-  onBlur: (val: string) => void;
-  disabled: boolean;
-  minValue: number;
-  maxValue: number;
-}
-
-/** small numeric field used for advanced settings like divisors */
-export function AdvancedNumericRuleField(props: IAdvancedNumericRuleFieldProps) {
-  const { label, required, value, onChange, onBlur, disabled, minValue, maxValue } = props;
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!invalidInteger(value, minValue, maxValue)) setError(false);
-  }, [value, minValue, maxValue]);
-
-  const handleChange = (str: string) => {
-    if (required && str === '') {
-      setError(true);
-    } else if (invalidInteger(str, minValue, maxValue)) {
-      setError(true);
-    } else {
-      setError(false);
-    }
-    onChange(str);
-  };
-
-  return (
-    <Grid container>
-      <Grid xs>
-        <InlineLabel text={label} />
-      </Grid>
-      <Grid xs="auto">
-        <YfNumericField
-          sx={{ marginTop: 1, width: '8ch' }}
-          size="small"
-          inputProps={{ min: 0 }}
-          disabled={disabled}
-          error={error}
-          value={value}
-          onChange={(e) => handleChange(e.target.value)}
-          onBlur={() => onBlur(value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onBlur(value);
-          }}
-        />
-      </Grid>
-    </Grid>
-  );
-}
-
-function InlineLabel(props: { text: string }) {
-  const { text } = props;
-  return (
-    <div style={{ marginTop: '1rem' }}>
-      <Typography variant="body2">{text}</Typography>
-    </div>
+    <SettingsList>
+      <AdvancedNumericRuleField
+        label="Max bonus score"
+        required
+        value={maxBonusScore}
+        disabled={readOnly || ptsPerPart !== ''}
+        minValue={1}
+        maxValue={1000}
+        onChange={setMaxBonusScore}
+        onBlur={() => handleMaxBonusScoreChange(maxBonusScore)}
+      />
+      <AdvancedNumericRuleField
+        label="Min parts per bonus"
+        required
+        value={minBonusParts}
+        disabled={readOnly}
+        minValue={1}
+        maxValue={parseInt(maxBonusParts, 10)}
+        onChange={setMinBonusParts}
+        onBlur={() => handleMinBonusPartsChange(minBonusParts)}
+      />
+      <AdvancedNumericRuleField
+        label="Max parts per bonus"
+        required
+        value={maxBonusParts}
+        disabled={readOnly}
+        minValue={parseInt(minBonusParts, 10)}
+        maxValue={1000}
+        onChange={setMaxBonusParts}
+        onBlur={() => handleMaxBonusPartsChange(maxBonusParts)}
+      />
+      <AdvancedNumericRuleField
+        label="Pts per bonus part"
+        required={false}
+        value={ptsPerPart}
+        disabled={readOnly}
+        minValue={1}
+        maxValue={1000}
+        onChange={setPtsPerPart}
+        onBlur={() => handlePtsPerPartChange(ptsPerPart)}
+      />
+      <AdvancedNumericRuleField
+        label="Divisor"
+        required
+        value={divisor}
+        disabled={readOnly || ptsPerPart !== ''}
+        minValue={1}
+        maxValue={parseInt(maxBonusScore, 10)}
+        onChange={setDivisor}
+        onBlur={() => handleDivisorChange(divisor)}
+      />
+    </SettingsList>
   );
 }
 

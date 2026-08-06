@@ -1,7 +1,7 @@
 /* eslint-disable react/require-default-props */
 /* eslint-disable prefer-destructuring */
 import { useContext } from 'react';
-import Grid from '@mui/material/Unstable_Grid2';
+import Grid from '@mui/material/Grid';
 import {
   TableContainer,
   Table,
@@ -9,7 +9,6 @@ import {
   TableRow,
   TableCell,
   TableBody,
-  CardContent,
   Tooltip,
   IconButton,
   Stack,
@@ -67,103 +66,101 @@ function PhaseStandings(props: IPhaseStandingsProps) {
 
   return (
     <YfCard title={phase.name}>
-      <CardContent>
-        <Grid
-          container
-          spacing={2}
-          sx={{ '& .MuiSvgIcon-root': { fontSize: '1rem' }, '& .MuiIconButton-root': { py: 0 } }}
-        >
-          {thisTournament.isLastFullPhase(phase) && (
-            <>
-              <Grid xs={6}>
-                {thisTournament.getFinalsPhases().map((ph) => (
-                  <TiebreakerOrFinalsInfo key={ph.code} tbOrFinalsPhase={ph} />
-                ))}
-              </Grid>
-              <Grid xs={6} sx={{ textAlign: 'right', '& .MuiSvgIcon-root': { fontSize: '1.5rem' } }}>
-                <ConfirmFinalRanksCheckbox />
-              </Grid>
-            </>
-          )}
-          {phaseStats.pools.map((poolStats) => (
-            <Grid key={poolStats.pool.name} xs={12}>
-              <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'lightgray' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell width="5%" />
-                      <TableCell width="20%">{poolStats.pool.name}</TableCell>
+      <Grid
+        container
+        spacing={2}
+        sx={{ '& .MuiSvgIcon-root': { fontSize: '1rem' }, '& .MuiIconButton-root': { py: 0 } }}
+      >
+        {thisTournament.isLastFullPhase(phase) && (
+          <>
+            <Grid size={{ xs: 6 }}>
+              {thisTournament.getFinalsPhases().map((ph) => (
+                <TiebreakerOrFinalsInfo key={ph.code} tbOrFinalsPhase={ph} />
+              ))}
+            </Grid>
+            <Grid sx={{ textAlign: 'right', '& .MuiSvgIcon-root': { fontSize: '1.5rem' } }} size={{ xs: 6 }}>
+              <ConfirmFinalRanksCheckbox />
+            </Grid>
+          </>
+        )}
+        {phaseStats.pools.map((poolStats) => (
+          <Grid key={poolStats.pool.name} size={{ xs: 12 }}>
+            <TableContainer sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell width="5%" />
+                    <TableCell width="20%">{poolStats.pool.name}</TableCell>
+                    <TableCell align="right" width="5%">
+                      W
+                    </TableCell>
+                    <TableCell align="right" width="5%">
+                      L
+                    </TableCell>
+                    {phaseStats.anyTiesExist && (
                       <TableCell align="right" width="5%">
-                        W
+                        T
                       </TableCell>
-                      <TableCell align="right" width="5%">
-                        L
-                      </TableCell>
-                      {phaseStats.anyTiesExist && (
-                        <TableCell align="right" width="5%">
-                          T
-                        </TableCell>
-                      )}
-                      <TableCell align="right" width="8%">
-                        Pct
-                      </TableCell>
-                      <TableCell align="right">{`PP${regulationTossupCount}`}</TableCell>
-                      {showPPB && <TableCell align="right">PPB</TableCell>}
-                      {(!nextPhase || thisTournament.usingScheduleTemplate) && (
-                        <TableCell align="right">{nextPhase ? 'Seed' : 'Final Rank'}</TableCell>
-                      )}
+                    )}
+                    <TableCell align="right" width="8%">
+                      Pct
+                    </TableCell>
+                    <TableCell align="right">{`PP${regulationTossupCount}`}</TableCell>
+                    {showPPB && <TableCell align="right">PPB</TableCell>}
+                    {(!nextPhase || thisTournament.usingScheduleTemplate) && (
+                      <TableCell align="right">{nextPhase ? 'Seed' : 'Final Rank'}</TableCell>
+                    )}
 
-                      {nextPhase && <TableCell width="4%" />}
-                      {nextPhase && <TableCell>Advance To</TableCell>}
-                      {nextPhase && thisTournament.usingScheduleTemplate && (
-                        <TableCell align="center">
-                          <Tooltip
-                            placement="left"
-                            title={`Place all of this pool's teams into the ${nextPhase.name} pools as shown`}
+                    {nextPhase && <TableCell width="4%" />}
+                    {nextPhase && <TableCell>Advance To</TableCell>}
+                    {nextPhase && thisTournament.usingScheduleTemplate && (
+                      <TableCell align="center">
+                        <Tooltip
+                          placement="left"
+                          title={`Place all of this pool's teams into the ${nextPhase.name} pools as shown`}
+                        >
+                          <LinkButton
+                            size="small"
+                            variant="text"
+                            onClick={() => tournManager.rebracketPool(poolStats, nextPhase)}
                           >
-                            <LinkButton
-                              size="small"
-                              variant="text"
-                              onClick={() => tournManager.rebracketPool(poolStats, nextPhase)}
-                            >
-                              Confirm All
-                            </LinkButton>
-                          </Tooltip>
-                        </TableCell>
+                            Confirm All
+                          </LinkButton>
+                        </Tooltip>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {poolStats.poolTeams.map((ptStats) => (
+                    <TableRow key={ptStats.team.name}>
+                      <TableCell>{ptStats.rank}</TableCell>
+                      <TableCell>{ptStats.team.name}</TableCell>
+                      <TableCell align="right">{ptStats.wins}</TableCell>
+                      <TableCell align="right">{ptStats.losses}</TableCell>
+                      {phaseStats.anyTiesExist && <TableCell align="right">{ptStats.ties}</TableCell>}
+                      <TableCell align="right">{ptStats.getWinPctString()}</TableCell>
+                      <TableCell align="right">{ptStats.getPtsPerRegTuhString(regulationTossupCount)}</TableCell>
+                      {showPPB && <TableCell align="right">{ptStats.getPtsPerBonusString()}</TableCell>}
+                      {nextPhase && thisTournament.usingScheduleTemplate ? (
+                        <TableCell align="right">{ptStats.currentSeed}</TableCell>
+                      ) : (
+                        !nextPhase && <FinalRankCell ptStats={ptStats} />
+                      )}
+                      {nextPhase && <TableCell>{getAdvancementIcon(ptStats)}</TableCell>}
+                      {nextPhase && <AdvanceToCell ptStats={ptStats} nextPhase={nextPhase} />}
+                      {nextPhase && thisTournament.usingScheduleTemplate && (
+                        <ConfirmationCell ptStats={ptStats} nextPhase={nextPhase} />
                       )}
                     </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {poolStats.poolTeams.map((ptStats) => (
-                      <TableRow key={ptStats.team.name}>
-                        <TableCell>{ptStats.rank}</TableCell>
-                        <TableCell>{ptStats.team.name}</TableCell>
-                        <TableCell align="right">{ptStats.wins}</TableCell>
-                        <TableCell align="right">{ptStats.losses}</TableCell>
-                        {phaseStats.anyTiesExist && <TableCell align="right">{ptStats.ties}</TableCell>}
-                        <TableCell align="right">{ptStats.getWinPctString()}</TableCell>
-                        <TableCell align="right">{ptStats.getPtsPerRegTuhString(regulationTossupCount)}</TableCell>
-                        {showPPB && <TableCell align="right">{ptStats.getPtsPerBonusString()}</TableCell>}
-                        {nextPhase && thisTournament.usingScheduleTemplate ? (
-                          <TableCell align="right">{ptStats.currentSeed}</TableCell>
-                        ) : (
-                          !nextPhase && <FinalRankCell ptStats={ptStats} />
-                        )}
-                        {nextPhase && <TableCell>{getAdvancementIcon(ptStats)}</TableCell>}
-                        {nextPhase && <AdvanceToCell ptStats={ptStats} nextPhase={nextPhase} />}
-                        {nextPhase && thisTournament.usingScheduleTemplate && (
-                          <ConfirmationCell ptStats={ptStats} nextPhase={nextPhase} />
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              {tbPhase && <TiebreakerOrFinalsInfo tbOrFinalsPhase={tbPhase} pool={poolStats.pool} />}
-            </Grid>
-          ))}
-        </Grid>
-      </CardContent>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            {tbPhase && <TiebreakerOrFinalsInfo tbOrFinalsPhase={tbPhase} pool={poolStats.pool} />}
+          </Grid>
+        ))}
+      </Grid>
     </YfCard>
   );
 }
@@ -296,7 +293,11 @@ function TiebreakerOrFinalsInfo(props: ITiebreakerOrFinalsInfoProps) {
   return (
     <Box sx={{ marginTop: isFinals ? 0 : 1, mx: 2 }}>
       <Typography variant="subtitle2">{isFinals ? tbOrFinalsPhase.name : 'Tiebreakers'}</Typography>
-      <Box typography="body2">
+      <Box
+        sx={{
+          typography: 'body2',
+        }}
+      >
         {matches.map((match) => (
           <div key={match.id}>
             {match.getWinnerLoserString()}{' '}

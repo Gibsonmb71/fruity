@@ -10,8 +10,6 @@ import {
   FormHelperText,
   IconButton,
   InputAdornment,
-  List,
-  ListItem,
   OutlinedInput,
   Tooltip,
   Typography,
@@ -19,11 +17,11 @@ import {
 import { Add, Delete } from '@mui/icons-material';
 import { useContext, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import YfCard from './YfCard';
 import { TournamentContext } from '../TournamentManager';
+import YfCard from './YfCard';
 import useSubscription from '../Utils/CustomHooks';
 import AnswerType, { sortAnswerTypes } from '../DataModel/AnswerType';
-import { hotkeyFormat } from '../Utils/GeneralReactUtils';
+import { hotkeyFormat, SettingRow, SettingsList } from '../Utils/GeneralReactUtils';
 import { ScoringRules } from '../DataModel/ScoringRules';
 
 const commonPointValues = [-5, 10, 15, 20];
@@ -68,12 +66,18 @@ function TossupSettingsCard() {
   };
 
   return (
-    <YfCard title="Toss-Ups">
-      <Typography variant="subtitle2">Point values</Typography>
+    <YfCard
+      title="Toss-ups"
+      description="Every point value a toss-up can be worth. At least one has to be positive."
+      variant="rows"
+      fullHeight
+    >
       <ActivePointValueList answerTypes={activeAnswerTypes} deleteItem={deleteAnswerType} allDisabled={readOnly} />
-      {canAddMoreValues && <Typography variant="subtitle2">Add more point values</Typography>}
       {canAddMoreValues && (
-        <Box sx={{ py: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, py: 1.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            Add:
+          </Typography>
           <AvailableStandardPtValuesList
             pointValues={pointValuesForChips}
             addPointValue={addAnswerType}
@@ -81,8 +85,8 @@ function TossupSettingsCard() {
           />
           <Chip
             key="custom"
-            sx={{ marginBottom: 1 }}
-            label="Custom..."
+            variant="outlined"
+            label="Other…"
             disabled={readOnly}
             onDelete={() => setCustomPtValFormOpen(true)}
             deleteIcon={<Add />}
@@ -117,32 +121,33 @@ function ActivePointValueList(props: IActivePointValueListProps) {
   const cantDeletePositive = positivePtValues.length === 1;
 
   return (
-    <List sx={{ width: '75%' }}>
+    <SettingsList>
       {answerTypes.map((answerType) => {
         const disableDelete = cantDeletePositive && answerType.value > 0;
-        const tooltip = disableDelete ? 'You must have at least one positive point value' : 'Delete this point value';
+        // Say why the button is dead rather than leaving the user to poke at it. The last positive
+        // value can't go, and nothing about the rules can change once games exist.
+        let description: string | undefined;
+        if (allDisabled) description = undefined;
+        else if (disableDelete) description = 'A tournament needs at least one positive value.';
 
         return (
-          <ListItem
-            key={answerType.value}
-            sx={{ '&:hover': { backgroundColor: 'ivory' } }}
-            secondaryAction={
-              <Tooltip title={tooltip} placement="right">
-                <span>
-                  <IconButton
-                    sx={{ '&:hover': { backgroundColor: 'transparent' } }}
-                    disabled={disableDelete || allDisabled}
-                    onClick={() => deleteItem(answerType.value)}
-                  >
-                    <Delete />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            }
-          >{`${answerType.value} pts`}</ListItem>
+          <SettingRow key={answerType.value} label={`${answerType.value} pts`} description={description}>
+            <Tooltip title={disableDelete ? '' : 'Remove this point value'} placement="left">
+              <span>
+                <IconButton
+                  size="small"
+                  disabled={disableDelete || allDisabled}
+                  onClick={() => deleteItem(answerType.value)}
+                  aria-label={`Delete ${answerType.value} point value`}
+                >
+                  <Delete fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </SettingRow>
         );
       })}
-    </List>
+    </SettingsList>
   );
 }
 
@@ -158,7 +163,7 @@ function AvailableStandardPtValuesList(props: IAvailableStandardPtValuesListProp
   return pointValues.map((value) => (
     <Chip
       key={value}
-      sx={{ marginRight: 1, marginBottom: 1 }}
+      variant="outlined"
       label={`${value} pts`}
       disabled={disabled}
       onDelete={() => addPointValue(value)}
