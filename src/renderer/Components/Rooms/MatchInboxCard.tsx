@@ -1,8 +1,9 @@
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { Box, Button, Divider, Stack, TextField, Typography } from '@mui/material';
 import { Check, Close } from '@mui/icons-material';
 import { IInboxItem, IMatchSubmissionConflict, TournamentServerContext } from '../../Services/TournamentServerService';
 import { ImportResultStatus } from '../../DataModel/MatchImportResult';
+import { INavigationIntent } from '../../Services/Navigation';
 
 function submittedTime(value: string): string {
   const parsed = new Date(value);
@@ -25,7 +26,7 @@ function InboxRow({ item }: { item: IInboxItem }) {
   const rightScore = match?.rightTeam.points ?? '–';
 
   return (
-    <div className="rooms-inbox-row">
+    <div className="rooms-inbox-row" data-inbox-session-id={item.sessionId} tabIndex={-1}>
       <div className="rooms-inbox-teams">
         <Typography
           variant="caption"
@@ -111,7 +112,7 @@ function InboxRow({ item }: { item: IInboxItem }) {
                 startIcon={<Check />}
                 onClick={() => service.acceptSubmission(item.sessionId)}
               >
-                Accept
+                Accept result
               </Button>
             )}
             {needsOverride && (
@@ -121,7 +122,7 @@ function InboxRow({ item }: { item: IInboxItem }) {
                 color="warning"
                 onClick={() => service.acceptSubmission(item.sessionId, true)}
               >
-                Accept anyway
+                Accept result anyway
               </Button>
             )}
             <Button size="small" color="error" startIcon={<Close />} onClick={() => setRejecting(true)}>
@@ -134,12 +135,32 @@ function InboxRow({ item }: { item: IInboxItem }) {
   );
 }
 
-export default function MatchInboxCard() {
+export default function MatchInboxCard({
+  navigation,
+  onNavigationHandled,
+}: {
+  // eslint-disable-next-line react/require-default-props
+  navigation?: INavigationIntent;
+  // eslint-disable-next-line react/require-default-props
+  onNavigationHandled?: () => void;
+}) {
   const service = useContext(TournamentServerContext);
+  const cardRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!navigation || navigation.focus !== 'result-inbox' || !cardRef.current) return;
+    const selector = navigation.scheduledMatchId
+      ? `[data-inbox-scheduled-match-id="${navigation.scheduledMatchId}"]`
+      : '[data-inbox-session-id]';
+    const target =
+      cardRef.current.querySelector<HTMLElement>(selector) ?? cardRef.current.querySelector<HTMLElement>('button');
+    target?.scrollIntoView({ block: 'center' });
+    target?.focus({ preventScroll: true });
+    onNavigationHandled?.();
+  }, [navigation, onNavigationHandled, service?.inbox.length]);
   if (!service) return null;
 
   return (
-    <section className="rooms-panel" aria-labelledby="match-inbox-heading">
+    <section ref={cardRef} className="rooms-panel" aria-labelledby="match-inbox-heading">
       <div className="rooms-panel-header">
         <div>
           <h2 id="match-inbox-heading">Match Inbox</h2>
@@ -163,7 +184,9 @@ export default function MatchInboxCard() {
       ) : (
         <Box>
           {service.inbox.map((item) => (
-            <InboxRow key={item.sessionId} item={item} />
+            <Box key={item.sessionId} data-inbox-scheduled-match-id={item.scheduledMatchId}>
+              <InboxRow item={item} />
+            </Box>
           ))}
         </Box>
       )}

@@ -76,6 +76,8 @@ interface ITournamentExtraData {
   trackDiv2: boolean;
   finalRankingsReady?: boolean;
   usingScheduleTemplate?: boolean;
+  /** Explicitly selects manual YellowFruit entry or browser room scoring. */
+  roomScoringMode?: TournamentRoomScoringMode;
   /** Physical playing locations, for the tournament server's room workflow */
   rooms?: IYftFileRoom[];
   /** Games the tournament intends to play, as opposed to ones it has played */
@@ -89,6 +91,9 @@ interface ITournamentExtraData {
   /** Public audience/display settings. Browser slideshow position is intentionally not persisted. */
   liveDisplay?: ILiveDisplaySettings;
 }
+
+/** How a tournament expects games to be scored. This is intentionally tournament-level state. */
+export type TournamentRoomScoringMode = 'traditional' | 'browser';
 
 /** YellowFruit implementation of the Tournament object */
 class Tournament implements IQbjTournament, IYftDataModelObject {
@@ -115,6 +120,9 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
   phases: Phase[] = [];
 
   usingScheduleTemplate: boolean = false;
+
+  /** Traditional manual entry is the safe default for new tournaments. */
+  roomScoringMode: TournamentRoomScoringMode = 'traditional';
 
   rankings: Ranking[] = [];
 
@@ -219,6 +227,7 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
       trackDiv2: this.trackDiv2,
       finalRankingsReady: this.finalRankingsReady,
       usingScheduleTemplate: this.usingScheduleTemplate,
+      roomScoringMode: this.roomScoringMode,
       // Omitted entirely when there are none, so a tournament that never used the server writes the
       // same file it always did.
       rooms: this.rooms.length > 0 ? this.rooms.map((room) => room.toYftFileObject()) : undefined,

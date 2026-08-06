@@ -9,10 +9,14 @@ describe('Quick Find', () => {
     const items = buildQuickFindItems(tournament);
 
     expect(items.some((item) => item.label === 'Setup')).toBe(true);
-    expect(items.find((item) => item.label === 'Ninety Six A' && item.detail === 'Team')?.navigation).toEqual({
+    expect(items.find((item) => item.label === 'Ninety Six A' && item.detail === 'Team')?.navigation).toMatchObject({
+      target: 'games',
       teamName: 'Ninety Six A',
     });
-    expect(items.find((item) => item.label === 'Round 1')?.navigation).toEqual({ roundNumber: 1 });
+    expect(items.find((item) => item.label === 'Round 1')?.navigation).toMatchObject({
+      roundNumber: 1,
+      focus: 'round',
+    });
   });
 
   test('prioritizes a label match and limits results', () => {
@@ -32,6 +36,11 @@ describe('Quick Find', () => {
     round.addMatch(match);
 
     const item = buildQuickFindItems(tournament).find((candidate) => candidate.id === `match-${match.id}`);
-    expect(item?.navigation).toEqual({ matchId: match.id, roundNumber: round.number });
+    expect(item?.navigation).toMatchObject({
+      matchId: match.id,
+      roundNumber: round.number,
+      gamesReviewFilter: 'all',
+      focus: 'scheduled-match',
+    });
   });
 });

@@ -44,6 +44,7 @@ import SqbsGenerator from './DataModel/SqbsFileGeneration';
 import MatchImportService, { invalidJsonMessage } from './Services/MatchImportService';
 import { IReportScope, isEntireReportScope, projectTournamentForReport } from './Services/ReportScope';
 import TournamentServerService from './Services/TournamentServerService';
+import { checkBrowserRoomScoringDisable, shouldStopServerBeforeDisabling } from './Services/RoomScoringMode';
 
 /** Holds the tournament the application is currently editing */
 export class TournamentManager {
@@ -826,6 +827,26 @@ export class TournamentManager {
     }
     this.tournament.questionSet = trimmedName;
     this.onDataChanged();
+  }
+
+  /**
+   * Change the explicit room-scoring workflow choice. Disabling is guarded by the same durable
+   * scheduled-match state that survives a restart as well as the live server session summaries.
+   */
+  async setRoomScoringMode(mode: Tournament['roomScoringMode']): Promise<{ ok: boolean; reason?: string }> {
+    if (this.tournament.roomScoringMode === mode) return { ok: true };
+
+    if (mode === 'traditional') {
+      const check = checkBrowserRoomScoringDisable(this.tournament, this.tournamentServerService.sessions);
+      if (!check.canDisable) return { ok: false, reason: check.reason };
+      if (shouldStopServerBeforeDisabling(check, this.tournamentServerService.status.running)) {
+        await this.tournamentServerService.stopServer();
+      }
+    }
+
+    this.tournament.roomScoringMode = mode;
+    this.onDataChanged();
+    return { ok: true };
   }
 
   setPacketName(round: Round, packetName: string) {

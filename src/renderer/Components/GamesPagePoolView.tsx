@@ -10,15 +10,21 @@ import { YfEmptyState } from '../Utils/GeneralReactUtils';
 import { Phase } from '../DataModel/Phase';
 import { Pool } from '../DataModel/Pool';
 import { Team } from '../DataModel/Team';
+import type { GamesReviewFilter } from '../Services/Navigation';
 
-export default function GamesViewByPool() {
+export default function GamesViewByPool({
+  reviewFilter = 'all',
+}: {
+  // eslint-disable-next-line react/require-default-props
+  reviewFilter?: GamesReviewFilter;
+}) {
   const tournManager = useContext(TournamentContext);
   const phases = tournManager.tournament.getFullPhases();
 
   return (
     <Stack spacing={2}>
       {phases.map((phase) => (
-        <GamesForPhaseByPool key={phase.name} phase={phase} />
+        <GamesForPhaseByPool key={phase.name} phase={phase} reviewFilter={reviewFilter} />
       ))}
     </Stack>
   );
@@ -26,21 +32,22 @@ export default function GamesViewByPool() {
 
 interface IGamesForPhaseByPoolProps {
   phase: Phase;
+  reviewFilter: GamesReviewFilter;
 }
 
 function GamesForPhaseByPool(props: IGamesForPhaseByPoolProps) {
-  const { phase } = props;
+  const { phase, reviewFilter } = props;
 
   return (
     <YfCard title={phase.name}>
       <Grid container spacing={2}>
-        {phase.pools.map((pool) => poolMatrixSeries(phase, pool))}
+        {phase.pools.map((pool) => poolMatrixSeries(phase, pool, reviewFilter))}
       </Grid>
     </YfCard>
   );
 }
 
-function poolMatrixSeries(phase: Phase, pool: Pool) {
+function poolMatrixSeries(phase: Phase, pool: Pool, reviewFilter: GamesReviewFilter) {
   const matrices = [];
 
   if (pool.roundRobins < 1) {
@@ -51,7 +58,9 @@ function poolMatrixSeries(phase: Phase, pool: Pool) {
   }
 
   for (let i = 1; i <= pool.roundRobins; i++) {
-    matrices.push(<PoolMatrix key={`${pool.name}_${i}`} phase={phase} pool={pool} nthRoundRobin={i} />);
+    matrices.push(
+      <PoolMatrix key={`${pool.name}_${i}`} phase={phase} pool={pool} nthRoundRobin={i} reviewFilter={reviewFilter} />,
+    );
   }
   return matrices;
 }
@@ -74,10 +83,11 @@ interface IPoolMatrixProps {
   phase: Phase;
   pool: Pool;
   nthRoundRobin: number;
+  reviewFilter: GamesReviewFilter;
 }
 
 function PoolMatrix(props: IPoolMatrixProps) {
-  const { pool, phase, nthRoundRobin } = props;
+  const { pool, phase, nthRoundRobin, reviewFilter } = props;
 
   if (pool.poolTeams.length === 0) return null;
 
@@ -106,6 +116,7 @@ function PoolMatrix(props: IPoolMatrixProps) {
                     opponent={opponent.team}
                     phase={phase}
                     nthRoundRobin={nthRoundRobin}
+                    reviewFilter={reviewFilter}
                   />
                 ))}
               </TableRow>
@@ -128,10 +139,11 @@ interface IMatrixCellProps {
   opponent: Team;
   phase: Phase;
   nthRoundRobin: number;
+  reviewFilter: GamesReviewFilter;
 }
 
 function MatrixCell(props: IMatrixCellProps) {
-  const { team, opponent, phase, nthRoundRobin } = props;
+  const { team, opponent, phase, nthRoundRobin, reviewFilter } = props;
   const tournManager = useContext(TournamentContext);
   const theme = useTheme();
   const successColor = theme.vars?.palette.success.main ?? theme.palette.success.main;
@@ -142,6 +154,15 @@ function MatrixCell(props: IMatrixCellProps) {
     return <TableCell sx={{ backgroundColor: 'action.disabledBackground' }} />;
   }
   const match = tournManager.tournament.findMatchBetweenTeams(team, opponent, phase, nthRoundRobin);
+  const hasErrors = match ? match.getErrorMessages().length > 0 : false;
+  const hasWarnings = match ? match.getWarningMessages().length > 0 : false;
+  const reviewMatch = hasErrors || hasWarnings;
+  const matchesFilter =
+    reviewFilter === 'all' ||
+    (reviewFilter === 'needs-review' && reviewMatch) ||
+    (reviewFilter === 'errors' && hasErrors) ||
+    (reviewFilter === 'warnings' && hasWarnings);
+  if (!matchesFilter) return <TableCell align="center" />;
   if (!match) {
     return (
       <TableCell align="center">

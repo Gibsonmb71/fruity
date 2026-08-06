@@ -3,30 +3,25 @@ import {
   Box,
   Button,
   Checkbox,
-  FormControl,
-  FormControlLabel,
-  InputLabel,
   ListItemText,
   Menu,
   MenuItem,
   Paper,
-  Select,
   Stack,
   Tab,
   Tabs,
   Typography,
 } from '@mui/material';
-import { CheckCircleOutlined, FileDownload, Launch, MoreHoriz, WarningAmber } from '@mui/icons-material';
+import { FileDownload, Launch, MoreHoriz } from '@mui/icons-material';
 import { YfCssClasses, YfPageHeader } from '../Utils/GeneralReactUtils';
 import { statReportProtocol } from '../../SharedUtils';
 import { StatReportFileNames, StatReportPages } from '../Enums';
 import useSubscription from '../Utils/CustomHooks';
 import { TournamentContext } from '../TournamentManager';
-import { resolveTournamentReadiness } from '../Services/TournamentReadiness';
 import { PhaseTypes } from '../DataModel/Phase';
-import { CommonRuleSets } from '../DataModel/ScoringRules';
-import { ScheduledMatchStatus } from '../DataModel/ScheduledMatch';
 import { IReportScope } from '../Services/ReportScope';
+import { resolvePublicationReadiness, IPublicationReadiness } from '../Services/ReportReadiness';
+import ReadinessMark from './ReadinessMark';
 
 const primaryReportTabs = [
   { value: StatReportPages.Standings, label: 'Standings' },
@@ -46,7 +41,8 @@ export default function StatReportPage() {
   const [includeCarryover, setIncludeCarryover] = useState(true);
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [detailAnchor, setDetailAnchor] = useState<HTMLElement | null>(null);
-  const readiness = resolveTournamentReadiness(tournManager.tournament);
+  const [scopeAnchor, setScopeAnchor] = useState<HTMLElement | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const reportPages = tournManager.tournament.phases;
   const allPhaseCodes = useMemo(() => reportPages.map((phase) => phase.code), [reportPages]);
   const effectivePhaseCodes = useMemo(() => {
@@ -67,17 +63,15 @@ export default function StatReportPage() {
   const selectedPhases = reportPages.filter((phase) => effectivePhaseCodes.includes(phase.code));
   const canIncludeCarryover = selectedPhases.some((phase) => phase.phaseType === PhaseTypes.Playoff);
   const path = `${statReportProtocol}://${StatReportFileNames[activeReportPage]}`;
-  const allMatches = useMemo(
-    () => tournManager.tournament.phases.flatMap((phase) => phase.rounds.flatMap((round) => round.matches)),
-    [tournManager.tournament.phases],
+  const publicationReadiness = useMemo(
+    () => resolvePublicationReadiness(tournManager.tournament),
+    [tournManager.tournament],
   );
-  const invalidGames = allMatches.filter((match) => match.getErrorMessages().length > 0).length;
-  const warnings = allMatches.reduce((count, match) => count + match.getNumSuppressedWarnings(), 0);
-  const hasStats = tournManager.tournament.stats.length > 0;
   let selectedScopeLabel = selectedPhases.map((phase) => phase.name).join(', ') || 'Selected stages';
   if (scopeMode === 'all') selectedScopeLabel = 'Entire tournament';
   else if (scopeMode === 'prelim') selectedScopeLabel = 'Preliminaries';
   else if (scopeMode === 'playoffs') selectedScopeLabel = 'Playoffs and finals';
+  const scopeButtonLabel = `${selectedScopeLabel}${includeCarryover && canIncludeCarryover ? ' + carryovers' : ''}`;
 
   useEffect(() => {
     tournManager.setReportScope(reportScope);
@@ -116,13 +110,11 @@ export default function StatReportPage() {
         />
       </Box>
 
-      <ResultsReadiness
-        invalidGames={invalidGames}
-        hasStats={hasStats}
-        suppressedWarnings={warnings}
-        readiness={readiness}
+      <PublicationReadiness
+        readiness={publicationReadiness}
+        detailsOpen={detailsOpen}
+        onToggleDetails={() => setDetailsOpen((open) => !open)}
       />
-      <NaqtSubmissionReadiness readiness={readiness} />
 
       <Stack
         direction={{ xs: 'column', md: 'row' }}
@@ -139,59 +131,14 @@ export default function StatReportPage() {
           ))}
         </Tabs>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-          <FormControl size="small" sx={{ minWidth: 190 }}>
-            <InputLabel>Scope</InputLabel>
-            <Select
-              label="Scope"
-              value={scopeMode}
-              onChange={(event) => {
-                const next = event.target.value as typeof scopeMode;
-                if (next === 'selected' && selectedPhaseCodes.length === 0) setSelectedPhaseCodes(allPhaseCodes);
-                setScopeMode(next);
-              }}
-            >
-              <MenuItem value="all">Entire tournament</MenuItem>
-              <MenuItem value="prelim">Preliminaries</MenuItem>
-              <MenuItem value="playoffs">Playoffs and finals</MenuItem>
-              <MenuItem value="selected">Selected stages…</MenuItem>
-            </Select>
-          </FormControl>
-          {scopeMode === 'selected' && (
-            <FormControl size="small" sx={{ minWidth: 230, maxWidth: 320 }}>
-              <InputLabel>Stages</InputLabel>
-              <Select
-                multiple
-                label="Stages"
-                value={selectedPhaseCodes}
-                onChange={(event) => setSelectedPhaseCodes(event.target.value as string[])}
-                renderValue={(values) =>
-                  (values as string[])
-                    .map((code) => reportPages.find((phase) => phase.code === code)?.name ?? code)
-                    .join(', ')
-                }
-              >
-                {reportPages.map((phase) => (
-                  <MenuItem key={phase.code} value={phase.code}>
-                    <Checkbox checked={selectedPhaseCodes.includes(phase.code)} size="small" />
-                    <ListItemText primary={phase.name} />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-          {canIncludeCarryover && (
-            <FormControlLabel
-              control={
-                <Checkbox
-                  size="small"
-                  checked={includeCarryover}
-                  onChange={(event) => setIncludeCarryover(event.target.checked)}
-                />
-              }
-              label="Include carried-over games"
-              sx={{ mr: 0, '& .MuiFormControlLabel-label': { fontSize: '0.78rem' } }}
-            />
-          )}
+          <Button
+            size="small"
+            variant="outlined"
+            endIcon={<MoreHoriz />}
+            onClick={(event) => setScopeAnchor(event.currentTarget)}
+          >
+            Scope: {scopeButtonLabel}
+          </Button>
           <Button
             size="small"
             variant="outlined"
@@ -202,14 +149,64 @@ export default function StatReportPage() {
           </Button>
         </Stack>
       </Stack>
-      {scopeMode !== 'all' && (
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-          Preview scope: {selectedScopeLabel}.{' '}
-          {includeCarryover && canIncludeCarryover
-            ? 'Carried-over games are included.'
-            : 'Only games in the selected stages are included.'}
-        </Typography>
-      )}
+      <Menu anchorEl={scopeAnchor} open={scopeAnchor !== null} onClose={() => setScopeAnchor(null)}>
+        <MenuItem
+          selected={scopeMode === 'all'}
+          onClick={() => {
+            setScopeMode('all');
+            setScopeAnchor(null);
+          }}
+        >
+          Entire tournament
+        </MenuItem>
+        <MenuItem
+          selected={scopeMode === 'prelim'}
+          onClick={() => {
+            setScopeMode('prelim');
+            setScopeAnchor(null);
+          }}
+        >
+          Preliminaries
+        </MenuItem>
+        <MenuItem
+          selected={scopeMode === 'playoffs'}
+          onClick={() => {
+            setScopeMode('playoffs');
+            setScopeAnchor(null);
+          }}
+        >
+          Playoffs and finals
+        </MenuItem>
+        <MenuItem
+          selected={scopeMode === 'selected'}
+          onClick={() => {
+            setScopeMode('selected');
+            setScopeAnchor(null);
+          }}
+        >
+          Custom stage selection
+        </MenuItem>
+        {scopeMode === 'selected' &&
+          reportPages.map((phase) => (
+            <MenuItem
+              key={phase.code}
+              onClick={() =>
+                setSelectedPhaseCodes((codes) =>
+                  codes.includes(phase.code) ? codes.filter((code) => code !== phase.code) : [...codes, phase.code],
+                )
+              }
+            >
+              <Checkbox checked={selectedPhaseCodes.includes(phase.code)} size="small" />
+              <ListItemText primary={phase.name} />
+            </MenuItem>
+          ))}
+        {canIncludeCarryover && (
+          <MenuItem onClick={() => setIncludeCarryover((included) => !included)}>
+            <Checkbox checked={includeCarryover} size="small" />
+            <ListItemText primary="Include carried-over games" />
+          </MenuItem>
+        )}
+      </Menu>
 
       <Paper
         variant="outlined"
@@ -271,19 +268,17 @@ export default function StatReportPage() {
   );
 }
 
-function ResultsReadiness({
-  invalidGames,
-  hasStats,
-  suppressedWarnings,
+function PublicationReadiness({
   readiness,
+  detailsOpen,
+  onToggleDetails,
 }: {
-  invalidGames: number;
-  hasStats: boolean;
-  suppressedWarnings: number;
-  readiness: ReturnType<typeof resolveTournamentReadiness>;
+  readiness: IPublicationReadiness;
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
 }) {
-  const hasTeams = readiness.setup.teamCount > 0;
-  const hasRounds = readiness.setup.formatReady;
+  const showDetails = detailsOpen || readiness.status === 'problem';
+  const summaryChecks = readiness.checks.filter((check) => check.id === 'game-data' || check.id === 'completeness');
   return (
     <Box
       sx={{
@@ -296,107 +291,35 @@ function ResultsReadiness({
         backgroundColor: 'background.paper',
       }}
     >
-      <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-        Results readiness
-      </Typography>
-      <Stack direction={{ xs: 'column', md: 'row' }} sx={{ gap: 1.25, flexWrap: 'wrap' }}>
-        <ReadinessItem
-          valid={invalidGames === 0}
-          text={invalidGames === 0 ? 'All games are valid' : `${invalidGames} games need correction`}
-        />
-        <ReadinessItem
-          valid={hasTeams && hasStats}
-          text={hasTeams && hasStats ? 'Team and individual statistics available' : 'Statistics are not compiled yet'}
-        />
-        <ReadinessItem
-          valid={hasRounds}
-          text={hasRounds ? 'Round and packet statistics available' : 'Round/packet structure is incomplete'}
-        />
-        {suppressedWarnings > 0 && (
-          <ReadinessItem valid={false} text={`${suppressedWarnings} suppressed warnings remain`} />
-        )}
+      <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ alignItems: { sm: 'center' }, gap: 1.25 }}>
+        <Typography variant="subtitle2" sx={{ mr: { sm: 0.5 } }}>
+          Publication readiness
+        </Typography>
+        {summaryChecks.map((check) => (
+          <VerificationItem key={check.id} status={check.status} text={check.text} />
+        ))}
+        <Button size="small" onClick={onToggleDetails} sx={{ ml: { sm: 'auto' } }} aria-expanded={showDetails}>
+          Details
+        </Button>
       </Stack>
+      {showDetails && (
+        <Stack direction={{ xs: 'column', md: 'row' }} sx={{ gap: 1.25, flexWrap: 'wrap', mt: 1 }}>
+          {readiness.checks.map((check) => (
+            <VerificationItem key={check.id} status={check.status} text={check.text} />
+          ))}
+        </Stack>
+      )}
     </Box>
   );
 }
 
-function NaqtSubmissionReadiness({ readiness }: { readiness: ReturnType<typeof resolveTournamentReadiness> }) {
-  const tournManager = useContext(TournamentContext);
-  const { tournament } = tournManager;
-  if (
-    tournament.standardRuleSet !== CommonRuleSets.NaqtTimed &&
-    tournament.standardRuleSet !== CommonRuleSets.NaqtUntimed
-  ) {
-    return null;
-  }
-
-  const matches = tournament.phases.flatMap((phase) => phase.rounds.flatMap((round) => round.matches));
-  const invalid = matches.filter((match) => match.getErrorMessages().length > 0);
-  const missingTossups = matches.filter((match) => !match.isForfeit() && match.tossupsRead === undefined);
-  const scheduled = tournament.scheduledMatches.filter((match) => match.status !== ScheduledMatchStatus.Cancelled);
-  const acceptedScheduled = scheduled.filter((match) => match.status === ScheduledMatchStatus.Accepted);
-  const hasAutomaticCompleteness = readiness.roomOperationsEnabled && scheduled.length > 0;
-  const scheduleComplete = hasAutomaticCompleteness && acceptedScheduled.length === scheduled.length;
-  let completenessText = 'No games recorded yet';
-  if (hasAutomaticCompleteness) {
-    completenessText = scheduleComplete
-      ? 'All scheduled games are accepted'
-      : `${scheduled.length - acceptedScheduled.length} scheduled games are not accepted`;
-  } else if (matches.length > 0) {
-    completenessText = 'Game completeness cannot be verified automatically for manual entry';
-  }
-
+function VerificationItem({ status, text }: { status: 'verified' | 'problem' | 'unknown'; text: string }) {
+  let color: 'warning.main' | 'success.main' | 'text.secondary' = 'text.secondary';
+  if (status === 'problem') color = 'warning.main';
+  else if (status === 'verified') color = 'success.main';
   return (
-    <Box
-      sx={{
-        border: 1,
-        borderColor: 'divider',
-        borderRadius: 1.5,
-        px: 1.5,
-        py: 1.25,
-        mb: 1.5,
-        backgroundColor: 'background.paper',
-      }}
-    >
-      <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-        NAQT submission readiness
-      </Typography>
-      <Stack direction={{ xs: 'column', md: 'row' }} sx={{ gap: 1.25, flexWrap: 'wrap' }}>
-        <ReadinessItem
-          valid={invalid.length === 0}
-          text={invalid.length === 0 ? 'Game data is valid' : `${invalid.length} games need correction`}
-        />
-        <ReadinessItem
-          valid={missingTossups.length === 0}
-          text={
-            missingTossups.length === 0
-              ? 'Tossups heard are recorded'
-              : `${missingTossups.length} games lack tossups heard`
-          }
-        />
-        <ReadinessItem
-          valid={matches.length > 0 && (hasAutomaticCompleteness ? scheduleComplete : true)}
-          text={completenessText}
-        />
-        <ReadinessItem
-          valid={matches.every(
-            (match) => !match.isForfeit() || match.leftTeam.forfeitLoss || match.rightTeam.forfeitLoss,
-          )}
-          text="Forfeits are represented in the game data"
-        />
-      </Stack>
-    </Box>
-  );
-}
-
-function ReadinessItem({ valid, text }: { valid: boolean; text: string }) {
-  return (
-    <Typography
-      variant="body2"
-      color={valid ? 'success.main' : 'warning.main'}
-      sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
-    >
-      {valid ? <CheckCircleOutlined sx={{ fontSize: 17 }} /> : <WarningAmber sx={{ fontSize: 17 }} />}
+    <Typography variant="body2" color={color} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <ReadinessMark status={status} />
       {text}
     </Typography>
   );

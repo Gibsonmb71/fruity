@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import type { DragEvent, JSX } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { DragEvent, JSX, KeyboardEvent } from 'react';
 import {
   Box,
+  Button,
   Checkbox,
   FormControl,
   IconButton,
@@ -23,12 +24,18 @@ import {
 import { DragIndicator, LockOpenOutlined, LockOutlined, MoreVert } from '@mui/icons-material';
 import { ScheduledMatch, ScheduledMatchStatus } from '../../DataModel/ScheduledMatch';
 import { TournamentRoom } from '../../DataModel/TournamentRoom';
+import { Phase } from '../../DataModel/Phase';
+import Tournament from '../../DataModel/Tournament';
 import { roundsWithGames } from '../../Services/ScheduleService';
+import { INavigationIntent } from '../../Services/Navigation';
+import { planRoomDrop } from '../../Services/RoomAllocationService';
 
 type MatchPlanView = 'round' | 'board';
 type MatchPlanRange = 'current' | 'next' | 'all';
 
 interface IMatchPlanWorkspaceProps {
+  tournament: Tournament;
+  phases: Phase[];
   matches: ScheduledMatch[];
   rooms: TournamentRoom[];
   currentRoundNumber: number | null;
@@ -36,6 +43,14 @@ interface IMatchPlanWorkspaceProps {
   onEdit: (match: ScheduledMatch) => void;
   onCancel: (match: ScheduledMatch) => void;
   onToggleLock: (match: ScheduledMatch) => void;
+  // eslint-disable-next-line react/require-default-props
+  navigation?: INavigationIntent;
+  // eslint-disable-next-line react/require-default-props
+  onNavigationHandled?: () => void;
+  // eslint-disable-next-line react/require-default-props
+  undoLabel?: string;
+  // eslint-disable-next-line react/require-default-props
+  onUndo?: () => void;
 }
 
 interface IMatchPlanCallbacks {
@@ -47,17 +62,40 @@ interface IMatchPlanCallbacks {
 }
 
 export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
-  const { matches, rooms, currentRoundNumber, onMove, onEdit, onCancel, onToggleLock } = props;
+  const {
+    tournament,
+    phases,
+    matches,
+    rooms,
+    currentRoundNumber,
+    onMove,
+    onEdit,
+    onCancel,
+    onToggleLock,
+    navigation,
+    onNavigationHandled,
+    undoLabel,
+    onUndo,
+  } = props;
   const [view, setView] = useState<MatchPlanView>('round');
   const [range, setRange] = useState<MatchPlanRange>(currentRoundNumber === null ? 'all' : 'current');
   const [stage, setStage] = useState('all');
   const [round, setRound] = useState('all');
 
   const allRounds = useMemo(() => roundsWithGames(matches), [matches]);
-  const stages = useMemo(
-    () => Array.from(new Set(matches.map((match) => match.phaseCode).filter((code) => code !== ''))).sort(),
-    [matches],
-  );
+  const stageOptions = useMemo(() => {
+    const phaseNames = new Map(phases.map((phase) => [phase.code, phase.name || phase.code]));
+    const codes = Array.from(new Set(matches.map((match) => match.phaseCode).filter((code) => code !== ''))).sort();
+    const nameCounts = new Map<string, number>();
+    codes.forEach((code) => {
+      const name = phaseNames.get(code) ?? code;
+      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    });
+    return codes.map((code) => {
+      const name = phaseNames.get(code) ?? code;
+      return { code, label: (nameCounts.get(name) ?? 0) > 1 ? `${name} · ${code}` : name };
+    });
+  }, [matches, phases]);
   const activeRound =
     currentRoundNumber ??
     allRounds.find((roundNumber) => matches.some((match) => !match.isResolved() && match.roundNumber === roundNumber));
@@ -82,6 +120,23 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
       .sort((a, b) => a.roundNumber - b.roundNumber || a.id.localeCompare(b.id));
   }, [activeRound, matches, nextRound, range, round, stage]);
 
+  useEffect(() => {
+    if (!navigation) return undefined;
+    const handle = window.setTimeout(() => {
+      const matchId = navigation.scheduledMatchId ?? navigation.scheduledMatchIds?.[0];
+      let target: HTMLElement | null = null;
+      if (matchId) {
+        target = document.querySelector<HTMLElement>(`[data-match-plan-match-id="${matchId}"]`);
+      } else if (navigation.roundNumber !== undefined) {
+        target = document.querySelector<HTMLElement>(`[data-match-plan-round="${navigation.roundNumber}"]`);
+      }
+      target?.scrollIntoView({ block: 'center' });
+      target?.focus({ preventScroll: true });
+      onNavigationHandled?.();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [navigation, onNavigationHandled, visibleMatches.length]);
+
   const setStageFilter = (value: string) => {
     setStage(value);
     setRound('all');
@@ -102,7 +157,9 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
       />
     );
   } else {
-    workspace = <RoomBoard matches={visibleMatches} rooms={rooms} onMove={onMove} onEdit={onEdit} />;
+    workspace = (
+      <RoomBoard tournament={tournament} matches={visibleMatches} rooms={rooms} onMove={onMove} onEdit={onEdit} />
+    );
   }
 
   return (
@@ -126,9 +183,9 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
             <InputLabel>Stage</InputLabel>
             <Select label="Stage" value={stage} onChange={(event) => setStageFilter(event.target.value)}>
               <MenuItem value="all">All stages</MenuItem>
-              {stages.map((stageCode) => (
-                <MenuItem key={stageCode} value={stageCode}>
-                  {stageCode}
+              {stageOptions.map((stageOption) => (
+                <MenuItem key={stageOption.code} value={stageOption.code}>
+                  {stageOption.label}
                 </MenuItem>
               ))}
             </Select>
@@ -146,15 +203,22 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
           </FormControl>
         </Stack>
       </Stack>
-      <Tabs
-        value={view}
-        onChange={(event, value: MatchPlanView) => setView(value)}
-        aria-label="Match Plan views"
-        sx={{ px: 1.5, minHeight: 36, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { minHeight: 36 } }}
-      >
-        <Tab value="round" label="By round" />
-        <Tab value="board" label="Round × room" />
-      </Tabs>
+      <Stack direction="row" sx={{ alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs
+          value={view}
+          onChange={(event, value: MatchPlanView) => setView(value)}
+          aria-label="Match Plan views"
+          sx={{ px: 1.5, minHeight: 36, '& .MuiTab-root': { minHeight: 36 } }}
+        >
+          <Tab value="round" label="By round" />
+          <Tab value="board" label="Round × room" />
+        </Tabs>
+        {undoLabel && onUndo && (
+          <Button size="small" onClick={onUndo} sx={{ ml: 'auto', mr: 1.5 }}>
+            {undoLabel} · Undo
+          </Button>
+        )}
+      </Stack>
       {workspace}
     </>
   );
@@ -167,7 +231,11 @@ function RoundMatchPlan({ matches, rooms, onMove, onEdit, onCancel, onToggleLock
       {rounds.map((roundNumber) => {
         const roundMatches = matches.filter((match) => match.roundNumber === roundNumber);
         return (
-          <Box key={roundNumber} sx={{ '& + &': { borderTop: 1, borderColor: 'divider' } }}>
+          <Box
+            key={roundNumber}
+            data-match-plan-round={roundNumber}
+            sx={{ '& + &': { borderTop: 1, borderColor: 'divider' } }}
+          >
             <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', px: 1.5, py: 1 }}>
               <Typography variant="subtitle2">Round {roundNumber}</Typography>
               <Typography variant="caption" color="text.secondary">
@@ -223,7 +291,7 @@ function MatchPlanRow({
       }`
     : 'Unassigned';
   return (
-    <TableRow hover>
+    <TableRow hover data-match-plan-match-id={match.id} tabIndex={-1}>
       <TableCell>
         <Typography variant="body2" sx={{ fontWeight: 500 }}>
           {match.leftTeamName}{' '}
@@ -334,16 +402,20 @@ function RoomSelect({
 }
 
 function RoomBoard({
+  tournament,
   matches,
   rooms,
   onMove,
   onEdit,
 }: {
+  tournament: Tournament;
   matches: ScheduledMatch[];
   rooms: TournamentRoom[];
   onMove: (match: ScheduledMatch, roomId: string) => void;
   onEdit: (match: ScheduledMatch) => void;
 }) {
+  const [draggedMatchId, setDraggedMatchId] = useState<string | null>(null);
+  const [hoveredDestination, setHoveredDestination] = useState<string | null>(null);
   const rounds = roundsWithGames(matches);
   const columns = [...rooms, { id: '__unassigned__', name: 'Unassigned', enabled: true } as TournamentRoom];
 
@@ -353,11 +425,29 @@ function RoomBoard({
         match.roundNumber === roundNumber && (roomId === '__unassigned__' ? !match.roomId : match.roomId === roomId),
     );
 
+  const destinationFor = (roomId: string) => {
+    if (!draggedMatchId) return { state: 'idle' as const, message: '' };
+    return planRoomDrop(tournament, draggedMatchId, roomId === '__unassigned__' ? undefined : roomId);
+  };
+
+  const allowDragOver = (event: DragEvent, roundNumber: number, roomId: string) => {
+    const destination = destinationFor(roomId);
+    setHoveredDestination(`${roundNumber}:${roomId}`);
+    event.dataTransfer.dropEffect =
+      destination.state === 'valid-empty' || destination.state === 'valid-swap' ? 'move' : 'none';
+    event.preventDefault();
+  };
+
   const dropMatch = (event: DragEvent, roomId: string) => {
     event.preventDefault();
     const matchId = event.dataTransfer.getData('text/plain');
     const match = matches.find((candidate) => candidate.id === matchId);
-    if (match) onMove(match, roomId === '__unassigned__' ? '' : roomId);
+    if (!match) return;
+    const destination = planRoomDrop(tournament, match.id, roomId === '__unassigned__' ? undefined : roomId);
+    if (destination.state !== 'valid-empty' && destination.state !== 'valid-swap') return;
+    onMove(match, roomId === '__unassigned__' ? '' : roomId);
+    setDraggedMatchId(null);
+    setHoveredDestination(null);
   };
 
   return (
@@ -375,31 +465,68 @@ function RoomBoard({
         </TableHead>
         <TableBody>
           {rounds.map((roundNumber) => (
-            <TableRow key={roundNumber}>
+            <TableRow key={roundNumber} data-match-plan-round={roundNumber}>
               <TableCell sx={{ verticalAlign: 'top' }}>
                 <Typography variant="subtitle2">Round {roundNumber}</Typography>
               </TableCell>
               {columns.map((room) => {
                 const cellMatches = matchesForCell(roundNumber, room.id);
+                const destination = destinationFor(room.id);
+                const destinationKey = `${roundNumber}:${room.id}`;
+                const highlighted = hoveredDestination === destinationKey;
                 return (
                   <TableCell
                     key={room.id}
-                    onDragOver={(event) => event.preventDefault()}
+                    onDragOver={(event) => allowDragOver(event, roundNumber, room.id)}
+                    onDragLeave={() => setHoveredDestination(null)}
                     onDrop={(event) => dropMatch(event, room.id)}
-                    onDoubleClick={() => cellMatches[0] && onEdit(cellMatches[0])}
-                    sx={{ verticalAlign: 'top', minHeight: 64, backgroundColor: 'background.paper' }}
+                    data-drop-state={destination.state}
+                    aria-label={`${room.name}, round ${roundNumber}${
+                      destination.state !== 'idle' ? `, ${destination.message}` : ''
+                    }`}
+                    sx={{
+                      verticalAlign: 'top',
+                      minHeight: 64,
+                      backgroundColor: highlighted ? 'action.selected' : 'background.paper',
+                      outline: highlighted ? 1 : undefined,
+                      outlineColor:
+                        destination.state === 'invalid' || destination.state === 'protected'
+                          ? 'warning.main'
+                          : 'primary.main',
+                    }}
                   >
                     <Stack sx={{ gap: 0.75 }}>
                       {cellMatches.map((match) => (
                         <BoardMatch
                           key={match.id}
                           match={match}
-                          onDragStart={(event) => event.dataTransfer.setData('text/plain', match.id)}
+                          onEdit={onEdit}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', match.id);
+                            setDraggedMatchId(match.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedMatchId(null);
+                            setHoveredDestination(null);
+                          }}
                         />
                       ))}
                       {cellMatches.length === 0 && (
                         <Typography variant="body2" color="text.disabled">
                           —
+                        </Typography>
+                      )}
+                      {highlighted && destination.state !== 'idle' && (
+                        <Typography
+                          variant="caption"
+                          color={
+                            destination.state === 'invalid' || destination.state === 'protected'
+                              ? 'warning.main'
+                              : 'primary.main'
+                          }
+                        >
+                          {destination.message}
                         </Typography>
                       )}
                     </Stack>
@@ -414,12 +541,35 @@ function RoomBoard({
   );
 }
 
-function BoardMatch({ match, onDragStart }: { match: ScheduledMatch; onDragStart: (event: DragEvent) => void }) {
-  const draggable = isEditable(match);
+function BoardMatch({
+  match,
+  onEdit,
+  onDragStart,
+  onDragEnd,
+}: {
+  match: ScheduledMatch;
+  onEdit: (match: ScheduledMatch) => void;
+  onDragStart: (event: DragEvent) => void;
+  onDragEnd: () => void;
+}) {
+  const draggable = isEditable(match) && !match.roomAssignmentLocked;
+  const activate = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onEdit(match);
+    }
+  };
   return (
     <Box
+      role="button"
+      tabIndex={0}
+      data-match-plan-match-id={match.id}
       draggable={draggable}
+      onClick={() => onEdit(match)}
+      onKeyDown={activate}
       onDragStart={draggable ? onDragStart : undefined}
+      onDragEnd={onDragEnd}
+      aria-label={`Edit ${match.describe()}${match.roomAssignmentLocked ? ', room kept' : ''}`}
       sx={{
         display: 'flex',
         gap: 0.5,
@@ -428,12 +578,17 @@ function BoardMatch({ match, onDragStart }: { match: ScheduledMatch; onDragStart
         border: 1,
         borderColor: 'divider',
         borderRadius: 1,
-        cursor: draggable ? 'grab' : 'default',
-        '&:active': { cursor: draggable ? 'grabbing' : 'default' },
+        cursor: draggable ? 'grab' : 'pointer',
+        '&:hover, &:focus-visible': { borderColor: 'primary.main', backgroundColor: 'action.hover', outline: 'none' },
+        '&:active': { cursor: draggable ? 'grabbing' : 'pointer' },
       }}
-      title={draggable ? 'Drag to another room in this round' : 'This game cannot be moved'}
+      title={
+        draggable
+          ? 'Drag to another room in this round, or select to edit'
+          : 'Select to edit; this game cannot be moved'
+      }
     >
-      {draggable && <DragIndicator sx={{ fontSize: 16, color: 'text.disabled', mt: 0.15 }} />}
+      {draggable && <DragIndicator sx={{ fontSize: 16, color: 'text.disabled', mt: 0.15 }} aria-hidden />}
       <Box sx={{ minWidth: 0 }}>
         <Typography variant="body2" sx={{ fontWeight: 500, lineHeight: 1.25 }}>
           {match.leftTeamName} / {match.rightTeamName}

@@ -1,6 +1,17 @@
-import { Box, Button, Stack, Switch, TextField, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  FormControl,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
+  Stack,
+  Switch,
+  TextField,
+  Typography,
+} from '@mui/material';
 import Grid from '@mui/material/Grid';
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { DatePicker } from '@mui/x-date-pickers';
 import dayjs from 'dayjs';
 import { Delete, Restore } from '@mui/icons-material';
@@ -44,8 +55,97 @@ function GeneralPage({ showPageHeader = true }: IGeneralPageProps) {
         <Grid size={{ xs: 12 }}>
           <TrackingPanel />
         </Grid>
+        <Grid size={{ xs: 12 }}>
+          <GameEntryPanel />
+        </Grid>
       </Grid>
     </>
+  );
+}
+
+function GameEntryPanel() {
+  const manager = useContext(TournamentContext);
+  const mode = manager.tournament.roomScoringMode;
+  const [modeError, setModeError] = useState('');
+
+  const changeMode = async (nextMode: typeof mode) => {
+    setModeError('');
+    const result = await manager.setRoomScoringMode(nextMode);
+    if (!result.ok) setModeError(result.reason ?? 'Browser room scoring could not be disabled.');
+  };
+
+  return (
+    <YfCard title="Game entry" description="Choose how this tournament's results will be scored.">
+      <FormControl component="fieldset" fullWidth>
+        <RadioGroup
+          value={mode}
+          onChange={(event) => {
+            changeMode(event.target.value as typeof mode);
+          }}
+          aria-label="Game entry mode"
+          sx={{ gap: 0.5 }}
+        >
+          <FormControlLabel
+            value="traditional"
+            control={<Radio size="small" />}
+            sx={{ alignItems: 'flex-start', m: 0 }}
+            label={
+              <Box sx={{ pt: 0.25 }}>
+                <Typography variant="body2">Traditional YellowFruit</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Enter or import results in Games.
+                </Typography>
+              </Box>
+            }
+          />
+          <FormControlLabel
+            value="browser"
+            control={<Radio size="small" />}
+            sx={{ alignItems: 'flex-start', m: 0 }}
+            label={
+              <Box sx={{ pt: 0.25 }}>
+                <Typography variant="body2">Browser room scoring</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {mode === 'browser'
+                    ? 'On · moderators or scorekeepers score from room devices.'
+                    : 'Off · optional. Enable this when room devices should submit results.'}
+                </Typography>
+              </Box>
+            }
+          />
+        </RadioGroup>
+      </FormControl>
+      {mode === 'traditional' && (
+        <Button
+          size="small"
+          variant="outlined"
+          sx={{ mt: 1 }}
+          onClick={() => {
+            changeMode('browser');
+          }}
+        >
+          Enable browser room scoring
+        </Button>
+      )}
+      {mode === 'browser' && (
+        <Button
+          size="small"
+          variant="text"
+          color="warning"
+          sx={{ mt: 1 }}
+          onClick={() => {
+            changeMode('traditional');
+          }}
+        >
+          Disable browser room scoring
+        </Button>
+      )}
+      {modeError && (
+        <Typography variant="caption" color="error.main" sx={{ display: 'block', mt: 0.75 }} role="alert">
+          {modeError}
+        </Typography>
+      )}
+    </YfCard>
   );
 }
 

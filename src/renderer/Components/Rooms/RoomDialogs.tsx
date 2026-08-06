@@ -87,6 +87,7 @@ export function RoomEditorDialog(props: IRoomEditorDialogProps) {
       created.enabled = enabled;
       tournament.rooms.push(created);
     }
+    manager.setRoomScoringMode('browser');
     manager.markTournamentDataChanged();
     onClose();
   };

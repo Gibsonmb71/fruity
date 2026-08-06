@@ -47,15 +47,19 @@ import {
   validateSchedule,
 } from '../../Services/ScheduleService';
 import {
+  IRoomAssignmentSnapshot,
   IRebalancePlan,
   applyRebalance,
   applySwapPlan,
   assignRoom,
+  captureRoomAssignmentSnapshot,
   planAutoAssignUnassigned,
   planRebalance,
   planSwap,
+  restoreRoomAssignmentSnapshot,
 } from '../../Services/RoomAllocationService';
-import { ReadinessTarget, resolveTournamentReadiness } from '../../Services/TournamentReadiness';
+import { resolveTournamentReadiness } from '../../Services/TournamentReadiness';
+import { createNavigationIntent, INavigationIntent } from '../../Services/Navigation';
 import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSetupDialog } from './RoomDialogs';
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
 import MatchPlanWorkspace from './MatchPlanWorkspace';
@@ -156,10 +160,19 @@ interface IRoomsPageProps {
   // eslint-disable-next-line react/require-default-props
   onTabChange?: (tab: ControlPages) => void;
   // eslint-disable-next-line react/require-default-props
-  onNavigateTarget?: (target: ReadinessTarget) => void;
+  onNavigateTarget?: (intent: INavigationIntent) => void;
+  // eslint-disable-next-line react/require-default-props
+  navigation?: INavigationIntent;
+  onNavigationHandled: () => void;
 }
 
-export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNavigateTarget }: IRoomsPageProps) {
+export default function RoomsPage({
+  activeTab: controlledTab,
+  onTabChange,
+  onNavigateTarget,
+  navigation,
+  onNavigationHandled,
+}: IRoomsPageProps) {
   const manager = useContext(TournamentContext);
   const service = manager.tournamentServerService;
   const { tournament } = manager;
@@ -174,6 +187,9 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<IConfirmState | null>(null);
   const [bulkPlan, setBulkPlan] = useState<{ mode: 'auto' | 'rebalance'; plan: IRebalancePlan } | null>(null);
+  const [assignmentUndo, setAssignmentUndo] = useState<{ snapshot: IRoomAssignmentSnapshot; label: string } | null>(
+    null,
+  );
   const [scheduleError, setScheduleError] = useState('');
   const [roomMenu, setRoomMenu] = useState<{ room: TournamentRoom; anchor: HTMLElement } | null>(null);
   const [uncontrolledTab, setUncontrolledTab] = useState(ControlPages.Live);
@@ -190,6 +206,13 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
       service.dataChangedReactCallback = () => {};
     };
   }, [service]);
+
+  useEffect(() => {
+    if (!navigation) return undefined;
+    if (navigation.target === 'control:match-plan' || navigation.focus === 'result-inbox') return undefined;
+    const timer = window.setTimeout(() => onNavigationHandled(), 0);
+    return () => window.clearTimeout(timer);
+  }, [navigation, onNavigationHandled]);
 
   useEffect(() => {
     if (!service.status.running) return undefined;
@@ -221,6 +244,7 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: activeSessions.map((session) => ({ roomId: session.roomId, status: session.status })),
     roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
   });
@@ -329,14 +353,36 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
     });
   };
 
+  const rememberAssignmentUndo = (snapshot: IRoomAssignmentSnapshot, changeCount: number) => {
+    if (changeCount > 0 && snapshot.entries.length > 0) {
+      setAssignmentUndo({
+        snapshot,
+        label: `${changeCount} room assignment${changeCount === 1 ? '' : 's'} updated`,
+      });
+    }
+  };
+
+  const undoAssignment = () => {
+    if (!assignmentUndo) return;
+    const issues = restoreRoomAssignmentSnapshot(tournament, assignmentUndo.snapshot);
+    if (hasBlockingIssue(issues)) {
+      setScheduleError(issues.map((issue) => issue.message).join(' '));
+      return;
+    }
+    setAssignmentUndo(null);
+    manager.markTournamentDataChanged();
+  };
+
   const moveRoomAssignment = (match: ScheduledMatch, nextRoomId: string) => {
     setScheduleError('');
     if (nextRoomId === '') {
+      const snapshot = captureRoomAssignmentSnapshot(tournament, [match.id]);
       const issues = assignRoom(tournament, match.id, undefined, { source: 'manual' });
       if (hasBlockingIssue(issues)) {
         setScheduleError(issues.map((issue) => issue.message).join(' '));
         return;
       }
+      rememberAssignmentUndo(snapshot, 1);
       manager.markTournamentDataChanged();
       return;
     }
@@ -347,11 +393,16 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
       return;
     }
     if (plan.kind === 'move') {
+      const snapshot = captureRoomAssignmentSnapshot(
+        tournament,
+        plan.changes.map((change) => change.matchId),
+      );
       const issues = applySwapPlan(tournament, plan);
       if (hasBlockingIssue(issues)) {
         setScheduleError(issues.map((issue) => issue.message).join(' '));
         return;
       }
+      rememberAssignmentUndo(snapshot, plan.changes.length);
       manager.markTournamentDataChanged();
       return;
     }
@@ -367,9 +418,16 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
       }.`,
       confirmLabel: 'Swap',
       onConfirm: () => {
+        const snapshot = captureRoomAssignmentSnapshot(
+          tournament,
+          plan.changes.map((change) => change.matchId),
+        );
         const issues = applySwapPlan(tournament, plan);
         if (hasBlockingIssue(issues)) setScheduleError(issues.map((issue) => issue.message).join(' '));
-        else manager.markTournamentDataChanged();
+        else {
+          rememberAssignmentUndo(snapshot, plan.changes.length);
+          manager.markTournamentDataChanged();
+        }
         setConfirmState(null);
       },
     });
@@ -390,7 +448,12 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
   };
 
   const applyBulkPlan = (plan: IRebalancePlan) => {
+    const snapshot = captureRoomAssignmentSnapshot(
+      tournament,
+      plan.changes.map((change) => change.matchId),
+    );
     applyRebalance(tournament, plan);
+    rememberAssignmentUndo(snapshot, plan.changes.length);
     manager.markTournamentDataChanged();
     setBulkPlan(null);
   };
@@ -403,8 +466,10 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
       match.status === ScheduledMatchStatus.Accepted
     )
       return;
+    const snapshot = captureRoomAssignmentSnapshot(tournament, [match.id]);
     match.roomAssignmentLocked = match.roomAssignmentLocked ? undefined : true;
     match.roomAssignmentSource = 'manual';
+    rememberAssignmentUndo(snapshot, 1);
     manager.markTournamentDataChanged();
   };
 
@@ -769,6 +834,8 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
               </Alert>
             )}
             <MatchPlanWorkspace
+              tournament={tournament}
+              phases={tournament.phases}
               matches={matches}
               rooms={rooms}
               currentRoundNumber={currentRound}
@@ -776,11 +843,17 @@ export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNav
               onEdit={(match) => setMatchEditor(match)}
               onCancel={cancelMatch}
               onToggleLock={toggleRoomAssignmentLock}
+              navigation={navigation}
+              onNavigationHandled={onNavigationHandled}
+              undoLabel={assignmentUndo?.label}
+              onUndo={assignmentUndo ? undoAssignment : undefined}
             />
           </section>
         )}
 
-        {activeTab === ControlPages.Live && service.inbox.length > 0 && <MatchInboxCard />}
+        {activeTab === ControlPages.Live && (service.inbox.length > 0 || navigation?.focus === 'result-inbox') && (
+          <MatchInboxCard navigation={navigation} onNavigationHandled={onNavigationHandled} />
+        )}
 
         <RoomEditorDialog
           open={roomEditor !== undefined}
@@ -1010,7 +1083,7 @@ function runPrimaryAction(
   setServerSettingsOpen: (open: boolean) => void,
   setRebracketOpen: (open: boolean) => void,
   releaseRound: () => void,
-  onNavigateTarget?: (target: ReadinessTarget) => void,
+  onNavigateTarget?: (intent: INavigationIntent) => void,
 ) {
   const action = primaryOperationAction(readiness);
   if (!action) return;
@@ -1020,7 +1093,7 @@ function runPrimaryAction(
       const { target } = action;
       if (!target) break;
       if (!target.startsWith('control:')) {
-        onNavigateTarget?.(target);
+        onNavigateTarget?.(action.navigation ?? createNavigationIntent(target));
         break;
       }
       if (target === 'control:live') setActiveTab(ControlPages.Live);
@@ -1361,88 +1434,113 @@ function ServerSettingsDialog({
 }) {
   const [portText, setPortText] = useState(String(service.requestedPort));
   const [busy, setBusy] = useState(false);
+  const [stopConfirmationOpen, setStopConfirmationOpen] = useState(false);
   useEffect(() => {
     if (open) setPortText(String(service.requestedPort));
   }, [open, service.requestedPort]);
   const port = Number.parseInt(portText, 10);
   const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
-  const toggle = async () => {
+  const stopServer = async () => {
+    setStopConfirmationOpen(false);
     setBusy(true);
     try {
-      if (service.status.running) await service.stopServer();
-      else await service.startServer(port);
+      await service.stopServer();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = async () => {
+    if (service.status.running) {
+      setStopConfirmationOpen(true);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await service.startServer(port);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Tournament Server settings</DialogTitle>
-      <DialogContent>
-        <Typography
-          variant="body2"
-          sx={{
-            color: 'text.secondary',
-            mb: 2,
-          }}
-        >
-          The server binds to every LAN interface on this computer. Room pages only work while it is running.
-        </Typography>
-        {!service.status.running && (
-          <TextField
-            label="Port"
-            value={portText}
-            onChange={(event) => {
-              setPortText(event.target.value);
-              const next = Number.parseInt(event.target.value, 10);
-              if (Number.isInteger(next)) service.setRequestedPort(next);
+    <>
+      <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+        <DialogTitle>Tournament Server settings</DialogTitle>
+        <DialogContent>
+          <Typography
+            variant="body2"
+            sx={{
+              color: 'text.secondary',
+              mb: 2,
             }}
-            error={!validPort}
-            helperText={validPort ? ' ' : 'Use a port between 1024 and 65535'}
-          />
-        )}
-        {service.status.running && (
-          <>
-            <Alert severity="success" sx={{ mb: 2 }}>
-              Running on port {service.status.port}. Stop the server before changing the port.
+          >
+            The server binds to every LAN interface on this computer. Room pages only work while it is running.
+          </Typography>
+          {!service.status.running && (
+            <TextField
+              label="Port"
+              value={portText}
+              onChange={(event) => {
+                setPortText(event.target.value);
+                const next = Number.parseInt(event.target.value, 10);
+                if (Number.isInteger(next)) service.setRequestedPort(next);
+              }}
+              error={!validPort}
+              helperText={validPort ? ' ' : 'Use a port between 1024 and 65535'}
+            />
+          )}
+          {service.status.running && (
+            <>
+              <Alert severity="success" sx={{ mb: 2 }}>
+                Running on port {service.status.port}. Stop the server before changing the port.
+              </Alert>
+              {service.networkAddresses.length > 0 && (
+                <FormControl fullWidth size="small">
+                  <InputLabel id="settings-network-address-label">Preferred network address</InputLabel>
+                  <Select
+                    labelId="settings-network-address-label"
+                    label="Preferred network address"
+                    value={service.selectedAddress}
+                    onChange={(event) => service.setPreferredNetworkAddress(event.target.value)}
+                  >
+                    {service.networkAddresses.map((address) => (
+                      <MenuItem key={address.url} value={address.url}>
+                        {address.interfaceName}: {address.address} ({address.url})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+            </>
+          )}
+          {service.lastError !== '' && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {service.lastError}
             </Alert>
-            {service.networkAddresses.length > 0 && (
-              <FormControl fullWidth size="small">
-                <InputLabel id="settings-network-address-label">Preferred network address</InputLabel>
-                <Select
-                  labelId="settings-network-address-label"
-                  label="Preferred network address"
-                  value={service.selectedAddress}
-                  onChange={(event) => service.setPreferredNetworkAddress(event.target.value)}
-                >
-                  {service.networkAddresses.map((address) => (
-                    <MenuItem key={address.url} value={address.url}>
-                      {address.interfaceName}: {address.address} ({address.url})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-          </>
-        )}
-        {service.lastError !== '' && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {service.lastError}
-          </Alert>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-        <Button
-          variant="contained"
-          color={service.status.running ? 'error' : 'primary'}
-          startIcon={service.status.running ? <Stop /> : <PlayArrow />}
-          onClick={toggle}
-          disabled={busy || (!service.status.running && !validPort)}
-        >
-          {service.status.running ? 'Stop server' : 'Start server'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Close</Button>
+          <Button
+            variant="contained"
+            color={service.status.running ? 'error' : 'primary'}
+            startIcon={service.status.running ? <Stop /> : <PlayArrow />}
+            onClick={toggle}
+            disabled={busy || (!service.status.running && !validPort)}
+          >
+            {service.status.running ? 'Stop server' : 'Start server'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <ConfirmDialog
+        open={stopConfirmationOpen}
+        title="Stop the tournament server?"
+        message="Room scorekeepers will be disconnected, and any active games may be interrupted. Stop the server?"
+        confirmLabel="Stop server"
+        destructive
+        onClose={() => setStopConfirmationOpen(false)}
+        onConfirm={stopServer}
+      />
+    </>
   );
 }

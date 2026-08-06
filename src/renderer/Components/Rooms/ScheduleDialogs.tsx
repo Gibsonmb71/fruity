@@ -134,6 +134,7 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
         return;
       }
     }
+    manager.setRoomScoringMode('browser');
     manager.markTournamentDataChanged();
     onClose();
   };

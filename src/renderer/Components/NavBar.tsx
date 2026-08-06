@@ -33,7 +33,8 @@ import { hotkeyFormat } from '../Utils/GeneralReactUtils';
 import getAppPageHelpText from './PageLevelHelpText';
 import { headerHeight, macTrafficLightWidth } from '../Theme/tokens';
 import { TournamentContext } from '../TournamentManager';
-import { ITournamentReadiness, ReadinessTarget } from '../Services/TournamentReadiness';
+import { ITournamentReadiness } from '../Services/TournamentReadiness';
+import { INavigationIntent } from '../Services/Navigation';
 
 // Display names for the buttons
 const pageNames = {
@@ -80,7 +81,7 @@ interface INavBarProps {
   activePage: ApplicationPages;
   setActivePage: (page: ApplicationPages) => void;
   readiness: ITournamentReadiness;
-  onNavigateTarget: (target: ReadinessTarget) => void;
+  onNavigateTarget: (intent: INavigationIntent) => void;
   onOpenQuickFind: () => void;
 }
 
@@ -201,15 +202,12 @@ function NavBar(props: INavBarProps) {
                 aria-hidden
                 sx={{
                   flexShrink: 0,
-                  width: 15,
-                  height: 15,
-                  borderRadius: '5px 5px 5px 2px',
-                  border: 1,
-                  borderColor: 'primary.main',
-                  backgroundColor: 'primary.main',
-                  transform: 'rotate(-8deg)',
+                  fontSize: '1rem',
+                  lineHeight: 1,
                 }}
-              />
+              >
+                🍌
+              </Box>
               <Typography
                 noWrap
                 sx={{
@@ -398,7 +396,7 @@ function NavBar(props: INavBarProps) {
           <MenuItem
             key={issue.id}
             onClick={() => {
-              onNavigateTarget(issue.target);
+              onNavigateTarget(issue.navigation ?? { target: issue.target });
               setIssuesAnchor(null);
             }}
             sx={{ alignItems: 'flex-start', whiteSpace: 'normal' }}

@@ -10,11 +10,15 @@ import {
   Autocomplete,
   TextField,
   Button,
+  FormControl,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Tab,
   Tabs,
 } from '@mui/material';
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Add, Delete, Edit, Error, ExpandMore, FileUpload, FilterAlt, Warning } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
@@ -27,7 +31,7 @@ import { Team } from '../DataModel/Team';
 import { CtrlOrCmd, trunc } from '../Utils/GeneralUtils';
 import { YfEmptyState, YfPageHeader } from '../Utils/GeneralReactUtils';
 import { ApplicationPages, SetupPages } from '../Enums';
-import type { IQuickFindNavigation } from '../Services/QuickFind';
+import type { GamesReviewFilter, INavigationIntent } from '../Services/Navigation';
 
 // Defines the order the buttons should be in
 const viewList = ['By round', 'By pool'];
@@ -38,7 +42,7 @@ interface IGamesPageProps {
   // eslint-disable-next-line react/require-default-props
   onNavigate?: (page: ApplicationPages, setupSection?: SetupPages) => void;
   // eslint-disable-next-line react/require-default-props
-  navigation?: IQuickFindNavigation;
+  navigation?: INavigationIntent;
   // eslint-disable-next-line react/require-default-props
   onNavigationHandled?: () => void;
 }
@@ -50,6 +54,7 @@ export default function GamesPage(props: IGamesPageProps) {
   const [filterTeam, setFilterTeam] = useState<Team | undefined>(() =>
     navigation?.teamName ? tournManager.tournament.findTeamByName(navigation.teamName) : undefined,
   );
+  const [reviewFilter, setReviewFilter] = useState<GamesReviewFilter>(navigation?.gamesReviewFilter ?? 'all');
   const hasSchedule = tournManager.tournament.phases.length > 0;
 
   useEffect(() => {
@@ -57,6 +62,7 @@ export default function GamesPage(props: IGamesPageProps) {
     if (navigation.teamName) {
       setFilterTeam(tournManager.tournament.findTeamByName(navigation.teamName));
     }
+    if (navigation.gamesReviewFilter !== undefined) setReviewFilter(navigation.gamesReviewFilter);
     if (navigation.matchId) {
       const matchAndRound = tournManager.tournament.phases
         .flatMap((phase) =>
@@ -70,6 +76,17 @@ export default function GamesPage(props: IGamesPageProps) {
     }
     onNavigationHandled?.();
   }, [navigation, onNavigationHandled, tournManager]);
+
+  const reviewCounts = useMemo(() => {
+    const counts = { errors: 0, warnings: 0 };
+    tournManager.tournament.phases
+      .flatMap((phase) => phase.rounds.flatMap((round) => round.matches))
+      .forEach((match) => {
+        if (match.getErrorMessages().length > 0) counts.errors += 1;
+        else if (match.getWarningMessages().length > 0) counts.warnings += 1;
+      });
+    return counts;
+  }, [tournManager.tournament.phases]);
 
   return (
     <>
@@ -115,6 +132,20 @@ export default function GamesPage(props: IGamesPageProps) {
             <TeamFilterField filterByTeam={setFilterTeam} />
           </Box>
         )}
+        <FormControl size="small" sx={{ minWidth: 165 }}>
+          <InputLabel>Review</InputLabel>
+          <Select
+            value={reviewFilter}
+            label="Review"
+            onChange={(event) => setReviewFilter(event.target.value as GamesReviewFilter)}
+            aria-label="Filter games by review status"
+          >
+            <MenuItem value="all">All games</MenuItem>
+            <MenuItem value="needs-review">Needs review ({reviewCounts.errors + reviewCounts.warnings})</MenuItem>
+            <MenuItem value="errors">Errors ({reviewCounts.errors})</MenuItem>
+            <MenuItem value="warnings">Warnings ({reviewCounts.warnings})</MenuItem>
+          </Select>
+        </FormControl>
       </Box>
       {!hasSchedule ? (
         <Paper variant="outlined">
@@ -130,8 +161,15 @@ export default function GamesPage(props: IGamesPageProps) {
         </Paper>
       ) : (
         <>
-          {curView === 0 && <GamesViewByRound filterTeam={filterTeam} initialRoundNumber={navigation?.roundNumber} />}
-          {curView === 1 && <GamesViewByPool />}
+          {curView === 0 && (
+            <GamesViewByRound
+              filterTeam={filterTeam}
+              reviewFilter={reviewFilter}
+              initialRoundNumber={navigation?.roundNumber}
+              initialMatchId={navigation?.matchId}
+            />
+          )}
+          {curView === 1 && <GamesViewByPool reviewFilter={reviewFilter} />}
         </>
       )}
     </>
@@ -182,12 +220,15 @@ function TeamFilterField(props: ITeamFilterFieldProps) {
 
 interface IGameViewByRoundProps {
   filterTeam: Team | undefined;
+  reviewFilter: GamesReviewFilter;
   // eslint-disable-next-line react/require-default-props
   initialRoundNumber?: number;
+  // eslint-disable-next-line react/require-default-props
+  initialMatchId?: string;
 }
 
 function GamesViewByRound(props: IGameViewByRoundProps) {
-  const { filterTeam, initialRoundNumber } = props;
+  const { filterTeam, reviewFilter, initialRoundNumber, initialMatchId } = props;
   const tournManager = useContext(TournamentContext);
   const [phases] = useSubscription(tournManager.tournament.phases);
 
@@ -198,7 +239,9 @@ function GamesViewByRound(props: IGameViewByRoundProps) {
           key={phase.name}
           phase={phase}
           filterTeam={filterTeam}
+          reviewFilter={reviewFilter}
           initialRoundNumber={initialRoundNumber}
+          initialMatchId={initialMatchId}
         />
       ))}
     </Stack>
@@ -208,12 +251,15 @@ function GamesViewByRound(props: IGameViewByRoundProps) {
 interface IGamesForPhaseByRoundProps {
   phase: Phase;
   filterTeam: Team | undefined;
+  reviewFilter: GamesReviewFilter;
   // eslint-disable-next-line react/require-default-props
   initialRoundNumber?: number;
+  // eslint-disable-next-line react/require-default-props
+  initialMatchId?: string;
 }
 
 function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
-  const { phase, filterTeam, initialRoundNumber } = props;
+  const { phase, filterTeam, reviewFilter, initialRoundNumber, initialMatchId } = props;
 
   return (
     <Box component="section" aria-labelledby={`games-phase-${phase.code}`}>
@@ -232,7 +278,9 @@ function GamesForPhaseByRound(props: IGamesForPhaseByRoundProps) {
             expanded={!!filterTeam}
             forceNumericDisplay={phase.forceNumericRounds || false}
             filterTeam={filterTeam}
+            reviewFilter={reviewFilter}
             initialRoundNumber={initialRoundNumber}
+            initialMatchId={initialMatchId}
           />
         ))}
       </Box>
@@ -245,26 +293,40 @@ interface ISingleRoundProps {
   expanded: boolean;
   forceNumericDisplay: boolean;
   filterTeam: Team | undefined;
+  reviewFilter: GamesReviewFilter;
   // eslint-disable-next-line react/require-default-props
   initialRoundNumber?: number;
+  // eslint-disable-next-line react/require-default-props
+  initialMatchId?: string;
 }
 
 function SingleRound(props: ISingleRoundProps) {
-  const { round, expanded: expandedProp, forceNumericDisplay, filterTeam, initialRoundNumber } = props;
+  const {
+    round,
+    expanded: expandedProp,
+    forceNumericDisplay,
+    filterTeam,
+    reviewFilter,
+    initialRoundNumber,
+    initialMatchId,
+  } = props;
   const tournManager = useContext(TournamentContext);
   const [expanded, setExpanded] = useState(expandedProp || initialRoundNumber === round.number);
   const canAddMatch = useMemo(() => tournManager.tournament.readyToAddMatches(), [tournManager]);
-  const [numErrs, numWarns] = filterTeam === undefined ? round.countErrorsAndWarnings() : [0, 0];
+  const [numErrs, numWarns] = round.countErrorsAndWarnings();
   const [prevFilterTeam, setPrevFilterTeam] = useState<Team | undefined>(undefined);
 
   const matchesToShow = useMemo(
-    () => (filterTeam ? round.matches.filter((m) => m.includesTeam(filterTeam)) : round.matches),
-    [filterTeam, round.matches],
+    () =>
+      round.matches.filter(
+        (match) => (!filterTeam || match.includesTeam(filterTeam)) && reviewFilterMatches(match, reviewFilter),
+      ),
+    [filterTeam, reviewFilter, round.matches],
   );
   const numMatches = matchesToShow.length;
 
   if (prevFilterTeam !== filterTeam) {
-    if (filterTeam && numMatches > 0) setExpanded(true);
+    if ((filterTeam || reviewFilter !== 'all') && numMatches > 0) setExpanded(true);
     else setExpanded(false);
     setPrevFilterTeam(filterTeam);
   }
@@ -292,6 +354,7 @@ function SingleRound(props: ISingleRoundProps) {
           <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             {numMatches === 1 ? '1 game' : `${numMatches} games`}
             {!!filterTeam && <FilterAlt fontSize="small" />}
+            {reviewFilter !== 'all' && <FilterAlt fontSize="small" />}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, ml: 'auto' }}>
             {numErrs > 0 && (
@@ -334,7 +397,7 @@ function SingleRound(props: ISingleRoundProps) {
         </Box>
       </AccordionSummary>
       <AccordionDetails sx={{ px: 2, pb: 1.5 }}>
-        {expanded && <SingleRoundMatchList round={round} matchList={matchesToShow} />}
+        {expanded && <SingleRoundMatchList round={round} matchList={matchesToShow} initialMatchId={initialMatchId} />}
       </AccordionDetails>
     </Accordion>
   );
@@ -343,10 +406,12 @@ function SingleRound(props: ISingleRoundProps) {
 interface ISingleRoundMatchListProps {
   round: Round;
   matchList: Match[];
+  // eslint-disable-next-line react/require-default-props
+  initialMatchId?: string;
 }
 
 function SingleRoundMatchList(props: ISingleRoundMatchListProps) {
-  const { round, matchList } = props;
+  const { round, matchList, initialMatchId } = props;
   return (
     matchList.length > 0 && (
       <Box
@@ -355,7 +420,7 @@ function SingleRoundMatchList(props: ISingleRoundMatchListProps) {
         }}
       >
         {matchList.map((m) => (
-          <MatchListItem key={m.id} match={m} round={round} />
+          <MatchListItem key={m.id} match={m} round={round} highlighted={m.id === initialMatchId} />
         ))}
       </Box>
     )
@@ -365,18 +430,37 @@ function SingleRoundMatchList(props: ISingleRoundMatchListProps) {
 interface IMatchListItemProps {
   match: Match;
   round: Round;
+  // eslint-disable-next-line react/require-default-props
+  highlighted?: boolean;
+}
+
+function reviewFilterMatches(match: Match, reviewFilter: GamesReviewFilter): boolean {
+  if (reviewFilter === 'all') return true;
+  const hasErrors = match.getErrorMessages().length > 0;
+  const hasWarnings = match.getWarningMessages().length > 0;
+  if (reviewFilter === 'errors') return hasErrors;
+  if (reviewFilter === 'warnings') return hasWarnings;
+  return hasErrors || hasWarnings;
 }
 
 function MatchListItem(props: IMatchListItemProps) {
-  const { match, round } = props;
+  const { match, round, highlighted = false } = props;
   const tournManager = useContext(TournamentContext);
+  const itemRef = useRef<HTMLDivElement>(null);
   const validationStatus = match.getOverallValidationStatus();
 
   const errorMessage = match.getErrorMessages()[0];
   const warningMessage = match.getWarningMessages()[0];
 
+  useEffect(() => {
+    if (!highlighted || !itemRef.current) return;
+    itemRef.current.scrollIntoView({ block: 'center' });
+  }, [highlighted]);
+
   return (
     <Box
+      ref={itemRef}
+      id={`game-${match.id}`}
       sx={{
         display: 'flex',
         alignItems: 'center',
@@ -384,6 +468,7 @@ function MatchListItem(props: IMatchListItemProps) {
         px: 1.5,
         py: 1,
         '&:hover': { backgroundColor: 'action.hover' },
+        ...(highlighted ? { backgroundColor: 'action.selected', outline: 1, outlineColor: 'primary.main' } : {}),
       }}
       onDoubleClick={() => tournManager.openMatchEditModalExistingMatch(match, round)}
     >
