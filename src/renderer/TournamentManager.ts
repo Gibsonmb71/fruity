@@ -840,7 +840,13 @@ export class TournamentManager {
       const check = checkBrowserRoomScoringDisable(this.tournament, this.tournamentServerService.sessions);
       if (!check.canDisable) return { ok: false, reason: check.reason };
       if (shouldStopServerBeforeDisabling(check, this.tournamentServerService.status.running)) {
-        await this.tournamentServerService.stopServer();
+        const stopped = await this.tournamentServerService.stopServer();
+        if (stopped.running) {
+          return {
+            ok: false,
+            reason: 'The Tournament Server could not be stopped safely. Browser room scoring remains enabled.',
+          };
+        }
       }
     }
 

@@ -16,8 +16,6 @@ interface IMatchTeamEditorProps {
 
 export default function MatchTeamEditor(props: IMatchTeamEditorProps) {
   const { whichTeam } = props;
-  const modalManager = useContext(MatchEditModalContext);
-  const matchTeam = modalManager.tempMatch.getMatchTeam(whichTeam);
   const teamLabel = whichTeam === 'left' ? 'Team A' : 'Team B';
 
   return (
@@ -30,18 +28,8 @@ export default function MatchTeamEditor(props: IMatchTeamEditorProps) {
       <Box sx={{ px: { xs: 1.25, sm: 1.5 }, py: 1.25, borderBottom: 1, borderColor: 'divider' }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ alignItems: { sm: 'flex-start' } }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="overline" color="text.secondary">
+            <Typography id={`match-${whichTeam}-heading`} variant="overline" color="text.secondary">
               {teamLabel}
-            </Typography>
-            <Typography
-              id={`match-${whichTeam}-heading`}
-              component="h2"
-              variant="h3"
-              noWrap
-              title={matchTeam.team?.name}
-              sx={{ fontSize: '1rem', overflow: 'hidden', textOverflow: 'ellipsis' }}
-            >
-              {matchTeam.team?.name || 'Select a team'}
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} sx={{ width: { xs: '100%', sm: 'min(58%, 330px)' } }}>

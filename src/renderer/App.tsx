@@ -249,6 +249,27 @@ function TournamentEditor() {
     roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
   });
 
+  const handleQuickFindIntent = (intent: INavigationIntent) => {
+    if (intent.actionId === 'add-team') mgr.openTeamEditModalNewTeam();
+    if (intent.actionId === 'add-game' && intent.roundNumber !== undefined) {
+      const round = mgr.tournament.getRoundObjByNumber(intent.roundNumber);
+      if (round) mgr.openMatchModalNewMatchForRound(round);
+    }
+    if (intent.actionId === 'start-server' && readiness.primaryAction?.kind === 'start-server') {
+      service.startServer();
+    }
+    if (
+      intent.actionId === 'release-round' &&
+      readiness.primaryAction?.kind === 'release-round' &&
+      readiness.primaryAction.roundNumber === intent.roundNumber &&
+      intent.roundNumber !== undefined &&
+      service.canReleaseRound(intent.roundNumber).canRelease
+    ) {
+      service.releaseRound(intent.roundNumber);
+    }
+    openReadinessTarget(intent);
+  };
+
   return (
     <>
       <NavBar
@@ -322,7 +343,11 @@ function TournamentEditor() {
       <MatchImportResultDialog />
       <SqbsExportDialog />
       <AboutYfDialog />
-      <QuickFindDialog open={quickFindOpen} onClose={() => setQuickFindOpen(false)} onNavigate={openReadinessTarget} />
+      <QuickFindDialog
+        open={quickFindOpen}
+        onClose={() => setQuickFindOpen(false)}
+        onNavigate={handleQuickFindIntent}
+      />
       <GenericToast />
     </>
   );
@@ -397,7 +422,27 @@ function QuickFindDialog({
   const mgr = useContext(TournamentContext);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const items = useMemo(() => buildQuickFindItems(mgr.tournament), [mgr.tournament]);
+  const service = mgr.tournamentServerService;
+  const readiness = resolveTournamentReadiness(mgr.tournament, {
+    running: service.status.running,
+    currentRoundNumber: service.currentRoundNumber,
+    releasedRoundNumber: service.releasedRoundNumber,
+    inboxCount: service.inbox.length,
+    conflictCount: service.conflicts.length,
+    inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
+  });
+  const items = buildQuickFindItems(mgr.tournament, {
+    serverRunning: service.status.running,
+    inboxCount: service.inbox.length,
+    currentRoundNumber: readiness.currentRoundNumber,
+    gameEntryAllowed: readiness.coreReady,
+    startServerAllowed: readiness.primaryAction?.kind === 'start-server',
+    releaseAllowed:
+      readiness.primaryAction?.kind === 'release-round' &&
+      readiness.primaryAction.roundNumber === readiness.currentRoundNumber &&
+      readiness.currentRoundNumber !== null &&
+      service.canReleaseRound(readiness.currentRoundNumber).canRelease,
+  });
   const results = useMemo(() => filterQuickFindItems(items, query), [items, query]);
 
   useEffect(() => {

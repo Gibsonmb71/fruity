@@ -1,5 +1,5 @@
 /* eslint-disable react/require-default-props */
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import type { DragEvent } from 'react';
 import {
   Box,
@@ -14,8 +14,10 @@ import {
   TableRow,
   Tooltip,
   Typography,
+  Menu,
+  MenuItem,
 } from '@mui/material';
-import { ArrowDownward, ArrowUpward, DragIndicator } from '@mui/icons-material';
+import { DragIndicator, MoreVert } from '@mui/icons-material';
 import { MatchEditModalContext } from '../Modal Managers/TempMatchManager';
 import { TournamentContext } from '../TournamentManager';
 import { LeftOrRight } from '../Utils/UtilTypes';
@@ -89,7 +91,7 @@ export default function MatchPlayerStatsTable(props: IMatchPlayerStatsTableProps
             <TableCell align="right" sx={{ width: 64 }}>
               Pts
             </TableCell>
-            <TableCell sx={{ width: 70 }} aria-label="Player reorder actions" />
+            <TableCell sx={{ width: 42 }} aria-label="Player reorder actions" />
           </TableRow>
         </TableHead>
         <TableBody>
@@ -121,6 +123,8 @@ function PlayerRow(props: IPlayerRowProps) {
   const playerName = matchPlayer.player.name;
   const isFirst = rowNumber === 0;
   const isLast = rowNumber === modalManager.tempMatch.getMatchTeam(whichTeam).matchPlayers.length - 1;
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const closeMenu = () => setMenuAnchor(null);
 
   const handleDrop = (event: DragEvent<HTMLTableRowElement>) => {
     event.preventDefault();
@@ -187,32 +191,36 @@ function PlayerRow(props: IPlayerRowProps) {
         </Typography>
       </TableCell>
       <TableCell>
-        <Stack direction="row" spacing={0} sx={{ justifyContent: 'flex-end' }}>
-          <Tooltip title="Move up">
-            <span>
-              <IconButton
-                size="small"
-                aria-label={`Move ${playerName} up`}
-                disabled={isFirst}
-                onClick={() => modalManager.moveMatchPlayer(whichTeam, rowNumber, 'up')}
-              >
-                <ArrowUpward fontSize="inherit" />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Move down">
-            <span>
-              <IconButton
-                size="small"
-                aria-label={`Move ${playerName} down`}
-                disabled={isLast}
-                onClick={() => modalManager.moveMatchPlayer(whichTeam, rowNumber, 'down')}
-              >
-                <ArrowDownward fontSize="inherit" />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Stack>
+        <Tooltip title={`Reorder ${playerName}`}>
+          <IconButton
+            size="small"
+            aria-label={`Reorder ${playerName}`}
+            aria-haspopup="menu"
+            onClick={(event) => setMenuAnchor(event.currentTarget)}
+          >
+            <MoreVert fontSize="inherit" />
+          </IconButton>
+        </Tooltip>
+        <Menu anchorEl={menuAnchor} open={menuAnchor !== null} onClose={closeMenu}>
+          <MenuItem
+            disabled={isFirst}
+            onClick={() => {
+              modalManager.moveMatchPlayer(whichTeam, rowNumber, 'up');
+              closeMenu();
+            }}
+          >
+            Move up
+          </MenuItem>
+          <MenuItem
+            disabled={isLast}
+            onClick={() => {
+              modalManager.moveMatchPlayer(whichTeam, rowNumber, 'down');
+              closeMenu();
+            }}
+          >
+            Move down
+          </MenuItem>
+        </Menu>
       </TableCell>
     </TableRow>
   );
@@ -231,6 +239,7 @@ interface IPlayerNumericFieldProps {
 function PlayerNumericField(props: IPlayerNumericFieldProps) {
   const { id, ariaLabel, value, error, errorMessage, min, onCommit } = props;
   const [current, setCurrent] = useSubscription(value?.toString() || '');
+  const errorDescriptionId = `${id}-error`;
 
   const commit = () => {
     const normalized = onCommit(current);
@@ -238,27 +247,41 @@ function PlayerNumericField(props: IPlayerNumericFieldProps) {
   };
 
   return (
-    <YfNumericField
-      id={id}
-      variant="standard"
-      hiddenLabel
-      value={current}
-      error={error}
-      helperText={error ? errorMessage : undefined}
-      slotProps={{ htmlInput: { min, inputMode: 'numeric', 'aria-label': ariaLabel } }}
-      sx={{
-        width: '6ch',
-        '& .MuiInputBase-input': { px: 0.25, textAlign: 'right' },
-      }}
-      onChange={(event) => setCurrent(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          commit();
-        }
-      }}
-    />
+    <>
+      <YfNumericField
+        id={id}
+        variant="standard"
+        hiddenLabel
+        value={current}
+        error={error}
+        slotProps={{
+          htmlInput: {
+            min,
+            inputMode: 'numeric',
+            'aria-label': ariaLabel,
+            'aria-invalid': error || undefined,
+            'aria-describedby': error ? errorDescriptionId : undefined,
+          },
+        }}
+        sx={{
+          width: '6ch',
+          '& .MuiInputBase-input': { px: 0.25, textAlign: 'right' },
+        }}
+        onChange={(event) => setCurrent(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          }
+        }}
+      />
+      {error && (
+        <Box component="span" id={errorDescriptionId} sx={visuallyHiddenSx}>
+          {errorMessage}
+        </Box>
+      )}
+    </>
   );
 }
 
@@ -273,6 +296,7 @@ function PlayerAnswerCountField(props: IPlayerAnswerCountFieldProps) {
   const modalManager = useContext(MatchEditModalContext);
   const [current, setCurrent] = useSubscription(answerCount.number?.toString() || '');
   const invalid = answerCount.validation.status === ValidationStatuses.Error;
+  const errorDescriptionId = `${id}-error`;
 
   const commit = () => {
     const normalized = modalManager.setAnswerCount(answerCount, current);
@@ -280,32 +304,52 @@ function PlayerAnswerCountField(props: IPlayerAnswerCountFieldProps) {
   };
 
   return (
-    <YfNumericField
-      id={id}
-      variant="standard"
-      hiddenLabel
-      value={current}
-      error={invalid}
-      helperText={invalid ? answerCount.validation.message : undefined}
-      slotProps={{
-        htmlInput: {
-          min: 0,
-          inputMode: 'numeric',
-          'aria-label': `${playerName} ${answerCount.answerType.label} answers`,
-        },
-      }}
-      sx={{
-        width: '6ch',
-        '& .MuiInputBase-input': { px: 0.25, textAlign: 'right' },
-      }}
-      onChange={(event) => setCurrent(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          commit();
-        }
-      }}
-    />
+    <>
+      <YfNumericField
+        id={id}
+        variant="standard"
+        hiddenLabel
+        value={current}
+        error={invalid}
+        slotProps={{
+          htmlInput: {
+            min: 0,
+            inputMode: 'numeric',
+            'aria-label': `${playerName} ${answerCount.answerType.label} answers`,
+            'aria-invalid': invalid || undefined,
+            'aria-describedby': invalid ? errorDescriptionId : undefined,
+          },
+        }}
+        sx={{
+          width: '6ch',
+          '& .MuiInputBase-input': { px: 0.25, textAlign: 'right' },
+        }}
+        onChange={(event) => setCurrent(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          }
+        }}
+      />
+      {invalid && (
+        <Box component="span" id={errorDescriptionId} sx={visuallyHiddenSx}>
+          {answerCount.validation.message}
+        </Box>
+      )}
+    </>
   );
 }
+
+const visuallyHiddenSx = {
+  border: 0,
+  clip: 'rect(0 0 0 0)',
+  height: 1,
+  margin: -1,
+  overflow: 'hidden',
+  padding: 0,
+  position: 'absolute' as const,
+  whiteSpace: 'nowrap' as const,
+  width: 1,
+};

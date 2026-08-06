@@ -60,6 +60,7 @@ function MatchEditDialogCore() {
     // Alt+A/Alt+S can fire while a numeric or text field still owns focus. Blur first so the
     // field's existing commit handler runs before the authoritative manager validation.
     (document.activeElement as HTMLElement | null)?.blur();
+    modalManager.markSaveAttempted();
     setRevealHiddenErrors(true);
     const saved = tournManager.matchEditModalAttemptToSave(stayOpen);
     if (!saved) {
@@ -144,7 +145,10 @@ function MatchEditDialogCore() {
             )}
           </Stack>
         </DialogTitle>
-        <DialogContent sx={{ minHeight: 0, overflowY: 'auto', px: { xs: 1.25, sm: 2 }, py: { xs: 1.25, sm: 1.5 } }}>
+        <DialogContent
+          sx={{ minHeight: 0, overflowY: 'auto', px: { xs: 1.25, sm: 2 }, py: { xs: 1.25, sm: 1.5 } }}
+          onChangeCapture={() => modalManager.markEditorInteracted()}
+        >
           <MatchDetailsBar totalTuhInputRef={totalTuhInputRef} />
           <Box
             sx={{

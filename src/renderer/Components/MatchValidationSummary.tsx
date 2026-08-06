@@ -6,6 +6,7 @@ import { MatchEditModalContext } from '../Modal Managers/TempMatchManager';
 import MatchValidationMessage, { MatchValidationType } from '../DataModel/MatchValidationMessage';
 import { ValidationStatuses } from '../DataModel/Interfaces';
 import { LeftOrRight } from '../Utils/UtilTypes';
+import { isPristineNewMatch } from '../Services/MatchEditorPresentation';
 
 export interface IMatchValidationIssue {
   key: string;
@@ -32,23 +33,29 @@ export function focusMatchEditorField(targetId?: string) {
 export default function MatchValidationSummary(props: IMatchValidationSummaryProps) {
   const { revealHiddenErrors, focusRequest } = props;
   const modalManager = useContext(MatchEditModalContext);
+  const pristine = isPristineNewMatch(
+    modalManager.validationInteractionState,
+    modalManager.originalMatchLoaded !== undefined,
+  );
+  const saveAttempted = revealHiddenErrors || modalManager.validationInteractionState === 'save-attempted';
   const allIssues = collectValidationIssues(modalManager);
   const visibleIssues = allIssues.filter(
     (issue) =>
+      !pristine &&
       !issue.validator.isSuppressed &&
-      (issue.validator.status !== ValidationStatuses.HiddenError || revealHiddenErrors),
+      (issue.validator.status !== ValidationStatuses.HiddenError || saveAttempted),
   );
   const blockingErrors = allIssues.filter(
-    (issue) => !issue.validator.isSuppressed && issue.validator.status === ValidationStatuses.Error,
+    (issue) => !pristine && !issue.validator.isSuppressed && issue.validator.status === ValidationStatuses.Error,
   );
   const warnings = allIssues.filter(
-    (issue) => !issue.validator.isSuppressed && issue.validator.status === ValidationStatuses.Warning,
+    (issue) => !pristine && !issue.validator.isSuppressed && issue.validator.status === ValidationStatuses.Warning,
   );
   const hiddenRequired = allIssues.filter(
-    (issue) => !issue.validator.isSuppressed && issue.validator.status === ValidationStatuses.HiddenError,
+    (issue) => !pristine && !issue.validator.isSuppressed && issue.validator.status === ValidationStatuses.HiddenError,
   );
   const suppressedCount = modalManager.tempMatch.getNumSuppressedWarnings();
-  const displayedBlockingErrorCount = blockingErrors.length + (revealHiddenErrors ? hiddenRequired.length : 0);
+  const displayedBlockingErrorCount = blockingErrors.length + (saveAttempted ? hiddenRequired.length : 0);
 
   useEffect(() => {
     if (focusRequest === 0) return undefined;
@@ -69,14 +76,16 @@ export default function MatchValidationSummary(props: IMatchValidationSummaryPro
         <ValidationStatusIcon
           hasErrors={displayedBlockingErrorCount > 0}
           hasWarnings={warnings.length > 0}
-          hasHiddenRequired={hiddenRequired.length > 0}
+          hasHiddenRequired={!pristine && hiddenRequired.length > 0}
+          pristine={pristine}
         />
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
           {validationSummaryLabel(
             displayedBlockingErrorCount,
             warnings.length,
             hiddenRequired.length,
-            revealHiddenErrors,
+            saveAttempted,
+            pristine,
           )}
         </Typography>
         {suppressedCount > 0 && (
@@ -160,11 +169,17 @@ function ValidationIssueRow(props: {
   );
 }
 
-function ValidationStatusIcon(props: { hasErrors: boolean; hasWarnings: boolean; hasHiddenRequired: boolean }) {
-  const { hasErrors, hasWarnings, hasHiddenRequired } = props;
+function ValidationStatusIcon(props: {
+  hasErrors: boolean;
+  hasWarnings: boolean;
+  hasHiddenRequired: boolean;
+  pristine: boolean;
+}) {
+  const { hasErrors, hasWarnings, hasHiddenRequired, pristine } = props;
   if (hasErrors) return <ErrorOutlined color="error" fontSize="small" />;
   if (hasWarnings) return <WarningAmber color="warning" fontSize="small" />;
   if (hasHiddenRequired) return <InfoOutlined color="info" fontSize="small" />;
+  if (pristine) return <InfoOutlined color="disabled" fontSize="small" />;
   return <CheckCircleOutlined color="success" fontSize="small" />;
 }
 
@@ -173,7 +188,9 @@ function validationSummaryLabel(
   warningCount: number,
   hiddenRequiredCount: number,
   revealHiddenErrors: boolean,
+  pristine: boolean,
 ) {
+  if (pristine) return 'Enter game details';
   if (errorCount > 0) return `${errorCount} ${errorCount === 1 ? 'problem' : 'problems'} prevent saving`;
   if (hiddenRequiredCount > 0 && !revealHiddenErrors) return 'Complete required fields to validate the game';
   if (warningCount > 0) return `${warningCount} ${warningCount === 1 ? 'warning' : 'warnings'}`;

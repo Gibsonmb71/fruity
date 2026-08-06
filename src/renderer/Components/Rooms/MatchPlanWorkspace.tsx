@@ -29,6 +29,7 @@ import Tournament from '../../DataModel/Tournament';
 import { roundsWithGames } from '../../Services/ScheduleService';
 import { INavigationIntent } from '../../Services/Navigation';
 import { planRoomDrop } from '../../Services/RoomAllocationService';
+import { matchPlanStageOptions, matchesForRoomCell } from '../../Services/MatchPlanPresentation';
 
 type MatchPlanView = 'round' | 'board';
 type MatchPlanRange = 'current' | 'next' | 'all';
@@ -83,19 +84,7 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
   const [round, setRound] = useState('all');
 
   const allRounds = useMemo(() => roundsWithGames(matches), [matches]);
-  const stageOptions = useMemo(() => {
-    const phaseNames = new Map(phases.map((phase) => [phase.code, phase.name || phase.code]));
-    const codes = Array.from(new Set(matches.map((match) => match.phaseCode).filter((code) => code !== ''))).sort();
-    const nameCounts = new Map<string, number>();
-    codes.forEach((code) => {
-      const name = phaseNames.get(code) ?? code;
-      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
-    });
-    return codes.map((code) => {
-      const name = phaseNames.get(code) ?? code;
-      return { code, label: (nameCounts.get(name) ?? 0) > 1 ? `${name} · ${code}` : name };
-    });
-  }, [matches, phases]);
+  const stageOptions = useMemo(() => matchPlanStageOptions(phases, matches), [matches, phases]);
   const activeRound =
     currentRoundNumber ??
     allRounds.find((roundNumber) => matches.some((match) => !match.isResolved() && match.roundNumber === roundNumber));
@@ -419,19 +408,13 @@ function RoomBoard({
   const rounds = roundsWithGames(matches);
   const columns = [...rooms, { id: '__unassigned__', name: 'Unassigned', enabled: true } as TournamentRoom];
 
-  const matchesForCell = (roundNumber: number, roomId: string) =>
-    matches.filter(
-      (match) =>
-        match.roundNumber === roundNumber && (roomId === '__unassigned__' ? !match.roomId : match.roomId === roomId),
-    );
-
-  const destinationFor = (roomId: string) => {
+  const destinationFor = (roomId: string, roundNumber: number) => {
     if (!draggedMatchId) return { state: 'idle' as const, message: '' };
-    return planRoomDrop(tournament, draggedMatchId, roomId === '__unassigned__' ? undefined : roomId);
+    return planRoomDrop(tournament, draggedMatchId, roomId === '__unassigned__' ? undefined : roomId, roundNumber);
   };
 
   const allowDragOver = (event: DragEvent, roundNumber: number, roomId: string) => {
-    const destination = destinationFor(roomId);
+    const destination = destinationFor(roomId, roundNumber);
     setHoveredDestination(`${roundNumber}:${roomId}`);
     event.dataTransfer.dropEffect =
       destination.state === 'valid-empty' || destination.state === 'valid-swap' ? 'move' : 'none';
@@ -443,7 +426,12 @@ function RoomBoard({
     const matchId = event.dataTransfer.getData('text/plain');
     const match = matches.find((candidate) => candidate.id === matchId);
     if (!match) return;
-    const destination = planRoomDrop(tournament, match.id, roomId === '__unassigned__' ? undefined : roomId);
+    const destination = planRoomDrop(
+      tournament,
+      match.id,
+      roomId === '__unassigned__' ? undefined : roomId,
+      match.roundNumber,
+    );
     if (destination.state !== 'valid-empty' && destination.state !== 'valid-swap') return;
     onMove(match, roomId === '__unassigned__' ? '' : roomId);
     setDraggedMatchId(null);
@@ -470,8 +458,8 @@ function RoomBoard({
                 <Typography variant="subtitle2">Round {roundNumber}</Typography>
               </TableCell>
               {columns.map((room) => {
-                const cellMatches = matchesForCell(roundNumber, room.id);
-                const destination = destinationFor(room.id);
+                const cellMatches = matchesForRoomCell(matches, roundNumber, room.id);
+                const destination = destinationFor(room.id, roundNumber);
                 const destinationKey = `${roundNumber}:${room.id}`;
                 const highlighted = hoveredDestination === destinationKey;
                 return (

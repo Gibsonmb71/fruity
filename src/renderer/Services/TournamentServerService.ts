@@ -6,6 +6,7 @@ import { StatsValidity } from '../DataModel/Match';
 import MatchImportService from './MatchImportService';
 import scoringRulesToModaqGameFormat from './YellowFruitScoringRulesToModaq';
 import buildPublicLiveSnapshot from './PublicLiveSnapshot';
+import { checkRoundRelease } from './ScheduleService';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
 import {
   IMatchSubmission,
@@ -255,9 +256,12 @@ export default class TournamentServerService {
   }
 
   /** Release one round to rooms without touching accepted history. */
+  canReleaseRound(roundNumber: number) {
+    return checkRoundRelease(this.tournament.scheduledMatches, this.tournament.rooms, roundNumber);
+  }
+
   releaseRound(roundNumber: number): boolean {
-    const hasGames = this.tournament.scheduledMatches.some((match) => match.roundNumber === roundNumber);
-    if (!hasGames) return false;
+    if (!this.canReleaseRound(roundNumber).canRelease) return false;
 
     this.tournament.releasedRoundNumber = roundNumber;
     this.roundOverride = null;
