@@ -10,6 +10,7 @@ import { PlayerAnswerCount } from '../DataModel/PlayerAnswerCount';
 import { textFieldChanged } from '../Utils/GeneralUtils';
 import { Round } from '../DataModel/Round';
 import { ScheduledMatch } from '../DataModel/ScheduledMatch';
+import { MatchEditorInteractionState } from '../Services/MatchEditorPresentation';
 
 export class TempMatchManager {
   /** The Match being edited */
@@ -46,6 +47,9 @@ export class TempMatchManager {
 
   otFieldsEnabledOverride: boolean = false;
 
+  /** UI-only validation timing; never serialized with the tournament or match. */
+  validationInteractionState: MatchEditorInteractionState = 'pristine';
+
   dataChangedReactCallback: () => void;
 
   constructor(tourn?: Tournament) {
@@ -63,6 +67,7 @@ export class TempMatchManager {
     delete this.originalMatchLoaded;
     delete this.scheduledMatchContext;
     this.otFieldsEnabledOverride = false;
+    this.validationInteractionState = 'pristine';
     this.errorDialogIsOpen = false;
     this.errorDialogContents = [];
   }
@@ -84,6 +89,7 @@ export class TempMatchManager {
     delete this.roundNumber;
     this.errorDialogIsOpen = false;
     this.errorDialogContents = [];
+    this.validationInteractionState = match ? 'editing' : 'pristine';
     this.round = round;
     if (round) this.phase = this.tournament.whichPhaseIsRoundIn(round);
     this.roundNumber = this.phase?.usesNumericRounds() ? round?.number : undefined;
@@ -153,6 +159,7 @@ export class TempMatchManager {
 
   /** Returns true if we can save the data */
   preSaveValidation() {
+    this.validationInteractionState = 'save-attempted';
     if (this.round === undefined) this.validateRoundNo();
     if (this.tempMatch.isForfeit()) {
       this.tempMatch.leftTeam.matchPlayers = [];
@@ -171,6 +178,17 @@ export class TempMatchManager {
       return false;
     }
     return true;
+  }
+
+  markEditorInteracted() {
+    if (this.validationInteractionState !== 'pristine') return;
+    this.validationInteractionState = 'editing';
+    this.dataChangedReactCallback();
+  }
+
+  markSaveAttempted() {
+    this.validationInteractionState = 'save-attempted';
+    this.dataChangedReactCallback();
   }
 
   /** Recalculate the authoritative validators for the editor without attempting a save. */

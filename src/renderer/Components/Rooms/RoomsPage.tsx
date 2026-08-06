@@ -36,6 +36,7 @@ import { TournamentRoom } from '../../DataModel/TournamentRoom';
 import Tournament from '../../DataModel/Tournament';
 import {
   ScheduleIssueSeverity,
+  checkRoundRelease,
   checkRoomDeletion,
   hasBlockingIssue,
   mergeGeneratedSchedule,
@@ -231,7 +232,6 @@ export default function RoomsPage({
     .sort((a, b) => a.roundNumber - b.roundNumber || a.id.localeCompare(b.id));
   const roundNumbers = useMemo(() => roundsWithGames(matches), [matches]);
   const scheduleIssues = useMemo(() => validateSchedule(matches, rooms), [matches, rooms]);
-  const blockingScheduleIssues = scheduleIssues.filter((issue) => issue.severity === ScheduleIssueSeverity.Error);
   const currentRound = service.currentRoundNumber;
   const currentSummary = currentRound === null ? null : summarizeRound(matches, currentRound);
   const activeSessions = service.sessions.filter(
@@ -266,12 +266,6 @@ export default function RoomsPage({
 
   const serverAddress = service.selectedAddress;
   const nextRelease = service.nextRoundToRelease();
-  const nextReleaseSummary = nextRelease === null ? null : summarizeRound(matches, nextRelease);
-  const previousRelease =
-    nextRelease === null
-      ? null
-      : roundNumbers.filter((roundNumber) => roundNumber < nextRelease).sort((a, b) => b - a)[0] ?? null;
-  const previousReleaseSummary = previousRelease === null ? null : summarizeRound(matches, previousRelease);
   const disabledRoomAssignments =
     nextRelease === null
       ? 0
@@ -281,15 +275,7 @@ export default function RoomsPage({
             match.roomId !== undefined &&
             rooms.some((room) => room.id === match.roomId && !room.enabled),
         ).length;
-  const releaseBlocked =
-    nextReleaseSummary === null ||
-    nextReleaseSummary.expected === 0 ||
-    nextReleaseSummary.roomsAssigned < nextReleaseSummary.expected ||
-    (previousReleaseSummary !== null && !previousReleaseSummary.complete) ||
-    disabledRoomAssignments > 0 ||
-    blockingScheduleIssues.some((issue) =>
-      issue.scheduledMatchIds.some((id) => matches.find((match) => match.id === id)?.roundNumber === nextRelease),
-    );
+  const releaseBlocked = nextRelease === null || !checkRoundRelease(matches, rooms, nextRelease).canRelease;
 
   const copyText = async (value: string) => {
     try {

@@ -15,6 +15,8 @@ export interface INavigationIntent {
   teamName?: string;
   phaseCode?: string;
   roomId?: string;
+  /** Ephemeral executable command metadata used by the command palette and destination handlers. */
+  actionId?: string;
   gamesReviewFilter?: GamesReviewFilter;
   controlFocus?: 'inbox' | 'current-round' | 'match-plan';
   /** Legacy focus vocabulary kept as a wire-compatible alias while callers migrate. */

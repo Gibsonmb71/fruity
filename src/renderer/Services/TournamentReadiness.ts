@@ -164,6 +164,14 @@ function allMatches(tournament: Tournament): Match[] {
   return tournament.phases.flatMap((phase) => phase.rounds.flatMap((round) => round.matches));
 }
 
+function matchRounds(tournament: Tournament): Map<string, number> {
+  return new Map(
+    tournament.phases
+      .flatMap((phase) => phase.rounds.map((round) => round.matches.map((match) => [match.id, round.number] as const)))
+      .flat(),
+  );
+}
+
 function allScheduledMatches(tournament: Tournament): ScheduledMatch[] {
   return tournament.scheduledMatches.slice();
 }
@@ -182,10 +190,15 @@ function findRebracketBoundary(tournament: Tournament, scheduledMatches: Schedul
   );
 }
 
-function addScheduleIssues(issues: ITournamentIssue[], scheduleIssues: IScheduleIssue[]) {
+function addScheduleIssues(
+  issues: ITournamentIssue[],
+  scheduleIssues: IScheduleIssue[],
+  roundByScheduledMatchId: Map<string, number>,
+) {
   scheduleIssues.forEach((scheduleIssue, index) => {
     const severity: ReadinessIssueSeverity =
       scheduleIssue.severity === ScheduleIssueSeverity.Error ? 'error' : 'warning';
+    const roundNumber = roundByScheduledMatchId.get(scheduleIssue.scheduledMatchIds[0]);
     issues.push(
       issue(
         `schedule-${index}-${scheduleIssue.message}`,
@@ -196,9 +209,11 @@ function addScheduleIssues(issues: ITournamentIssue[], scheduleIssues: ISchedule
         'Open Match Plan',
         {
           scheduledMatchIds: scheduleIssue.scheduledMatchIds,
+          roundNumber,
           navigation: {
             scheduledMatchIds: scheduleIssue.scheduledMatchIds,
             scheduledMatchId: scheduleIssue.scheduledMatchIds[0],
+            roundNumber,
             focus: 'scheduled-match',
           },
         },
@@ -207,10 +222,11 @@ function addScheduleIssues(issues: ITournamentIssue[], scheduleIssues: ISchedule
   });
 }
 
-function addMatchValidationIssues(issues: ITournamentIssue[], matches: Match[]) {
+function addMatchValidationIssues(issues: ITournamentIssue[], matches: Match[], roundByMatchId: Map<string, number>) {
   matches.forEach((match) => {
     const errors = match.getErrorMessages();
     const warnings = match.getWarningMessages();
+    const roundNumber = roundByMatchId.get(match.id);
     if (errors.length > 0) {
       issues.push(
         issue(
@@ -220,7 +236,10 @@ function addMatchValidationIssues(issues: ITournamentIssue[], matches: Match[]) 
           `${match.getScoreString()}: ${errors[0]}`,
           'games',
           'Review game',
-          { navigation: { matchId: match.id, gamesReviewFilter: 'needs-review', focus: 'scheduled-match' } },
+          {
+            roundNumber,
+            navigation: { matchId: match.id, roundNumber, gamesReviewFilter: 'errors', focus: 'round' },
+          },
         ),
       );
     } else if (warnings.length > 0) {
@@ -232,7 +251,10 @@ function addMatchValidationIssues(issues: ITournamentIssue[], matches: Match[]) 
           `${match.getScoreString()}: ${warnings[0]}`,
           'games',
           'Review game',
-          { navigation: { matchId: match.id, gamesReviewFilter: 'needs-review', focus: 'scheduled-match' } },
+          {
+            roundNumber,
+            navigation: { matchId: match.id, roundNumber, gamesReviewFilter: 'warnings', focus: 'round' },
+          },
         ),
       );
     }
@@ -296,6 +318,9 @@ function groupActiveIssues(issues: ITournamentIssue[], currentRoundNumber: numbe
       const scheduledMatchIds = Array.from(
         new Set(grouped.flatMap((currentIssue) => currentIssue.scheduledMatchIds ?? [])),
       );
+      const groupedMatchIds = Array.from(
+        new Set(grouped.map((currentIssue) => currentIssue.navigation?.matchId).filter((id): id is string => !!id)),
+      );
       return {
         ...first,
         id: `group-${key}`,
@@ -306,8 +331,8 @@ function groupActiveIssues(issues: ITournamentIssue[], currentRoundNumber: numbe
         roundNumber: currentRoundNumber ?? first.roundNumber,
         groupedCount: grouped.length,
         navigation: createNavigationIntent(first.target, {
-          matchId: first.navigation?.matchId,
-          matchIds: first.navigation?.matchIds,
+          matchId: grouped.length === 1 ? first.navigation?.matchId : undefined,
+          matchIds: grouped.length === 1 ? first.navigation?.matchIds : groupedMatchIds,
           scheduledMatchIds,
           scheduledMatchId: first.navigation?.scheduledMatchId ?? scheduledMatchIds[0],
           teamName: first.navigation?.teamName,
@@ -380,6 +405,8 @@ export function resolveTournamentReadiness(
   const issues: ITournamentIssue[] = [];
   const scheduledMatches = allScheduledMatches(tournament);
   const matches = allMatches(tournament);
+  const roundByMatchId = matchRounds(tournament);
+  const roundByScheduledMatchId = new Map(scheduledMatches.map((match) => [match.id, match.roundNumber]));
   const rooms = tournament.rooms.slice();
   const coreReady = tournamentReady && rulesReady && teamsReady && formatReady;
   const roomOperationsEnabled = tournament.roomScoringMode === 'browser';
@@ -447,8 +474,8 @@ export function resolveTournamentReadiness(
   }
 
   const scheduleIssues = roomOperationsEnabled ? validateSchedule(scheduledMatches, rooms) : [];
-  if (roomOperationsEnabled) addScheduleIssues(issues, scheduleIssues);
-  addMatchValidationIssues(issues, matches);
+  if (roomOperationsEnabled) addScheduleIssues(issues, scheduleIssues, roundByScheduledMatchId);
+  addMatchValidationIssues(issues, matches, roundByMatchId);
 
   if (tournament.scoringRules.answerTypes.length > 4) {
     issues.push(

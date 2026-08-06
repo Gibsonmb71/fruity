@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import TournamentServerService from '../renderer/Services/TournamentServerService';
 import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
+import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
 
 function scheduled(
@@ -28,6 +29,9 @@ describe('tournament operations release state', () => {
     const tournament = makeTestTournament();
     const accepted = scheduled(1, 0, 1, ScheduledMatchStatus.Accepted);
     const future = scheduled(2, 0, 2);
+    const room = new TournamentRoom('101', 0, 'room-101');
+    future.roomId = room.id;
+    tournament.rooms = [room];
     tournament.scheduledMatches = [accepted, future];
     const service = new TournamentServerService(tournament);
     let changes = 0;

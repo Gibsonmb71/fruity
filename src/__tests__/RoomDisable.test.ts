@@ -3,6 +3,7 @@ import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/Sche
 import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
 import { applyRebalance, planRoomDisable } from '../renderer/Services/RoomAllocationService';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
+import { checkBrowserRoomScoringDisable, shouldStopServerBeforeDisabling } from '../renderer/Services/RoomScoringMode';
 
 function makeRooms(names: string[]): TournamentRoom[] {
   return names.map((name, index) => new TournamentRoom(name, index, `room-${name}`));
@@ -24,6 +25,36 @@ function makeMatch(
 }
 
 describe('room disable planning', () => {
+  test('playing and submitted durable matches block disabling the workflow', () => {
+    const tournament = makeTestTournament();
+    const playing = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1]);
+    playing.status = ScheduledMatchStatus.Playing;
+    const submitted = makeMatch(tournament, 2, testTeamNames[2], testTeamNames[3]);
+    submitted.status = ScheduledMatchStatus.Submitted;
+    tournament.scheduledMatches = [playing, submitted];
+
+    const check = checkBrowserRoomScoringDisable(tournament);
+
+    expect(check.canDisable).toBe(false);
+    expect(check.affectedScheduledMatchIds).toEqual([playing.id, submitted.id]);
+    expect(shouldStopServerBeforeDisabling(check, true)).toBe(false);
+  });
+
+  test('a safe disable can stop a running server without touching configuration', () => {
+    const tournament = makeTestTournament();
+    const room = new TournamentRoom('101', 0, 'room-101');
+    tournament.rooms = [room];
+    const future = makeMatch(tournament, 1, testTeamNames[0], testTeamNames[1], room.id);
+    tournament.scheduledMatches = [future];
+
+    const check = checkBrowserRoomScoringDisable(tournament);
+
+    expect(check.canDisable).toBe(true);
+    expect(shouldStopServerBeforeDisabling(check, true)).toBe(true);
+    expect(future.roomId).toBe(room.id);
+    expect(tournament.rooms).toHaveLength(1);
+  });
+
   test('leave-unassigned preserves accepted history and identifies future games', () => {
     const tournament = makeTestTournament();
     tournament.rooms = makeRooms(['101', '102']);

@@ -8,6 +8,7 @@ import { makeTestTournament, testTeamNames } from './TestFixtures';
 import { ScheduledMatch } from '../renderer/DataModel/ScheduledMatch';
 import { Phase, PhaseTypes } from '../renderer/DataModel/Phase';
 import { Pool } from '../renderer/DataModel/Pool';
+import { shouldExpandOvertime, shouldShowTiePrompt } from '../renderer/Services/MatchEditorPresentation';
 
 function openMatchManager(ruleSet: CommonRuleSets = CommonRuleSets.NaqtUntimed) {
   const tournament = makeTestTournament(ruleSet);
@@ -44,6 +45,33 @@ function enterNaqtUntimedGame(manager: TempMatchManager) {
 }
 
 describe('Game / Match Editor workflow model', () => {
+  test('keeps a new editor quiet until interaction and exposes save-attempted state separately', () => {
+    const { manager } = openMatchManager();
+
+    expect(manager.validationInteractionState).toBe('pristine');
+    manager.markEditorInteracted();
+    expect(manager.validationInteractionState).toBe('editing');
+    manager.markSaveAttempted();
+    expect(manager.validationInteractionState).toBe('save-attempted');
+  });
+
+  test('existing editors validate normally while pristine presentation belongs only to new games', () => {
+    const { manager, round, left, right, tournament } = openMatchManager();
+    const existing = new Match(left, right, tournament.scoringRules.answerTypes);
+
+    manager.openModal(existing, round);
+
+    expect(manager.validationInteractionState).toBe('editing');
+  });
+
+  test('overtime presentation waits for an explicit tie action but reveals existing overtime', () => {
+    expect(shouldExpandOvertime(false, false)).toBe(false);
+    expect(shouldExpandOvertime(true, false)).toBe(true);
+    expect(shouldShowTiePrompt(false, 100, 100, false)).toBe(true);
+    expect(shouldShowTiePrompt(false, 100, 100, true)).toBe(false);
+    expect(shouldShowTiePrompt(true, 100, 100, false)).toBe(false);
+  });
+
   test('keeps the traditional untimed rapid-entry defaults and saves a valid NAQT game', () => {
     const { manager } = openMatchManager();
 

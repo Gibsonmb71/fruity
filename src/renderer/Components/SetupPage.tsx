@@ -23,6 +23,8 @@ import TeamsPage from './TeamsPage';
 import SchedulePage from './SchedulePage';
 import ReadinessMark from './ReadinessMark';
 import { readinessStatus } from '../Services/ReadinessSemantics';
+import Tournament from '../DataModel/Tournament';
+import { ScoringRules } from '../DataModel/ScoringRules';
 
 interface ISetupPageProps {
   section: SetupPages;
@@ -34,6 +36,7 @@ interface ISetupStatusProps {
   section: SetupPages;
   onSectionChange: (section: SetupPages) => void;
   readiness: ReturnType<typeof resolveTournamentReadiness>;
+  tournament: Tournament;
 }
 
 const setupTabs = [
@@ -79,9 +82,7 @@ function setupTabReady(section: SetupPages, readiness: ReturnType<typeof resolve
   }
 }
 
-function SetupStatus({ section, onSectionChange, readiness }: ISetupStatusProps) {
-  const { setup } = readiness;
-
+function SetupStatus({ section, onSectionChange, readiness, tournament }: ISetupStatusProps) {
   const nextSetupAction = setupActionFor(readiness);
 
   return (
@@ -97,17 +98,14 @@ function SetupStatus({ section, onSectionChange, readiness }: ISetupStatusProps)
         >
           {setupTabs.map((tab) => {
             const ready = setupTabReady(tab.value, readiness);
-            const teamsLabel =
-              tab.value === SetupPages.Teams && setup.expectedTeamCount !== null
-                ? `Teams ${setup.teamCount}/${setup.expectedTeamCount}`
-                : tab.label;
+            const tabLabel = setupTabLabel(tab.value, tab.label, readiness, tournament);
             return (
               <Tab
                 key={tab.value}
                 value={tab.value}
                 label={
                   <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                    {teamsLabel}
+                    {tabLabel}
                     {ready && <Check aria-label={`${tab.label} ready`} sx={{ fontSize: 16, color: 'success.main' }} />}
                   </Box>
                 }
@@ -150,6 +148,28 @@ function SetupStatus({ section, onSectionChange, readiness }: ISetupStatusProps)
       )}
     </>
   );
+}
+
+function setupTabLabel(
+  section: SetupPages,
+  defaultLabel: string,
+  readiness: ReturnType<typeof resolveTournamentReadiness>,
+  tournament: Tournament,
+): string {
+  const { setup } = readiness;
+  if (section === SetupPages.Rules && setup.rulesReady) {
+    const label = tournament.standardRuleSet ? ScoringRules.getRuleSetName(tournament.standardRuleSet) : 'Custom rules';
+    return `Rules · ${label}`;
+  }
+  if (section === SetupPages.Teams && setup.expectedTeamCount !== null) {
+    return `Teams · ${setup.teamCount}/${setup.expectedTeamCount}`;
+  }
+  if (section === SetupPages.Teams && setup.teamCount > 0) return `Teams · ${setup.teamCount}`;
+  if (section === SetupPages.Format && setup.formatReady) {
+    const roundCount = tournament.getFullPhases().reduce((count, phase) => count + phase.rounds.length, 0);
+    return `Format · ${roundCount} round${roundCount === 1 ? '' : 's'}`;
+  }
+  return defaultLabel;
 }
 
 function SetupPreflight({
@@ -314,7 +334,12 @@ export default function SetupPage({ section, onSectionChange, onNavigateTarget }
           </Box>
         }
       />
-      <SetupStatus section={section} onSectionChange={onSectionChange} readiness={readiness} />
+      <SetupStatus
+        section={section}
+        onSectionChange={onSectionChange}
+        readiness={readiness}
+        tournament={tournManager.tournament}
+      />
       <SetupPreflight
         readiness={readiness}
         onSectionChange={onSectionChange}

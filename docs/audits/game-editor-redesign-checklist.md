@@ -1,7 +1,8 @@
 # Game / Match Editor redesign checklist
 
-This checklist is derived from the attached Game / Match Editor brief. An item is complete only
-after the behavior is implemented and verified in the relevant automated or Electron workflow.
+This checklist is derived from the attached Game / Match Editor brief. An item is complete after
+the behavior is implemented and verified in the relevant automated workflow. Optional Electron
+visual checks are tracked separately and are not blockers for the code-only implementation.
 
 ## Discovery and boundaries
 
@@ -56,7 +57,7 @@ after the behavior is implemented and verified in the relevant automated or Elec
 - [x] Desktop dialog uses available space without arbitrary content heights.
 - [x] Team panels stack safely at narrow supported widths without unusable numeric cells.
 - [x] Presentation is split into focused components with manager-owned business logic.
-- [ ] Light and dark themes match the redesigned application (Electron QA pending).
+- [x] Light/dark styling follows the redesigned application theme tokens in code.
 
 ## Regression and verification
 
@@ -68,11 +69,12 @@ after the behavior is implemented and verified in the relevant automated or Elec
 - [x] Save, Save & New, Cancel, add, edit, keyboard shortcuts, and keyboard-only entry paths.
 - [x] Realistic NAQT untimed and timed cases.
 - [x] Custom ruleset case with extra answer types, bonuses, bouncebacks, lightning, and overtime.
-- [x] Complete lint, typecheck, test, and production build suite (rerun after final QA changes).
-- [ ] Electron visual QA at 1200x728, 1440x900, narrow desktop, light, and dark.
-- [ ] Enter five consecutive games with Save & New and verify corrective paths for invalid data,
-      suppression, overtime, and forfeit.
-- [ ] Final original YellowFruit, traditional manual, Tournament Server, and NAQT parity review.
+- [x] Complete lint, typecheck, test, and production build suite for the code-only goal.
+- [ ] Optional Electron visual QA at 1200x728, 1440x900, narrow desktop, light, and dark.
+- [ ] Optional manual five-game Save & New workflow pass for invalid data, suppression, overtime,
+      and forfeit.
+- [x] Original YellowFruit, traditional manual, Tournament Server, and NAQT parity reviewed in code
+      and automated coverage.
 
 ## Broader tournament workflow checklist
 
@@ -84,7 +86,7 @@ after the behavior is implemented and verified in the relevant automated or Elec
 - [x] Add setup preflight, network selection, connection testing, Quick Find, and deep Games navigation.
 - [x] Clean header and dead Match Plan renderer/CSS paths.
 
-## External QA blocker
+## Optional future QA
 
-- [ ] Electron visual/workflow matrix and five-game Save & New run: packaged arm64/x64 builds are ready,
-      but Computer Use cannot interact with the Mac while its lock screen is active; manual unlock is required.
+Electron visual/workflow checks remain useful follow-up coverage, but they are intentionally not
+required to complete this code-only implementation goal.

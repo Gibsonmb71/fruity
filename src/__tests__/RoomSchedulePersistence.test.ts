@@ -31,6 +31,55 @@ function reopen(written: IYftFileTournament) {
 }
 
 describe('rooms in the .yft file', () => {
+  test('new tournaments default to traditional entry and persist the choice only in YfData', () => {
+    const tournament = makeTestTournament();
+    const written = tournament.toFileObject() as IYftFileTournament;
+
+    expect(tournament.roomScoringMode).toBe('traditional');
+    expect(written.YfData.roomScoringMode).toBe('traditional');
+    expect(JSON.stringify(tournament.toFileObject(true))).not.toContain('roomScoringMode');
+  });
+
+  test('legacy room configuration opts into browser scoring once during migration', () => {
+    const { written } = saveAndReopen((tourn) => {
+      tourn.rooms = [new TournamentRoom('Room 101', 0)];
+    });
+    delete written.YfData.roomScoringMode;
+
+    const reopened = reopen(written);
+
+    expect(reopened.roomScoringMode).toBe('browser');
+    expect(reopened.rooms).toHaveLength(1);
+  });
+
+  test('legacy Live Display settings alone do not enable browser scoring', () => {
+    const { written } = saveAndReopen((tourn) => {
+      tourn.liveDisplaySettings.enabled = true;
+    });
+    delete written.YfData.roomScoringMode;
+    delete written.YfData.rooms;
+    delete written.YfData.scheduledMatches;
+
+    const reopened = reopen(written);
+
+    expect(reopened.roomScoringMode).toBe('traditional');
+    expect(reopened.liveDisplaySettings.enabled).toBe(true);
+  });
+
+  test('an explicit traditional choice remains off while preserving room configuration', () => {
+    const { reopened } = saveAndReopen((tourn) => {
+      tourn.roomScoringMode = 'traditional';
+      tourn.rooms = [new TournamentRoom('Room 101', 0)];
+      const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+      scheduled.roomId = tourn.rooms[0].id;
+      tourn.scheduledMatches = [scheduled];
+    });
+
+    expect(reopened.roomScoringMode).toBe('traditional');
+    expect(reopened.rooms).toHaveLength(1);
+    expect(reopened.scheduledMatches[0].roomId).toBe(reopened.rooms[0].id);
+  });
+
   test('rooms are written and read back with their ids and tokens', () => {
     const { original, reopened } = saveAndReopen((tourn) => {
       tourn.rooms = [

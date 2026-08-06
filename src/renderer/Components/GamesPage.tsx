@@ -314,8 +314,6 @@ function SingleRound(props: ISingleRoundProps) {
   const [expanded, setExpanded] = useState(expandedProp || initialRoundNumber === round.number);
   const canAddMatch = useMemo(() => tournManager.tournament.readyToAddMatches(), [tournManager]);
   const [numErrs, numWarns] = round.countErrorsAndWarnings();
-  const [prevFilterTeam, setPrevFilterTeam] = useState<Team | undefined>(undefined);
-
   const matchesToShow = useMemo(
     () =>
       round.matches.filter(
@@ -325,11 +323,10 @@ function SingleRound(props: ISingleRoundProps) {
   );
   const numMatches = matchesToShow.length;
 
-  if (prevFilterTeam !== filterTeam) {
-    if ((filterTeam || reviewFilter !== 'all') && numMatches > 0) setExpanded(true);
-    else setExpanded(false);
-    setPrevFilterTeam(filterTeam);
-  }
+  useEffect(() => {
+    const hasDeepFilter = !!filterTeam || reviewFilter !== 'all' || initialRoundNumber === round.number;
+    if (hasDeepFilter) setExpanded(numMatches > 0);
+  }, [filterTeam, initialRoundNumber, numMatches, reviewFilter, round.number]);
 
   const newMatchForRound = () => {
     tournManager.openMatchModalNewMatchForRound(round);

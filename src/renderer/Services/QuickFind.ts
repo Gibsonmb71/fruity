@@ -35,6 +35,8 @@ export interface IQuickFindContext {
   serverRunning?: boolean;
   inboxCount?: number;
   currentRoundNumber?: number | null;
+  gameEntryAllowed?: boolean;
+  startServerAllowed?: boolean;
   /** A caller with the full readiness resolver can make the release decision authoritative. */
   releaseAllowed?: boolean;
 }
@@ -50,11 +52,12 @@ interface IItemOptions {
 }
 
 function item(options: IItemOptions): IQuickFindItem {
-  const { navigation, target, ...rest } = options;
+  const { navigation, target, actionId, ...rest } = options;
   return {
     ...rest,
     target,
-    navigation: { target, ...navigation },
+    actionId,
+    navigation: { target, actionId, ...navigation },
   };
 }
 
@@ -139,14 +142,19 @@ export function buildQuickFindItems(tournament: Tournament, context: IQuickFindC
   const currentRound = firstUnresolvedRound(tournament, context);
   const roundTarget = browserScoring ? ('control:match-plan' as const) : ('games' as const);
   const actions: IQuickFindItem[] = [
-    item({
-      id: 'action-add-game',
-      category: 'ACTION',
-      actionId: 'add-game',
-      label: 'Add game',
-      detail: 'Open Games entry',
-      target: 'games',
-    }),
+    ...(context.gameEntryAllowed === false
+      ? []
+      : [
+          item({
+            id: 'action-add-game',
+            category: 'ACTION',
+            actionId: 'add-game',
+            label: 'Add game',
+            detail: 'Open Games entry',
+            target: 'games',
+            navigation: currentRound === undefined ? {} : { roundNumber: currentRound, focus: 'round' },
+          }),
+        ]),
     item({
       id: 'action-add-team',
       category: 'ACTION',
@@ -206,7 +214,7 @@ export function buildQuickFindItems(tournament: Tournament, context: IQuickFindC
     }),
   ];
 
-  if (browserScoring && context.serverRunning !== true) {
+  if (browserScoring && context.serverRunning !== true && context.startServerAllowed !== false) {
     actions.push(
       item({
         id: 'action-start-server',

@@ -503,6 +503,52 @@ export function summarizeRound(scheduled: ScheduledMatch[], roundNumber: number)
   };
 }
 
+export interface IRoundReleaseCheck {
+  canRelease: boolean;
+  reason?: string;
+}
+
+/**
+ * The single release gate used by Control and executable commands. Keeping this beside the
+ * schedule rules prevents a command-palette action from opening a round that the normal control
+ * surface would refuse.
+ */
+export function checkRoundRelease(
+  scheduled: ScheduledMatch[],
+  rooms: TournamentRoom[],
+  roundNumber: number,
+): IRoundReleaseCheck {
+  const summary = summarizeRound(scheduled, roundNumber);
+  if (summary.expected === 0) return { canRelease: false, reason: 'This round has no games to release.' };
+  if (summary.roomsAssigned < summary.expected) {
+    return { canRelease: false, reason: 'Assign every game in the round to an enabled room first.' };
+  }
+
+  const previousRound = roundsWithGames(scheduled)
+    .filter((number) => number < roundNumber)
+    .pop();
+  if (previousRound !== undefined && !summarizeRound(scheduled, previousRound).complete) {
+    return { canRelease: false, reason: `Round ${previousRound} must be complete before releasing this round.` };
+  }
+
+  const disabledAssignments = scheduled.some((match) => {
+    if (match.roundNumber !== roundNumber || !match.roomId || match.status === ScheduledMatchStatus.Cancelled) {
+      return false;
+    }
+    return rooms.some((room) => room.id === match.roomId && !room.enabled);
+  });
+  if (disabledAssignments) return { canRelease: false, reason: 'Reassign games from disabled rooms first.' };
+
+  const blockingIssue = validateSchedule(scheduled, rooms).find((issue) => {
+    if (issue.severity !== ScheduleIssueSeverity.Error) return false;
+    return issue.scheduledMatchIds.some(
+      (id) => scheduled.find((match) => match.id === id)?.roundNumber === roundNumber,
+    );
+  });
+  if (blockingIssue) return { canRelease: false, reason: blockingIssue.message };
+  return { canRelease: true };
+}
+
 /** Every round that has scheduled games, in order */
 export function roundsWithGames(scheduled: ScheduledMatch[]): number[] {
   return Array.from(new Set(scheduled.map((match) => match.roundNumber))).sort((a, b) => a - b);
