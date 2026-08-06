@@ -1,12 +1,25 @@
-/** Pages that the user navigates among. Corresponds with buttons in the nav bar */
+/** Lifecycle areas that the user navigates among. Corresponds with buttons in the nav bar. */
 export enum ApplicationPages {
-  General,
-  Rules,
-  Schedule,
-  Teams,
+  Setup,
   Games,
+  Control,
+  Reports,
+}
+
+/** Configuration tasks inside Setup. */
+export enum SetupPages {
+  Tournament,
+  Rules,
+  Teams,
+  Format,
+}
+
+/** Tournament-day operating surfaces inside Control. */
+export enum ControlPages {
+  Live,
+  MatchPlan,
   Rooms,
-  StatReport,
+  Display,
 }
 
 export enum StatReportPages {

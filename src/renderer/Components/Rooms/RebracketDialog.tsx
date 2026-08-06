@@ -168,7 +168,7 @@ export default function RebracketDialog(props: IRebracketDialogProps) {
         )}
         {scheduleErrors.length > 0 && (
           <Alert severity="error" sx={{ mb: 1 }}>
-            Resolve these schedule conflicts first:
+            Resolve these Match Plan conflicts first:
             {scheduleErrors.map((issue) => (
               <div key={issue.message}>{issue.message}</div>
             ))}
@@ -235,7 +235,7 @@ export default function RebracketDialog(props: IRebracketDialogProps) {
               {nextPhase.name} · {nextPhase.pools.length} pools · {phaseRoundNumbers(nextPhase).length} rounds
             </Typography>
             <Button variant="outlined" sx={{ mt: 1 }} onClick={previewNextPhase}>
-              Preview playoff schedule
+              Preview playoff Match Plan
             </Button>
           </div>
         )}

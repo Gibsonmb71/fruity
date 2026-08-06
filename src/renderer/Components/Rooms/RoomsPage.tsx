@@ -2,6 +2,7 @@ import { useContext, useEffect, useMemo, useState } from 'react';
 import type { ContextType, JSX } from 'react';
 import {
   Alert,
+  Box,
   Button,
   Checkbox,
   Chip,
@@ -11,26 +12,17 @@ import {
   DialogTitle,
   FormControlLabel,
   IconButton,
+  Menu,
+  MenuItem,
   Stack,
+  Tab,
+  Tabs,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  Add,
-  ArrowDownward,
-  ArrowUpward,
-  ContentCopy,
-  Delete,
-  Edit,
-  ExpandMore,
-  PlayArrow,
-  Print,
-  QrCode2,
-  Settings,
-  Stop,
-} from '@mui/icons-material';
+import { Add, ContentCopy, MoreVert, PlayArrow, Print, Settings, Stop } from '@mui/icons-material';
 import { TournamentContext } from '../../TournamentManager';
+import { ControlPages } from '../../Enums';
 import { TournamentServerContext } from '../../Services/TournamentServerService';
 import {
   ISessionSummary,
@@ -54,8 +46,10 @@ import {
   validateSchedule,
 } from '../../Services/ScheduleService';
 import { assignRoom } from '../../Services/RoomAllocationService';
+import { ReadinessTarget, resolveTournamentReadiness } from '../../Services/TournamentReadiness';
 import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSetupDialog } from './RoomDialogs';
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
+import MatchPlanWorkspace from './MatchPlanWorkspace';
 import RebracketDialog from './RebracketDialog';
 import MatchInboxCard from './MatchInboxCard';
 import LiveDisplaySettingsCard from './LiveDisplaySettingsCard';
@@ -194,7 +188,16 @@ function releaseMessage(
   return `Rooms may start through Round ${releasedRound}.`;
 }
 
-export default function RoomsPage() {
+interface IRoomsPageProps {
+  // eslint-disable-next-line react/require-default-props
+  activeTab?: ControlPages;
+  // eslint-disable-next-line react/require-default-props
+  onTabChange?: (tab: ControlPages) => void;
+  // eslint-disable-next-line react/require-default-props
+  onNavigateTarget?: (target: ReadinessTarget) => void;
+}
+
+export default function RoomsPage({ activeTab: controlledTab, onTabChange, onNavigateTarget }: IRoomsPageProps) {
   const manager = useContext(TournamentContext);
   const service = manager.tournamentServerService;
   const { tournament } = manager;
@@ -209,6 +212,13 @@ export default function RoomsPage() {
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<IConfirmState | null>(null);
   const [scheduleError, setScheduleError] = useState('');
+  const [roomMenu, setRoomMenu] = useState<{ room: TournamentRoom; anchor: HTMLElement } | null>(null);
+  const [uncontrolledTab, setUncontrolledTab] = useState(ControlPages.Live);
+  const activeTab = controlledTab ?? uncontrolledTab;
+  const setActiveTab = (tab: ControlPages) => {
+    setUncontrolledTab(tab);
+    onTabChange?.(tab);
+  };
 
   useEffect(() => {
     service.dataChangedReactCallback = () => setRefresh((current) => current + 1);
@@ -242,6 +252,15 @@ export default function RoomsPage() {
     (session) => session.status !== SessionStatus.Accepted && session.status !== SessionStatus.Rejected,
   );
   const onlineRooms = service.roomPresence.filter((presence) => presence.connected).length;
+  const readiness = resolveTournamentReadiness(tournament, {
+    running: service.status.running,
+    currentRoundNumber: service.currentRoundNumber,
+    releasedRoundNumber: service.releasedRoundNumber,
+    inboxCount: service.inbox.length,
+    conflictCount: service.conflicts.length,
+    sessions: activeSessions.map((session) => ({ roomId: session.roomId, status: session.status })),
+    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
+  });
 
   const rebracketBoundary = useMemo(() => {
     const fullPhases = tournament.getFullPhases();
@@ -378,6 +397,19 @@ export default function RoomsPage() {
     manager.markTournamentDataChanged();
   };
 
+  const toggleRoomAssignmentLock = (match: ScheduledMatch) => {
+    if (
+      !match.roomId ||
+      match.status === ScheduledMatchStatus.Playing ||
+      match.status === ScheduledMatchStatus.Submitted ||
+      match.status === ScheduledMatchStatus.Accepted
+    )
+      return;
+    match.roomAssignmentLocked = match.roomAssignmentLocked ? undefined : true;
+    match.roomAssignmentSource = 'manual';
+    manager.markTournamentDataChanged();
+  };
+
   const cancelMatch = (match: ScheduledMatch) => {
     if (
       match.status !== ScheduledMatchStatus.Scheduled &&
@@ -387,7 +419,7 @@ export default function RoomsPage() {
       return;
     setConfirmState({
       title: 'Cancel scheduled match?',
-      message: `${match.describe()} will remain in the schedule history as cancelled and will not count as an expected game.`,
+      message: `${match.describe()} will remain in the Match Plan history as cancelled and will not count as an expected game.`,
       confirmLabel: 'Cancel match',
       destructive: true,
       onConfirm: () => {
@@ -401,7 +433,7 @@ export default function RoomsPage() {
   const applyGeneratedSchedule = (generated: ScheduledMatch[]) => {
     const merged = mergeGeneratedSchedule(matches, generated, rooms);
     if (hasBlockingIssue(merged.issues)) {
-      manager.makeToast('The generated schedule conflicts with retained tournament history', 'error');
+      manager.makeToast('The generated Match Plan conflicts with retained tournament history', 'error');
       return;
     }
     tournament.scheduledMatches = merged.scheduledMatches;
@@ -418,8 +450,8 @@ export default function RoomsPage() {
     <TournamentServerContext.Provider value={service}>
       <main className="rooms-operations">
         <YfPageHeader
-          title="Rooms"
-          description="Tournament operations, room readiness, live games, and final-result review."
+          title="Control"
+          description="Tournament-day operations: what needs to happen now, where, and why."
           status={
             <Chip
               size="small"
@@ -428,6 +460,20 @@ export default function RoomsPage() {
             />
           }
         />
+
+        <Box className="control-tabs" sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+          <Tabs
+            value={activeTab}
+            onChange={(event, value: ControlPages) => setActiveTab(value)}
+            aria-label="Control sections"
+            sx={{ minHeight: 38, '& .MuiTab-root': { minHeight: 38, py: 0.5 } }}
+          >
+            <Tab label="Live" value={ControlPages.Live} />
+            <Tab label="Match Plan" value={ControlPages.MatchPlan} />
+            <Tab label="Rooms" value={ControlPages.Rooms} />
+            <Tab label="Display" value={ControlPages.Display} />
+          </Tabs>
+        </Box>
 
         <div className="rooms-server-toolbar">
           <div className="rooms-server-address">
@@ -473,9 +519,27 @@ export default function RoomsPage() {
           <SummaryItem label="Next rebracket" value={rebracketBoundary ? `After ${rebracketBoundary.name}` : '—'} />
         </div>
 
-        <LiveDisplaySettingsCard />
+        {activeTab === ControlPages.Live && (
+          <PrimaryOperationPanel
+            readiness={readiness}
+            onAction={() =>
+              runPrimaryAction(
+                readiness,
+                setActiveTab,
+                setServerSettingsOpen,
+                setRebracketOpen,
+                releaseRound,
+                onNavigateTarget,
+              )
+            }
+          />
+        )}
 
-        {rebracketBoundary && (
+        {activeTab === ControlPages.Live && <LiveRoomTable rooms={rooms} matches={matches} service={service} />}
+
+        {activeTab === ControlPages.Display && <LiveDisplaySettingsCard />}
+
+        {activeTab === ControlPages.Live && rebracketBoundary && (
           <section className="rooms-panel">
             <div className="rooms-panel-header">
               <div>
@@ -492,288 +556,313 @@ export default function RoomsPage() {
           </section>
         )}
 
-        <section className="rooms-panel" aria-labelledby="rooms-list-heading">
-          <div className="rooms-panel-header">
-            <div>
-              <h2 id="rooms-list-heading">Physical rooms</h2>
-              <p>
-                {rooms.length === 0
-                  ? 'Add the physical rooms being used for matches.'
-                  : `${rooms.length} configured room${rooms.length === 1 ? '' : 's'}`}
-              </p>
+        {activeTab === ControlPages.Rooms && (
+          <section className="rooms-panel" aria-labelledby="rooms-list-heading">
+            <div className="rooms-panel-header">
+              <div>
+                <h2 id="rooms-list-heading">Physical rooms</h2>
+                <p>
+                  {rooms.length === 0
+                    ? 'Add the physical rooms being used for matches.'
+                    : `${rooms.length} configured room${rooms.length === 1 ? '' : 's'}`}
+                </p>
+              </div>
+              <div className="rooms-panel-actions">
+                <Button
+                  size="small"
+                  startIcon={<Print />}
+                  onClick={() => setSetupOpen(true)}
+                  disabled={rooms.length === 0}
+                >
+                  Setup sheet
+                </Button>
+                <Button size="small" variant="contained" startIcon={<Add />} onClick={() => openRoomEditor()}>
+                  Add room
+                </Button>
+              </div>
             </div>
-            <div className="rooms-panel-actions">
-              <Button
-                size="small"
-                startIcon={<Print />}
-                onClick={() => setSetupOpen(true)}
-                disabled={rooms.length === 0}
-              >
-                Setup sheet
-              </Button>
-              <Button size="small" variant="contained" startIcon={<Add />} onClick={() => openRoomEditor()}>
-                Add room
-              </Button>
-            </div>
-          </div>
-          {rooms.length === 0 ? (
-            <div className="rooms-empty-state">
-              <strong>No rooms configured</strong>
-              Add the physical rooms being used for matches.
-            </div>
-          ) : (
-            <div className="rooms-table-wrap">
-              <table className="rooms-table">
-                <thead>
-                  <tr>
-                    <th>Room</th>
-                    <th>Match</th>
-                    <th>Status</th>
-                    <th>Progress</th>
-                    <th>Last check-in</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rooms.map((room, index) => {
-                    const match = currentMatchForRoom(room, matches);
-                    const session = sessionForRoom(room, service.sessions);
-                    const presence = roomPresenceFor(room, service);
-                    const state = roomState(room, match, session, presence?.connected ?? false, service.status.running);
-                    return (
-                      <tr key={room.id}>
-                        <td>
-                          <Button
-                            className="rooms-room-name"
-                            size="small"
-                            onClick={() => setRoomDetail(room)}
-                            sx={{ textTransform: 'none', p: 0 }}
-                          >
-                            {room.name}
-                          </Button>
-                          {room.description && <div className="rooms-room-description">{room.description}</div>}
-                        </td>
-                        <td className="rooms-matchup">
-                          {match ? (
-                            <>
-                              <strong>{match.leftTeamName}</strong> <span className="rooms-secondary">vs</span>{' '}
-                              <strong>{match.rightTeamName}</strong>
-                              <span className="rooms-secondary">Round {match.roundNumber}</span>
-                            </>
-                          ) : (
-                            <span className="rooms-secondary">No current assignment</span>
-                          )}
-                        </td>
-                        <td>
-                          <span className={`rooms-state ${state.className}`}>{state.label}</span>
-                        </td>
-                        <td>{sessionProgress(session, match)}</td>
-                        <td className="rooms-secondary">
-                          {presenceLabel(
-                            presence?.connected ?? false,
-                            presence?.lastSeenAt ?? null,
-                            presence?.msSinceLastSeen ?? null,
-                          )}
-                        </td>
-                        <td>
-                          <Stack
-                            direction="row"
-                            spacing={0.25}
-                            sx={{
-                              justifyContent: 'flex-end',
-                            }}
-                          >
-                            <Tooltip title="Move up">
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => {
-                                    tournament.rooms = moveRoom(tournament.rooms, room.id, -1);
-                                    manager.markTournamentDataChanged();
-                                  }}
-                                  disabled={index === 0}
-                                  aria-label={`Move ${room.name} up`}
-                                >
-                                  <ArrowUpward fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title="Move down">
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => {
-                                    tournament.rooms = moveRoom(tournament.rooms, room.id, 1);
-                                    manager.markTournamentDataChanged();
-                                  }}
-                                  disabled={index === rooms.length - 1}
-                                  aria-label={`Move ${room.name} down`}
-                                >
-                                  <ArrowDownward fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title="Edit room">
-                              <IconButton
-                                size="small"
-                                onClick={() => openRoomEditor(room)}
-                                aria-label={`Edit ${room.name}`}
-                              >
-                                <Edit fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Show QR">
-                              <IconButton
-                                size="small"
-                                onClick={() => setQrRoom(room)}
-                                aria-label={`Show QR for ${room.name}`}
-                              >
-                                <QrCode2 fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Room details">
-                              <IconButton
-                                size="small"
-                                onClick={() => setRoomDetail(room)}
-                                aria-label={`Open ${room.name} details`}
-                              >
-                                <ExpandMore fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Delete room">
-                              <IconButton
-                                size="small"
-                                onClick={() => requestDeleteRoom(room)}
-                                aria-label={`Delete ${room.name}`}
-                              >
-                                <Delete fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Stack>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+            {rooms.length === 0 ? (
+              <div className="rooms-empty-state">
+                <strong>No rooms configured</strong>
+                Add the physical rooms being used for matches.
+              </div>
+            ) : (
+              <div className="rooms-table-wrap">
+                <table className="rooms-table">
+                  <thead>
+                    <tr>
+                      <th>Room</th>
+                      <th>Match</th>
+                      <th>Status</th>
+                      <th>Progress</th>
+                      <th>Last check-in</th>
+                      <th aria-label="Actions" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rooms.map((room) => {
+                      const match = currentMatchForRoom(room, matches);
+                      const session = sessionForRoom(room, service.sessions);
+                      const presence = roomPresenceFor(room, service);
+                      const state = roomState(
+                        room,
+                        match,
+                        session,
+                        presence?.connected ?? false,
+                        service.status.running,
+                      );
+                      return (
+                        <tr key={room.id}>
+                          <td>
+                            <Button
+                              className="rooms-room-name"
+                              size="small"
+                              onClick={() => setRoomDetail(room)}
+                              sx={{ textTransform: 'none', p: 0 }}
+                            >
+                              {room.name}
+                            </Button>
+                            {room.description && <div className="rooms-room-description">{room.description}</div>}
+                          </td>
+                          <td className="rooms-matchup">
+                            {match ? (
+                              <>
+                                <strong>{match.leftTeamName}</strong> <span className="rooms-secondary">vs</span>{' '}
+                                <strong>{match.rightTeamName}</strong>
+                                <span className="rooms-secondary">Round {match.roundNumber}</span>
+                              </>
+                            ) : (
+                              <span className="rooms-secondary">No current assignment</span>
+                            )}
+                          </td>
+                          <td>
+                            <span className={`rooms-state ${state.className}`}>{state.label}</span>
+                          </td>
+                          <td>{sessionProgress(session, match)}</td>
+                          <td className="rooms-secondary">
+                            {presenceLabel(
+                              presence?.connected ?? false,
+                              presence?.lastSeenAt ?? null,
+                              presence?.msSinceLastSeen ?? null,
+                            )}
+                          </td>
+                          <td>
+                            <IconButton
+                              size="small"
+                              aria-label={`More actions for ${room.name}`}
+                              onClick={(event) => setRoomMenu({ room, anchor: event.currentTarget })}
+                            >
+                              <MoreVert fontSize="small" />
+                            </IconButton>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
 
-        <section className="rooms-panel" aria-labelledby="attention-heading">
-          <div className="rooms-panel-header">
-            <div>
-              <h2 id="attention-heading">Needs attention</h2>
-              <p>Issues that can block the next operational step.</p>
-            </div>
-          </div>
-          <AttentionList
-            service={service}
-            rooms={rooms}
-            scheduleIssues={scheduleIssues}
-            nextRelease={nextRelease}
-            releaseBlocked={releaseBlocked}
-            disabledRoomAssignments={disabledRoomAssignments}
-          />
-        </section>
+        <Menu anchorEl={roomMenu?.anchor ?? null} open={roomMenu !== null} onClose={() => setRoomMenu(null)}>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              setRoomDetail(roomMenu.room);
+              setRoomMenu(null);
+            }}
+          >
+            Open room
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              openRoomEditor(roomMenu.room);
+              setRoomMenu(null);
+            }}
+          >
+            Edit room
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              setQrRoom(roomMenu.room);
+              setRoomMenu(null);
+            }}
+          >
+            QR / permanent URL
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              tournament.rooms = moveRoom(tournament.rooms, roomMenu.room.id, -1);
+              manager.markTournamentDataChanged();
+              setRoomMenu(null);
+            }}
+          >
+            Move up
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              tournament.rooms = moveRoom(tournament.rooms, roomMenu.room.id, 1);
+              manager.markTournamentDataChanged();
+              setRoomMenu(null);
+            }}
+          >
+            Move down
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              requestRegenerateToken(roomMenu.room);
+              setRoomMenu(null);
+            }}
+          >
+            Regenerate token
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              roomMenu.room.enabled = !roomMenu.room.enabled;
+              manager.markTournamentDataChanged();
+              setRoomMenu(null);
+            }}
+          >
+            {roomMenu?.room.enabled ? 'Disable room' : 'Enable room'}
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!roomMenu) return;
+              requestDeleteRoom(roomMenu.room);
+              setRoomMenu(null);
+            }}
+          >
+            Delete room
+          </MenuItem>
+        </Menu>
 
-        <section className="rooms-panel" aria-labelledby="release-heading">
-          <div className="rooms-panel-header">
-            <div>
-              <h2 id="release-heading">Round readiness and release</h2>
-              <p>Scheduled games are not playable until this control releases their round.</p>
+        {activeTab === ControlPages.Live && (
+          <section className="rooms-panel" aria-labelledby="attention-heading">
+            <div className="rooms-panel-header">
+              <div>
+                <h2 id="attention-heading">Needs attention</h2>
+                <p>Issues that can block the next operational step.</p>
+              </div>
             </div>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={tournament.autoReleaseNextRound}
-                  onChange={(event) => {
-                    service.setAutoReleaseNextRound(event.target.checked);
-                  }}
-                />
-              }
-              label="Auto-release ordinary next rounds"
+            <AttentionList
+              service={service}
+              rooms={rooms}
+              scheduleIssues={scheduleIssues}
+              nextRelease={nextRelease}
+              releaseBlocked={releaseBlocked}
+              disabledRoomAssignments={disabledRoomAssignments}
             />
-          </div>
-          {roundNumbers.length === 0 ? (
-            <div className="rooms-empty-state">
-              <strong>No scheduled matches</strong>
-              Generate a schedule or add matches manually.
+          </section>
+        )}
+
+        {activeTab === ControlPages.Live && (
+          <section className="rooms-panel" aria-labelledby="release-heading">
+            <div className="rooms-panel-header">
+              <div>
+                <h2 id="release-heading">Round readiness and release</h2>
+                <p>Scheduled games are not playable until this control releases their round.</p>
+              </div>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={tournament.autoReleaseNextRound}
+                    onChange={(event) => {
+                      service.setAutoReleaseNextRound(event.target.checked);
+                    }}
+                  />
+                }
+                label="Auto-release ordinary next rounds"
+              />
             </div>
-          ) : (
-            <div>
-              {roundNumbers.map((roundNumber) => {
-                const summary = summarizeRound(matches, roundNumber);
-                const released = service.releasedRoundNumber === roundNumber;
-                return (
-                  <div className="rooms-round-block" key={roundNumber}>
-                    <div className="rooms-round-header">
-                      <strong>
-                        Round {roundNumber} {released ? '· Released' : ''}
-                      </strong>
-                      <span>{formatRoundSummary(summary)}</span>
+            {roundNumbers.length === 0 ? (
+              <div className="rooms-empty-state">
+                <strong>No planned matches</strong>
+                Generate a Match Plan or add matches manually.
+              </div>
+            ) : (
+              <div>
+                {roundNumbers.map((roundNumber) => {
+                  const summary = summarizeRound(matches, roundNumber);
+                  const released = service.releasedRoundNumber === roundNumber;
+                  return (
+                    <div className="rooms-round-block" key={roundNumber}>
+                      <div className="rooms-round-header">
+                        <strong>
+                          Round {roundNumber} {released ? '· Released' : ''}
+                        </strong>
+                        <span>{formatRoundSummary(summary)}</span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-              <Stack
-                direction="row"
-                sx={{
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  px: 2,
-                  py: 1.5,
-                }}
-              >
-                <Typography
-                  variant="body2"
+                  );
+                })}
+                <Stack
+                  direction="row"
                   sx={{
-                    color: 'text.secondary',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    px: 2,
+                    py: 1.5,
                   }}
                 >
-                  {releaseMessage(service.releasedRoundNumber, currentRound, currentSummary)}
-                </Typography>
-                <Button variant="contained" onClick={releaseRound} disabled={nextRelease === null || releaseBlocked}>
-                  {nextRelease === null ? 'All rounds released' : `Release Round ${nextRelease}`}
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: 'text.secondary',
+                    }}
+                  >
+                    {releaseMessage(service.releasedRoundNumber, currentRound, currentSummary)}
+                  </Typography>
+                  <Button variant="contained" onClick={releaseRound} disabled={nextRelease === null || releaseBlocked}>
+                    {nextRelease === null ? 'All rounds released' : `Release Round ${nextRelease}`}
+                  </Button>
+                </Stack>
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeTab === ControlPages.MatchPlan && (
+          <section className="rooms-panel" aria-labelledby="schedule-heading">
+            <div className="rooms-panel-header">
+              <div>
+                <h2 id="schedule-heading">Match Plan</h2>
+                <p>
+                  Plan concrete team-versus-team matches and their rooms. Accepted history is never regenerated away.
+                </p>
+              </div>
+              <div className="rooms-panel-actions">
+                <Button size="small" startIcon={<Add />} onClick={() => setMatchEditor(null)}>
+                  Add match
                 </Button>
-              </Stack>
+                <Button size="small" variant="contained" onClick={() => setGeneratorOpen(true)}>
+                  Generate Match Plan
+                </Button>
+              </div>
             </div>
-          )}
-        </section>
+            {scheduleError !== '' && (
+              <Alert severity="error" onClose={() => setScheduleError('')} sx={{ m: 2 }}>
+                {scheduleError}
+              </Alert>
+            )}
+            <MatchPlanWorkspace
+              matches={matches}
+              rooms={rooms}
+              onRoomChange={changeRoomAssignment}
+              onEdit={(match) => setMatchEditor(match)}
+              onCancel={cancelMatch}
+              onToggleLock={toggleRoomAssignmentLock}
+            />
+          </section>
+        )}
 
-        <section className="rooms-panel" aria-labelledby="schedule-heading">
-          <div className="rooms-panel-header">
-            <div>
-              <h2 id="schedule-heading">Schedule</h2>
-              <p>
-                Future scheduled games and accepted history are shown separately. Accepted history is never regenerated
-                away.
-              </p>
-            </div>
-            <div className="rooms-panel-actions">
-              <Button size="small" startIcon={<Add />} onClick={() => setMatchEditor(null)}>
-                Add match
-              </Button>
-              <Button size="small" variant="contained" onClick={() => setGeneratorOpen(true)}>
-                Generate schedule
-              </Button>
-            </div>
-          </div>
-          {scheduleError !== '' && (
-            <Alert severity="error" onClose={() => setScheduleError('')} sx={{ m: 2 }}>
-              {scheduleError}
-            </Alert>
-          )}
-          <ScheduleGroups
-            matches={matches}
-            rooms={rooms}
-            onRoomChange={changeRoomAssignment}
-            onEdit={(match) => setMatchEditor(match)}
-            onCancel={cancelMatch}
-          />
-        </section>
-
-        <MatchInboxCard />
+        {activeTab === ControlPages.Live && <MatchInboxCard />}
 
         <RoomEditorDialog
           open={roomEditor !== undefined}
@@ -867,6 +956,198 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
   );
 }
 
+function operationTitle(readiness: ReturnType<typeof resolveTournamentReadiness>): string {
+  switch (readiness.state) {
+    case 'server-unavailable':
+      return 'Tournament server is unavailable';
+    case 'rooms-not-configured':
+      return 'Rooms are not configured';
+    case 'match-plan-missing':
+      return 'Match Plan is missing';
+    case 'schedule-blocked':
+      return 'This round cannot start';
+    case 'results-awaiting-review':
+      return 'Results are waiting for review';
+    case 'rebracket-required':
+      return 'Rebracketing is required';
+    case 'next-round-preparation':
+      return 'The next round needs preparation';
+    case 'round-in-progress':
+      return 'Round in progress';
+    case 'tournament-complete':
+      return 'Tournament complete';
+    case 'round-ready':
+      return 'Round is ready to begin';
+    case 'setup':
+      return 'Finish setup before starting games';
+    case 'round-complete':
+    default:
+      return 'Tournament operations';
+  }
+}
+
+function operationMessage(readiness: ReturnType<typeof resolveTournamentReadiness>): string {
+  const firstIssue = readiness.activeIssues[0];
+  switch (readiness.state) {
+    case 'server-unavailable':
+      return 'Start the local server so room scorekeepers can connect.';
+    case 'rooms-not-configured':
+      return 'Add the physical rooms that will host the scheduled matches.';
+    case 'match-plan-missing':
+      return 'Generate or enter the concrete team-versus-team matches for the tournament.';
+    case 'schedule-blocked':
+      return firstIssue?.message ?? 'Fix the room or match assignment before releasing this round.';
+    case 'results-awaiting-review':
+      return 'Submitted results are never accepted automatically. Review them before advancing.';
+    case 'rebracket-required':
+      return 'The completed stage has reached an advancement checkpoint. Confirm standings before continuing.';
+    case 'next-round-preparation':
+      return 'Confirm assignments and rooms before releasing the next round.';
+    case 'round-in-progress':
+      return 'Monitor the room table below. Submitted results will appear here for review.';
+    case 'tournament-complete':
+      return 'All planned matches are accepted. Review the reports before publishing.';
+    case 'round-ready':
+      return 'All current assignments are ready for scorekeepers.';
+    case 'setup':
+      return firstIssue?.message ?? 'Complete the remaining setup tasks.';
+    case 'round-complete':
+    default:
+      return 'Review the current tournament state.';
+  }
+}
+
+function runPrimaryAction(
+  readiness: ReturnType<typeof resolveTournamentReadiness>,
+  setActiveTab: (tab: ControlPages) => void,
+  setServerSettingsOpen: (open: boolean) => void,
+  setRebracketOpen: (open: boolean) => void,
+  releaseRound: () => void,
+  onNavigateTarget?: (target: ReadinessTarget) => void,
+) {
+  const target = readiness.primaryAction?.target;
+  if (target && !target.startsWith('control:')) {
+    onNavigateTarget?.(target);
+    return;
+  }
+  if (target === 'control:rooms') {
+    setActiveTab(ControlPages.Rooms);
+    return;
+  }
+  if (target === 'control:match-plan') {
+    setActiveTab(ControlPages.MatchPlan);
+    return;
+  }
+  if (readiness.state === 'server-unavailable') {
+    setServerSettingsOpen(true);
+    return;
+  }
+  if (readiness.state === 'rebracket-required') {
+    setRebracketOpen(true);
+    return;
+  }
+  if (readiness.state === 'round-ready') releaseRound();
+}
+
+function PrimaryOperationPanel({
+  readiness,
+  onAction,
+}: {
+  readiness: ReturnType<typeof resolveTournamentReadiness>;
+  onAction: () => void;
+}) {
+  const roundLabel = readiness.currentRoundNumber === null ? 'TOURNAMENT' : `ROUND ${readiness.currentRoundNumber}`;
+  const action = readiness.primaryAction;
+  return (
+    <section className="rooms-panel rooms-primary-operation" aria-labelledby="primary-operation-heading">
+      <div className="rooms-panel-header">
+        <div>
+          <div className="rooms-eyebrow">{roundLabel}</div>
+          <h2 id="primary-operation-heading">{operationTitle(readiness)}</h2>
+          <p>{operationMessage(readiness)}</p>
+        </div>
+        {action && (
+          <Button variant="contained" onClick={onAction}>
+            {action.label}
+          </Button>
+        )}
+      </div>
+      {readiness.currentRoundSummary && (
+        <Typography variant="caption" color="text.secondary">
+          {readiness.currentRoundSummary.accepted}/{readiness.currentRoundSummary.expected} accepted ·{' '}
+          {readiness.currentRoundSummary.roomsAssigned}/{readiness.currentRoundSummary.expected} rooms assigned
+        </Typography>
+      )}
+    </section>
+  );
+}
+
+function LiveRoomTable({
+  rooms,
+  matches,
+  service,
+}: {
+  rooms: TournamentRoom[];
+  matches: ScheduledMatch[];
+  service: TournamentServerContextValue;
+}) {
+  return (
+    <section className="rooms-panel" aria-labelledby="live-room-table-heading">
+      <div className="rooms-panel-header">
+        <div>
+          <h2 id="live-room-table-heading">Live rooms</h2>
+          <p>What each scorekeeper needs to do right now.</p>
+        </div>
+      </div>
+      {rooms.length === 0 ? (
+        <div className="rooms-empty-state">Configure rooms to see live room operations here.</div>
+      ) : (
+        <div className="rooms-table-wrap">
+          <table className="rooms-table">
+            <thead>
+              <tr>
+                <th>Room</th>
+                <th>Match</th>
+                <th>State</th>
+                <th>Progress</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rooms.map((room) => {
+                const match = currentMatchForRoom(room, matches);
+                const session = sessionForRoom(room, service.sessions);
+                const presence = roomPresenceFor(room, service);
+                const state = roomState(room, match, session, presence?.connected ?? false, service.status.running);
+                return (
+                  <tr key={room.id}>
+                    <td>
+                      <strong>{room.name}</strong>
+                    </td>
+                    <td className="rooms-matchup">
+                      {match ? (
+                        <>
+                          <strong>{match.leftTeamName}</strong> <span className="rooms-secondary">/</span>{' '}
+                          <strong>{match.rightTeamName}</strong>
+                        </>
+                      ) : (
+                        <span className="rooms-secondary">No current assignment</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`rooms-state ${state.className}`}>{state.label}</span>
+                    </td>
+                    <td>{sessionProgress(session, match)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AttentionList({
   service,
   rooms,
@@ -943,6 +1224,9 @@ function AttentionList({
   return <ul className="rooms-attention-list">{items}</ul>;
 }
 
+// The previous grouped renderer is retained for backwards reference while the Match Plan workspace
+// uses the round and round-by-room views above.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ScheduleGroups({
   matches,
   rooms,

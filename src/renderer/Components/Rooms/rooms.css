@@ -138,6 +138,23 @@
   overflow: hidden;
 }
 
+.rooms-primary-operation {
+  border-color: var(--ops-accent);
+}
+
+.rooms-primary-operation .rooms-panel-header {
+  padding-top: 16px;
+  padding-bottom: 14px;
+}
+
+.rooms-eyebrow {
+  margin-bottom: 4px;
+  color: var(--ops-accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
 .rooms-panel-header {
   display: flex;
   align-items: flex-start;

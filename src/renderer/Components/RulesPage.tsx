@@ -1,7 +1,7 @@
-import { Box } from '@mui/material';
+import { Accordion, AccordionDetails, AccordionSummary, Box, Typography } from '@mui/material';
 import Grid from '@mui/material/Grid';
+import { ExpandMore, Lock } from '@mui/icons-material';
 import { useContext } from 'react';
-import { Lock } from '@mui/icons-material';
 import StandardRuleSetCard from './StandardRuleSetCard';
 import TossupSettingsCard from './TossupSettingsCard';
 import BonusSettingsCard from './BonusSettingsCard';
@@ -13,16 +13,23 @@ import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import { YfNotice, YfPageHeader } from '../Utils/GeneralReactUtils';
 
-function RulesPage() {
+interface IRulesPageProps {
+  // eslint-disable-next-line react/require-default-props
+  showPageHeader?: boolean;
+}
+
+function RulesPage({ showPageHeader = true }: IRulesPageProps) {
   const tournManager = useContext(TournamentContext);
   const [readOnly] = useSubscription(tournManager.tournament.hasMatchData);
 
   return (
     <>
-      <YfPageHeader
-        title="Rules"
-        description="How games are scored. Start from a standard rule set, then adjust whatever differs."
-      />
+      {showPageHeader && (
+        <YfPageHeader
+          title="Rules"
+          description="How games are scored. Start from a standard rule set, then adjust whatever differs."
+        />
+      )}
       {readOnly && (
         <Box sx={{ mb: 2 }}>
           <YfNotice
@@ -33,35 +40,45 @@ function RulesPage() {
           />
         </Box>
       )}
-      {/*
-        Paired the way a format actually gets settled — ruleset first, then match length beside what a
-        toss-up is worth, bonuses beside overtime, roster limits beside anything unusual. The previous
-        three-column grid distributed panels arbitrarily, so the reading order changed with the window
-        width and unrelated settings ended up as neighbors.
-      */}
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12 }}>
-          <StandardRuleSetCard />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <RoundLengthSettingsCard />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TossupSettingsCard />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <BonusSettingsCard />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <OvertimeSettingsCard />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <MaxPlayersSettingsCard />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <LightningRoundSettingsCard />
-        </Grid>
-      </Grid>
+      <StandardRuleSetCard />
+      <Accordion
+        disableGutters
+        sx={{ mt: 2, border: 1, borderColor: 'divider', borderRadius: 1.5, '&:before': { display: 'none' } }}
+      >
+        <AccordionSummary
+          expandIcon={<ExpandMore />}
+          sx={{ minHeight: 44, '& .MuiAccordionSummary-content': { my: 1 } }}
+        >
+          <Box>
+            <Typography variant="subtitle2">Advanced scoring controls</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Match length, tossup values, bonuses, overtime, rosters and lightning rounds.
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <RoundLengthSettingsCard />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TossupSettingsCard />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <BonusSettingsCard />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <OvertimeSettingsCard />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <MaxPlayersSettingsCard />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <LightningRoundSettingsCard />
+            </Grid>
+          </Grid>
+        </AccordionDetails>
+      </Accordion>
     </>
   );
 }

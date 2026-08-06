@@ -17,10 +17,17 @@ import { Round } from '../DataModel/Round';
  */
 const packetScrollAfterRounds = 8;
 
-function GeneralPage() {
+interface IGeneralPageProps {
+  // eslint-disable-next-line react/require-default-props
+  showPageHeader?: boolean;
+}
+
+function GeneralPage({ showPageHeader = true }: IGeneralPageProps) {
   return (
     <>
-      <YfPageHeader title="General" description="What, where and when this tournament is, and what you track." />
+      {showPageHeader && (
+        <YfPageHeader title="Tournament" description="What, where and when this tournament is, and what you track." />
+      )}
       <BackupRecoveryNotice />
       {/*
         Three panels in two rows, not one panel per field: the two narrow groups sit side by side and
@@ -158,12 +165,12 @@ function PacketNames() {
       </Typography>
       {phases.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
-          Rounds appear here once this tournament has a schedule. Pick one on the Schedule page.
+          Rounds appear here once this tournament has a format. Pick one on the Format page.
         </Typography>
       ) : (
         <Box
           sx={{
-            // A 14-round schedule would otherwise set the height of the whole page.
+            // A 14-round packet list would otherwise set the height of the whole page.
             ...(scrolls ? { maxHeight: 232, overflowY: 'auto', pr: 0.5 } : {}),
             display: 'grid',
             gridTemplateColumns: 'minmax(0, auto) minmax(0, 1fr)',

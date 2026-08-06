@@ -36,7 +36,12 @@ const viewList = ['Registration', 'Prelim assignments', 'Rebracket / final ranks
 /** Above this many teams, finding one by eye stops being reasonable. */
 const searchThreshold = 12;
 
-function TeamsPage() {
+interface ITeamsPageProps {
+  // eslint-disable-next-line react/require-default-props
+  showPageHeader?: boolean;
+}
+
+function TeamsPage({ showPageHeader = true }: ITeamsPageProps) {
   const tournManager = useContext(TournamentContext);
   const [curView] = useSubscription(tournManager.currentTeamsPageView);
 
@@ -49,7 +54,7 @@ function TeamsPage() {
 
   return (
     <>
-      <YfPageHeader title="Teams" description="Registrations, pool assignments and final ranks." />
+      {showPageHeader && <YfPageHeader title="Teams" description="Registrations, pool assignments and final ranks." />}
       {/* Page-level sub-navigation: these are three different jobs, not three settings. */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2.5 }}>
         <Tabs value={curView} onChange={(e, newValue) => setView(newValue)}>
@@ -356,11 +361,11 @@ function TeamRowMenu(props: ITeamRowMenuProps) {
 function teamCountCaption(numTeams: number, numTeamsForSchedule: number | null) {
   const noun = numTeams === 1 ? 'team' : 'teams';
   if (numTeamsForSchedule === null) return `${noun} registered`;
-  return `${noun} registered of the ${numTeamsForSchedule} this schedule expects`;
+  return `${noun} registered of the ${numTeamsForSchedule} this format expects`;
 }
 
 function scheduleFullReason(expectedNumTeams: number | null) {
-  return `The schedule is built for ${expectedNumTeams} teams and they're all registered. Change the schedule to fit more.`;
+  return `The format is built for ${expectedNumTeams} teams and they're all registered. Change the format to fit more.`;
 }
 
 function teamAttributeDisplay(reg: Registration, team: Team) {

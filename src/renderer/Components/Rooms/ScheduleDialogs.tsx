@@ -258,7 +258,7 @@ export function MatchEditorDialog(props: IMatchEditorDialogProps) {
           )}
           {issues.length === 0 && leftTeam !== '' && rightTeam !== '' && (
             <Button variant="text" size="small" onClick={runValidation} sx={{ alignSelf: 'flex-start' }}>
-              Check for schedule conflicts
+              Check for Match Plan conflicts
             </Button>
           )}
         </Stack>
@@ -369,7 +369,7 @@ export function ScheduleGeneratorDialog(props: IScheduleGeneratorDialogProps) {
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>Generate schedule</DialogTitle>
+      <DialogTitle>Generate Match Plan</DialogTitle>
       <DialogContent>
         <Typography
           variant="body2"
@@ -379,7 +379,7 @@ export function ScheduleGeneratorDialog(props: IScheduleGeneratorDialogProps) {
           }}
         >
           Preview a deterministic round robin before changing future assignments. Accepted and in-flight games are
-          retained; only future scheduled games are replaced.
+          retained; only future planned matches are replaced.
         </Typography>
         <Stack spacing={2} sx={{ pt: 1 }}>
           <FormControl fullWidth>
@@ -544,7 +544,7 @@ export function ScheduleGeneratorDialog(props: IScheduleGeneratorDialogProps) {
           disabled={!canApply}
           onClick={() => preview && onApply(preview.generation.scheduledMatches)}
         >
-          Apply schedule
+          Apply Match Plan
         </Button>
       </DialogActions>
     </Dialog>

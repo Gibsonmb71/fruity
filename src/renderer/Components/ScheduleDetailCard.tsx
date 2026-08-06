@@ -30,10 +30,10 @@ import { Phase, PhaseTypes, WildCardRankingMethod } from '../DataModel/Phase';
 import { Pool, advOpportunityDisplay } from '../DataModel/Pool';
 import { LinkButton } from '../Utils/GeneralReactUtils';
 
-const cardTitle = 'Schedule detail';
+const cardTitle = 'Format details';
 const unlockCustSchedTooltip =
-  'Add, remove, or modify stages and pools. Seeding and rebracketing assistance is not available for custom schedules.';
-const usingCustSchedTooltip = 'Using a custom schedule. Seeding and rebracketing assistance are not available.';
+  'Add, remove, or modify stages and pools. Seeding and rebracketing assistance is not available for custom formats.';
+const usingCustSchedTooltip = 'Using a custom format. Seeding and rebracketing assistance are not available.';
 
 export default function ScheduleDetailCard() {
   const tournManager = useContext(TournamentContext);
@@ -63,7 +63,7 @@ export default function ScheduleDetailCard() {
               onClick={() => tournManager.tryUnlockCustomSchedule()}
               startIcon={<LockOpen />}
             >
-              {usingTemplate ? 'Customize' : 'Custom'}
+              {usingTemplate ? 'Customize' : 'Custom format'}
             </Button>
           </span>
         </Tooltip>
@@ -422,7 +422,7 @@ function ScheduleZeroState() {
           </div>
           <div>
             <LinkButton onClick={() => tournManager.startNewCustomSchedule()}>
-              <Tune fontSize="small" /> Create a custom schedule instead
+              <Tune fontSize="small" /> Create a custom format instead
             </LinkButton>
           </div>
         </Box>
