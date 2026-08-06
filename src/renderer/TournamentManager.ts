@@ -42,6 +42,7 @@ import parseTeamsFromSqbsFile from './DataModel/SqbsParsing';
 import SqbsExportModalManager from './Modal Managers/SqbsExportModalManager';
 import SqbsGenerator from './DataModel/SqbsFileGeneration';
 import MatchImportService, { invalidJsonMessage } from './Services/MatchImportService';
+import { IReportScope, isEntireReportScope, projectTournamentForReport } from './Services/ReportScope';
 import TournamentServerService from './Services/TournamentServerService';
 
 /** Holds the tournament the application is currently editing */
@@ -107,6 +108,9 @@ export class TournamentManager {
 
   /** When did we last update the stat report? */
   inAppStatReportGenerated: Date;
+
+  /** The report-only stage selection currently shown in Reports; never written to tournament files. */
+  reportScope: IReportScope | null = null;
 
   recoveredBackup?: IYftBackupFile;
 
@@ -695,25 +699,44 @@ export class TournamentManager {
    * @param filePathStart The full file path, minus the identifier of the specific page (e.g. _standing.html), if saving externally. E.g. C:\mydata\mystatreport.
    * If saving to the in-app stat report, should be undefined
    */
-  generateHtmlReport(filePathStart?: string) {
+  generateHtmlReport(filePathStart?: string, requestedScope?: IReportScope | null) {
     let filePrefix;
     if (filePathStart) filePrefix = getFileNameFromPath(filePathStart);
 
-    this.tournament.setHtmlFilePrefix(filePrefix);
+    if (requestedScope !== undefined) this.reportScope = requestedScope;
+    const scope = this.reportScope;
+    const reportTournament =
+      scope && !isEntireReportScope(this.tournament, scope)
+        ? projectTournamentForReport(this.tournament, scope)
+        : this.tournament;
 
-    this.tournament.compileStats(true);
+    reportTournament.setHtmlFilePrefix(filePrefix);
+    if (reportTournament === this.tournament) this.tournament.compileStats(true);
     const reports: StatReportHtmlPage[] = [
-      { fileName: StatReportFileNames[StatReportPages.Standings], contents: this.tournament.makeHtmlStandings() },
-      { fileName: StatReportFileNames[StatReportPages.Individuals], contents: this.tournament.makeHtmlIndividuals() },
-      { fileName: StatReportFileNames[StatReportPages.Scoreboard], contents: this.tournament.makeHtmlScoreboard() },
-      { fileName: StatReportFileNames[StatReportPages.TeamDetails], contents: this.tournament.makeHtmlTeamDetail() },
+      { fileName: StatReportFileNames[StatReportPages.Standings], contents: reportTournament.makeHtmlStandings() },
+      {
+        fileName: StatReportFileNames[StatReportPages.Individuals],
+        contents: reportTournament.makeHtmlIndividuals(),
+      },
+      { fileName: StatReportFileNames[StatReportPages.Scoreboard], contents: reportTournament.makeHtmlScoreboard() },
+      {
+        fileName: StatReportFileNames[StatReportPages.TeamDetails],
+        contents: reportTournament.makeHtmlTeamDetail(),
+      },
       {
         fileName: StatReportFileNames[StatReportPages.PlayerDetails],
-        contents: this.tournament.makeHtmlPlayerDetail(),
+        contents: reportTournament.makeHtmlPlayerDetail(),
       },
-      { fileName: StatReportFileNames[StatReportPages.RoundReport], contents: this.tournament.makeHtmlRoundReport() },
+      {
+        fileName: StatReportFileNames[StatReportPages.RoundReport],
+        contents: reportTournament.makeHtmlRoundReport(),
+      },
     ];
     window.electron.ipcRenderer.sendMessage(IpcRendToMain.WriteStatReports, reports, filePathStart);
+  }
+
+  setReportScope(scope: IReportScope | null) {
+    this.reportScope = scope;
   }
 
   /** Prompt the user for a place to save the reports. Main will then tell renderer to generate reports with the chosen file name */
@@ -735,6 +758,7 @@ export class TournamentManager {
   modalManagersSetTournament() {
     this.teamModalManager.tournament = this.tournament;
     this.matchModalManager.tournament = this.tournament;
+    this.reportScope = null;
     // A different tournament means any pending room submissions are about the wrong thing.
     this.tournamentServerService.reset();
     this.tournamentServerService.setTournament(this.tournament);

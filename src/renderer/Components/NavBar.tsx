@@ -23,6 +23,7 @@ import {
   HelpOutlined,
   LightMode,
   SaveOutlined,
+  Search,
   SettingsBrightness,
   WarningAmber,
 } from '@mui/icons-material';
@@ -80,10 +81,11 @@ interface INavBarProps {
   setActivePage: (page: ApplicationPages) => void;
   readiness: ITournamentReadiness;
   onNavigateTarget: (target: ReadinessTarget) => void;
+  onOpenQuickFind: () => void;
 }
 
 function NavBar(props: INavBarProps) {
-  const { activePage, setActivePage, readiness, onNavigateTarget } = props;
+  const { activePage, setActivePage, readiness, onNavigateTarget, onOpenQuickFind } = props;
   const tournManager = React.useContext(TournamentContext);
   const [tipsDialogOpen, setTipsDialogOpen] = React.useState(false);
   const [issuesAnchor, setIssuesAnchor] = React.useState<HTMLElement | null>(null);
@@ -199,12 +201,15 @@ function NavBar(props: INavBarProps) {
                 aria-hidden
                 sx={{
                   flexShrink: 0,
-                  fontSize: '1rem',
-                  lineHeight: 1,
+                  width: 15,
+                  height: 15,
+                  borderRadius: '5px 5px 5px 2px',
+                  border: 1,
+                  borderColor: 'primary.main',
+                  backgroundColor: 'primary.main',
+                  transform: 'rotate(-8deg)',
                 }}
-              >
-                🍌
-              </Box>
+              />
               <Typography
                 noWrap
                 sx={{
@@ -316,7 +321,7 @@ function NavBar(props: INavBarProps) {
               ...(centered ? { ml: 'auto' } : undefined),
             }}
           >
-            {readiness.issues.length > 0 && (
+            {readiness.activeIssues.length > 0 && (
               <Button
                 size="small"
                 color="warning"
@@ -324,7 +329,7 @@ function NavBar(props: INavBarProps) {
                 onClick={(event) => setIssuesAnchor(event.currentTarget)}
                 sx={{ ...noDragSx, minHeight: 28, px: 0.75, fontSize: '0.75rem' }}
               >
-                {readiness.issues.length} {readiness.issues.length === 1 ? 'issue' : 'issues'}
+                {readiness.activeIssues.length} {readiness.activeIssues.length === 1 ? 'issue' : 'issues'}
               </Button>
             )}
             {tournManager.unsavedData && (
@@ -340,32 +345,39 @@ function NavBar(props: INavBarProps) {
                 </Button>
               </Tooltip>
             )}
-            <Tooltip title={`${fileStatus} file`}>
-              <Box
-                role="status"
-                aria-label={`${fileStatus} file`}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.6,
-                  px: 0.75,
-                  color: fileStatus === 'Unsaved' ? 'warning.main' : 'text.secondary',
-                  userSelect: 'none',
-                }}
-              >
+            {fileStatus !== 'Saved' && (
+              <Tooltip title={`${fileStatus} file`}>
                 <Box
-                  aria-hidden
+                  role="status"
+                  aria-label={`${fileStatus} file`}
                   sx={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    backgroundColor: fileStatus === 'Unsaved' ? 'warning.main' : 'currentColor',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.6,
+                    px: 0.75,
+                    color: fileStatus === 'Unsaved' ? 'warning.main' : 'text.secondary',
+                    userSelect: 'none',
                   }}
-                />
-                <Typography variant="caption" sx={{ fontSize: '0.6875rem' }}>
-                  {fileStatus}
-                </Typography>
-              </Box>
+                >
+                  <Box
+                    aria-hidden
+                    sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      backgroundColor: fileStatus === 'Unsaved' ? 'warning.main' : 'currentColor',
+                    }}
+                  />
+                  <Typography variant="caption" sx={{ fontSize: '0.6875rem' }}>
+                    {fileStatus}
+                  </Typography>
+                </Box>
+              </Tooltip>
+            )}
+            <Tooltip title="Quick Find (⌘K / Ctrl+K)">
+              <IconButton size="small" onClick={onOpenQuickFind} sx={noDragSx} aria-label="Quick Find">
+                <Search fontSize="small" />
+              </IconButton>
             </Tooltip>
             <ColorModeButton />
             <Tooltip title="Show help for this page">
@@ -382,7 +394,7 @@ function NavBar(props: INavBarProps) {
         onClose={() => setIssuesAnchor(null)}
         slotProps={{ paper: { sx: { maxWidth: 430 } } }}
       >
-        {readiness.issues.map((issue) => (
+        {readiness.activeIssues.map((issue) => (
           <MenuItem
             key={issue.id}
             onClick={() => {
