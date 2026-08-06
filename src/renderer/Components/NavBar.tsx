@@ -180,16 +180,16 @@ function NavBar(props: INavBarProps) {
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0, flexShrink: 0 }}>
               <Box
+                component="span"
                 aria-hidden
                 sx={{
-                  width: 7,
-                  height: 7,
                   flexShrink: 0,
-                  borderRadius: '50%',
-                  backgroundColor: 'primary.main',
-                  boxShadow: '0 0 0 3px var(--mui-palette-action-selected)',
+                  fontSize: '1rem',
+                  lineHeight: 1,
                 }}
-              />
+              >
+                🍌
+              </Box>
               <Typography
                 noWrap
                 sx={{
