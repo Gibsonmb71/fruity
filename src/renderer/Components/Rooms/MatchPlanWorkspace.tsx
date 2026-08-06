@@ -123,8 +123,8 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
       const target = matchId
         ? document.querySelector<HTMLElement>(`[data-match-plan-match-id="${matchId}"]`)
         : navigation.roundNumber !== undefined
-          ? document.querySelector<HTMLElement>(`[data-match-plan-round="${navigation.roundNumber}"]`)
-          : null;
+        ? document.querySelector<HTMLElement>(`[data-match-plan-round="${navigation.roundNumber}"]`)
+        : null;
       target?.scrollIntoView({ block: 'center' });
       target?.focus({ preventScroll: true });
       onNavigationHandled?.();
@@ -152,7 +152,9 @@ export default function MatchPlanWorkspace(props: IMatchPlanWorkspaceProps) {
       />
     );
   } else {
-    workspace = <RoomBoard tournament={tournament} matches={visibleMatches} rooms={rooms} onMove={onMove} onEdit={onEdit} />;
+    workspace = (
+      <RoomBoard tournament={tournament} matches={visibleMatches} rooms={rooms} onMove={onMove} onEdit={onEdit} />
+    );
   }
 
   return (
@@ -224,7 +226,11 @@ function RoundMatchPlan({ matches, rooms, onMove, onEdit, onCancel, onToggleLock
       {rounds.map((roundNumber) => {
         const roundMatches = matches.filter((match) => match.roundNumber === roundNumber);
         return (
-          <Box key={roundNumber} data-match-plan-round={roundNumber} sx={{ '& + &': { borderTop: 1, borderColor: 'divider' } }}>
+          <Box
+            key={roundNumber}
+            data-match-plan-round={roundNumber}
+            sx={{ '& + &': { borderTop: 1, borderColor: 'divider' } }}
+          >
             <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', px: 1.5, py: 1 }}>
               <Typography variant="subtitle2">Round {roundNumber}</Typography>
               <Typography variant="caption" color="text.secondary">
@@ -264,11 +270,20 @@ function RoundMatchPlan({ matches, rooms, onMove, onEdit, onCancel, onToggleLock
 
 type IMatchPlanProps = IMatchPlanCallbacks & { matches: ScheduledMatch[] };
 
-function MatchPlanRow({ match, rooms, onMove, onEdit, onCancel, onToggleLock }: IMatchPlanCallbacks & { match: ScheduledMatch }) {
+function MatchPlanRow({
+  match,
+  rooms,
+  onMove,
+  onEdit,
+  onCancel,
+  onToggleLock,
+}: IMatchPlanCallbacks & { match: ScheduledMatch }) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const editable = isEditable(match);
   const provenance = match.roomId
-    ? `${match.roomAssignmentSource === 'manual' ? 'Manual' : 'Automatic'}${match.roomAssignmentLocked ? ' · kept' : ''}`
+    ? `${match.roomAssignmentSource === 'manual' ? 'Manual' : 'Automatic'}${
+        match.roomAssignmentLocked ? ' · kept' : ''
+      }`
     : 'Unassigned';
   return (
     <TableRow hover data-match-plan-match-id={match.id} tabIndex={-1}>
@@ -293,7 +308,10 @@ function MatchPlanRow({ match, rooms, onMove, onEdit, onCancel, onToggleLock }: 
         </Typography>
       </TableCell>
       <TableCell>
-        <Typography variant="body2" color={match.status === ScheduledMatchStatus.NeedsAttention ? 'warning.main' : 'text.primary'}>
+        <Typography
+          variant="body2"
+          color={match.status === ScheduledMatchStatus.NeedsAttention ? 'warning.main' : 'text.primary'}
+        >
           {statusLabel(match.status)}
         </Typography>
       </TableCell>
@@ -345,7 +363,15 @@ function MatchPlanRow({ match, rooms, onMove, onEdit, onCancel, onToggleLock }: 
   );
 }
 
-function RoomSelect({ match, rooms, onMove }: { match: ScheduledMatch; rooms: TournamentRoom[]; onMove: (match: ScheduledMatch, roomId: string) => void }) {
+function RoomSelect({
+  match,
+  rooms,
+  onMove,
+}: {
+  match: ScheduledMatch;
+  rooms: TournamentRoom[];
+  onMove: (match: ScheduledMatch, roomId: string) => void;
+}) {
   const editable = isEditable(match);
   return (
     <FormControl size="small" fullWidth>
@@ -402,7 +428,8 @@ function RoomBoard({
   const allowDragOver = (event: DragEvent, roundNumber: number, roomId: string) => {
     const destination = destinationFor(roomId);
     setHoveredDestination(`${roundNumber}:${roomId}`);
-    event.dataTransfer.dropEffect = destination.state === 'valid-empty' || destination.state === 'valid-swap' ? 'move' : 'none';
+    event.dataTransfer.dropEffect =
+      destination.state === 'valid-empty' || destination.state === 'valid-swap' ? 'move' : 'none';
     event.preventDefault();
   };
 
@@ -449,13 +476,18 @@ function RoomBoard({
                     onDragLeave={() => setHoveredDestination(null)}
                     onDrop={(event) => dropMatch(event, room.id)}
                     data-drop-state={destination.state}
-                    aria-label={`${room.name}, round ${roundNumber}${destination.state !== 'idle' ? `, ${destination.message}` : ''}`}
+                    aria-label={`${room.name}, round ${roundNumber}${
+                      destination.state !== 'idle' ? `, ${destination.message}` : ''
+                    }`}
                     sx={{
                       verticalAlign: 'top',
                       minHeight: 64,
                       backgroundColor: highlighted ? 'action.selected' : 'background.paper',
                       outline: highlighted ? 1 : undefined,
-                      outlineColor: destination.state === 'invalid' || destination.state === 'protected' ? 'warning.main' : 'primary.main',
+                      outlineColor:
+                        destination.state === 'invalid' || destination.state === 'protected'
+                          ? 'warning.main'
+                          : 'primary.main',
                     }}
                   >
                     <Stack sx={{ gap: 0.75 }}>
@@ -481,7 +513,14 @@ function RoomBoard({
                         </Typography>
                       )}
                       {highlighted && destination.state !== 'idle' && (
-                        <Typography variant="caption" color={destination.state === 'invalid' || destination.state === 'protected' ? 'warning.main' : 'primary.main'}>
+                        <Typography
+                          variant="caption"
+                          color={
+                            destination.state === 'invalid' || destination.state === 'protected'
+                              ? 'warning.main'
+                              : 'primary.main'
+                          }
+                        >
                           {destination.message}
                         </Typography>
                       )}
@@ -538,7 +577,11 @@ function BoardMatch({
         '&:hover, &:focus-visible': { borderColor: 'primary.main', backgroundColor: 'action.hover', outline: 'none' },
         '&:active': { cursor: draggable ? 'grabbing' : 'pointer' },
       }}
-      title={draggable ? 'Drag to another room in this round, or select to edit' : 'Select to edit; this game cannot be moved'}
+      title={
+        draggable
+          ? 'Drag to another room in this round, or select to edit'
+          : 'Select to edit; this game cannot be moved'
+      }
     >
       {draggable && <DragIndicator sx={{ fontSize: 16, color: 'text.disabled', mt: 0.15 }} aria-hidden />}
       <Box sx={{ minWidth: 0 }}>

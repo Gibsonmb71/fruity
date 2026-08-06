@@ -188,8 +188,8 @@ export default class FileParser {
         yfExtraData.roomScoringMode === 'browser' || yfExtraData.roomScoringMode === 'traditional'
           ? yfExtraData.roomScoringMode
           : hasLegacyRoomConfiguration
-            ? 'browser'
-            : 'traditional';
+          ? 'browser'
+          : 'traditional';
       this.tourn.liveDisplaySettings = FileParser.parseLiveDisplaySettings(yfExtraData.liveDisplay);
     } else {
       this.tourn.inferCarryoverStatus();

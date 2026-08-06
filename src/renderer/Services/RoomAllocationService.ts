@@ -137,10 +137,7 @@ export interface IRoomAssignmentSnapshot {
 }
 
 /** Capture only the assignment fields needed to restore one assignment operation. */
-export function captureRoomAssignmentSnapshot(
-  tournament: Tournament,
-  matchIds: string[],
-): IRoomAssignmentSnapshot {
+export function captureRoomAssignmentSnapshot(tournament: Tournament, matchIds: string[]): IRoomAssignmentSnapshot {
   const ids = new Set(matchIds);
   return {
     entries: tournament.scheduledMatches
@@ -164,7 +161,9 @@ export function restoreRoomAssignmentSnapshot(
   tournament: Tournament,
   snapshot: IRoomAssignmentSnapshot,
 ): IScheduleIssue[] {
-  const matches = snapshot.entries.map((entry) => tournament.scheduledMatches.find((match) => match.id === entry.matchId));
+  const matches = snapshot.entries.map((entry) =>
+    tournament.scheduledMatches.find((match) => match.id === entry.matchId),
+  );
   if (matches.some((match) => !match)) {
     return [error('Undo is no longer safe because a scheduled match no longer exists.')];
   }
@@ -214,10 +213,12 @@ export function restoreRoomAssignmentSnapshot(
         candidate.status !== ScheduledMatchStatus.Cancelled,
     );
     if (outside) {
-      issues.push(error(`Undo is unsafe because ${roomName(tournament, entry.roomId)} is now occupied by another game.`, [
-        match.id,
-        outside.id,
-      ]));
+      issues.push(
+        error(`Undo is unsafe because ${roomName(tournament, entry.roomId)} is now occupied by another game.`, [
+          match.id,
+          outside.id,
+        ]),
+      );
     }
   });
 
@@ -246,11 +247,7 @@ export interface IRoomDropDestination {
 }
 
 /** Pure board affordance state derived from the existing move/swap policy. */
-export function planRoomDrop(
-  tournament: Tournament,
-  matchId: string,
-  targetRoomId?: string,
-): IRoomDropDestination {
+export function planRoomDrop(tournament: Tournament, matchId: string, targetRoomId?: string): IRoomDropDestination {
   const match = tournament.scheduledMatches.find((candidate) => candidate.id === matchId);
   if (!match) return { state: 'invalid', message: 'This scheduled match no longer exists.' };
   if (targetRoomId === undefined) {
@@ -262,7 +259,9 @@ export function planRoomDrop(
 
   const plan = planSwap(tournament, matchId, targetRoomId);
   if (plan.kind === 'illegal') {
-    const protectedDestination = plan.issues.some((issue) => /protected|locked|progress|historical|cancelled/i.test(issue.message));
+    const protectedDestination = plan.issues.some((issue) =>
+      /protected|locked|progress|historical|cancelled/i.test(issue.message),
+    );
     return {
       state: protectedDestination ? 'protected' : 'invalid',
       message: plan.issues[0]?.message ?? 'This room is not a valid destination.',
@@ -271,7 +270,8 @@ export function planRoomDrop(
   }
   return {
     state: plan.kind === 'swap' ? 'valid-swap' : 'valid-empty',
-    message: plan.kind === 'swap' ? 'Valid destination: swap the two matches.' : 'Valid destination: move this match here.',
+    message:
+      plan.kind === 'swap' ? 'Valid destination: swap the two matches.' : 'Valid destination: move this match here.',
     plan,
   };
 }
@@ -783,15 +783,23 @@ export function getRoomDropFeedback(tournament: Tournament, matchId: string, tar
   if (!match) return { state: 'unavailable', issues: [error('That scheduled match no longer exists.')] };
   if (targetRoomId === '' || targetRoomId === '__unassigned__') {
     if (match.roomId === undefined) return { state: 'same', issues: [] };
-    if (match.status === ScheduledMatchStatus.Playing || match.status === ScheduledMatchStatus.Submitted || match.status === ScheduledMatchStatus.Accepted || match.status === ScheduledMatchStatus.Cancelled) {
+    if (
+      match.status === ScheduledMatchStatus.Playing ||
+      match.status === ScheduledMatchStatus.Submitted ||
+      match.status === ScheduledMatchStatus.Accepted ||
+      match.status === ScheduledMatchStatus.Cancelled
+    ) {
       return { state: 'protected', issues: [error('Historical or in-flight games cannot be unassigned.', [match.id])] };
     }
-    if (match.roomAssignmentLocked) return { state: 'protected', issues: [error('This room assignment is locked.', [match.id])] };
+    if (match.roomAssignmentLocked)
+      return { state: 'protected', issues: [error('This room assignment is locked.', [match.id])] };
     return { state: 'eligible', issues: [] };
   }
   const plan = planSwap(tournament, matchId, targetRoomId);
   if (plan.kind === 'illegal') {
-    const protectedTarget = plan.issues.some((candidate) => /protected|locked|in progress|historical|cancelled/i.test(candidate.message));
+    const protectedTarget = plan.issues.some((candidate) =>
+      /protected|locked|in progress|historical|cancelled/i.test(candidate.message),
+    );
     return { state: protectedTarget ? 'protected' : 'unavailable', issues: plan.issues };
   }
   if (plan.kind === 'swap') return { state: 'swappable', issues: [] };
@@ -809,7 +817,10 @@ function assignmentState(match: ScheduledMatch): IRoomAssignmentState {
 }
 
 /** Capture the exact assignment/provenance state for a room mutation. */
-export function createRoomAssignmentUndoSnapshot(tournament: Tournament, matchIds: string[]): IRoomAssignmentUndoSnapshot {
+export function createRoomAssignmentUndoSnapshot(
+  tournament: Tournament,
+  matchIds: string[],
+): IRoomAssignmentUndoSnapshot {
   return {
     entries: Array.from(new Set(matchIds))
       .map((matchId) => tournament.scheduledMatches.find((match) => match.id === matchId))
@@ -848,7 +859,10 @@ export function restoreRoomAssignmentUndoSnapshot(
       current.roomAssignmentLocked !== entry.expectedAfter.roomAssignmentLocked ||
       current.roomAssignmentSource !== entry.expectedAfter.roomAssignmentSource
     ) {
-      return { restored: false, reason: 'The room plan changed again, so the older assignment is no longer safe to restore.' };
+      return {
+        restored: false,
+        reason: 'The room plan changed again, so the older assignment is no longer safe to restore.',
+      };
     }
   }
   snapshot.entries.forEach((entry) => {

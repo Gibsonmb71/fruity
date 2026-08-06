@@ -35,7 +35,11 @@ describe('resolveTournamentReadiness', () => {
     const readiness = resolveTournamentReadiness(new Tournament());
 
     expect(readiness.state).toBe('setup');
-    expect(readiness.primaryAction).toMatchObject({ kind: 'navigate', label: 'Open Tournament', target: 'setup:tournament' });
+    expect(readiness.primaryAction).toMatchObject({
+      kind: 'navigate',
+      label: 'Open Tournament',
+      target: 'setup:tournament',
+    });
     expect(readiness.primaryAction?.navigation).toMatchObject({ target: 'setup:tournament' });
     expect(readiness.setup.teamsReady).toBe(false);
     expect(readiness.setup.formatReady).toBe(false);
@@ -91,7 +95,11 @@ describe('resolveTournamentReadiness', () => {
     });
 
     expect(readiness.state).toBe('server-unavailable');
-    expect(readiness.primaryAction).toMatchObject({ kind: 'start-server', label: 'Start server', target: 'control:live' });
+    expect(readiness.primaryAction).toMatchObject({
+      kind: 'start-server',
+      label: 'Start server',
+      target: 'control:live',
+    });
   });
 
   test('prioritizes review of submitted results', () => {

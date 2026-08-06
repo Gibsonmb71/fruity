@@ -120,8 +120,9 @@ function firstUnresolvedRound(tournament: Tournament, context: IQuickFindContext
   if (scheduledRound !== undefined) return scheduledRound;
   return tournament.phases
     .flatMap((phase) => phase.rounds)
-    .find((round) => round.matches.some((match) => match.getErrorMessages().length > 0 || match.getWarningMessages().length > 0))
-    ?.number;
+    .find((round) =>
+      round.matches.some((match) => match.getErrorMessages().length > 0 || match.getWarningMessages().length > 0),
+    )?.number;
 }
 
 function canReleaseRound(tournament: Tournament, roundNumber: number, context: IQuickFindContext): boolean {
@@ -343,9 +344,7 @@ export function filterQuickFindItems(items: IQuickFindItem[], query: string): IQ
       else score = 4;
       return { item: currentItem, score, index: index >= 0 ? index : detailIndex >= 0 ? detailIndex : categoryIndex };
     })
-    .filter(
-      (result): result is { item: IQuickFindItem; score: number; index: number } => result !== null,
-    )
+    .filter((result): result is { item: IQuickFindItem; score: number; index: number } => result !== null)
     .sort((a, b) => a.score - b.score || a.index - b.index || a.item.label.localeCompare(b.item.label))
     .map((result) => result.item)
     .slice(0, 30);

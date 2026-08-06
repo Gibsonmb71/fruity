@@ -182,70 +182,77 @@ function SetupPreflight({
   };
 
   return (
-    <>
-      <Dialog fullWidth maxWidth="sm" open={open} onClose={onClose}>
-        <DialogTitle>Setup preflight</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
-            Core setup is required for every tournament. Room operations are optional and only appear when configured.
-          </Typography>
-          {coreChecks.map((check) => (
+    <Dialog fullWidth maxWidth="sm" open={open} onClose={onClose}>
+      <DialogTitle>Setup preflight</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
+          Core setup is required for every tournament. Room operations are optional and only appear when configured.
+        </Typography>
+        {coreChecks.map((check) => (
+          <PreflightRow
+            key={check.label}
+            label={check.label}
+            status={readinessStatus(check.ready, !check.ready)}
+            actionLabel={check.ready ? undefined : 'Fix'}
+            onAction={() => openTarget(check.target)}
+          />
+        ))}
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+          {readiness.roomOperationsEnabled ? 'Room operations' : 'Traditional manual entry'}
+        </Typography>
+        {readiness.roomOperationsEnabled ? (
+          <>
             <PreflightRow
-              key={check.label}
-              label={check.label}
-              status={readinessStatus(check.ready, !check.ready)}
-              actionLabel={check.ready ? undefined : 'Fix'}
-              onAction={() => openTarget(check.target)}
-            />
-          ))}
-          <Divider sx={{ my: 1.5 }} />
-          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-            {readiness.roomOperationsEnabled ? 'Room operations' : 'Traditional manual entry'}
-          </Typography>
-          {readiness.roomOperationsEnabled ? (
-            <>
-              <PreflightRow
-                label="Rooms configured"
-                status={readinessStatus(readiness.roomOperations.roomsConfigured, !readiness.roomOperations.roomsConfigured)}
-                actionLabel={readiness.roomOperations.roomsConfigured ? undefined : 'Set up rooms'}
-                onAction={() => openTarget('control:rooms')}
-              />
-              <PreflightRow
-                label="Match Plan configured"
-                status={readinessStatus(readiness.roomOperations.matchPlanConfigured, !readiness.roomOperations.matchPlanConfigured)}
-                actionLabel={readiness.roomOperations.matchPlanConfigured ? undefined : 'Open Match Plan'}
-                onAction={() => openTarget('control:match-plan')}
-              />
-              <PreflightRow
-                label="Tournament Server running"
-                status={readinessStatus(readiness.roomOperations.serverRunning, !readiness.roomOperations.serverRunning)}
-                actionLabel={readiness.roomOperations.serverRunning ? undefined : 'Start server'}
-                onAction={() => openTarget('control:live')}
-              />
-              <PreflightRow
-                label="Current assignments valid"
-                status={readinessStatus(readiness.roomOperations.currentAssignmentsValid, !readiness.roomOperations.currentAssignmentsValid)}
-                actionLabel={readiness.roomOperations.currentAssignmentsValid ? undefined : 'Review Match Plan'}
-                onAction={() => openTarget('control:match-plan')}
-              />
-            </>
-          ) : (
-            <PreflightRow
-              label="Browser room scoring"
-              status="unknown"
-              actionLabel="Optional"
+              label="Rooms configured"
+              status={readinessStatus(
+                readiness.roomOperations.roomsConfigured,
+                !readiness.roomOperations.roomsConfigured,
+              )}
+              actionLabel={readiness.roomOperations.roomsConfigured ? undefined : 'Set up rooms'}
               onAction={() => openTarget('control:rooms')}
             />
-          )}
-        </DialogContent>
-        <DialogActions>
-          {readiness.coreReady && !readiness.roomOperationsEnabled && (
-            <Button onClick={() => openTarget('games')}>Open Games</Button>
-          )}
-          <Button onClick={onClose}>Done</Button>
-        </DialogActions>
-      </Dialog>
-    </>
+            <PreflightRow
+              label="Match Plan configured"
+              status={readinessStatus(
+                readiness.roomOperations.matchPlanConfigured,
+                !readiness.roomOperations.matchPlanConfigured,
+              )}
+              actionLabel={readiness.roomOperations.matchPlanConfigured ? undefined : 'Open Match Plan'}
+              onAction={() => openTarget('control:match-plan')}
+            />
+            <PreflightRow
+              label="Tournament Server running"
+              status={readinessStatus(readiness.roomOperations.serverRunning, !readiness.roomOperations.serverRunning)}
+              actionLabel={readiness.roomOperations.serverRunning ? undefined : 'Start server'}
+              onAction={() => openTarget('control:live')}
+            />
+            <PreflightRow
+              label="Current assignments valid"
+              status={readinessStatus(
+                readiness.roomOperations.currentAssignmentsValid,
+                !readiness.roomOperations.currentAssignmentsValid,
+              )}
+              actionLabel={readiness.roomOperations.currentAssignmentsValid ? undefined : 'Review Match Plan'}
+              onAction={() => openTarget('control:match-plan')}
+            />
+          </>
+        ) : (
+          <PreflightRow
+            label="Browser room scoring"
+            status="unknown"
+            actionLabel="Optional"
+            onAction={() => openTarget('control:rooms')}
+          />
+        )}
+      </DialogContent>
+      <DialogActions>
+        {readiness.coreReady && !readiness.roomOperationsEnabled && (
+          <Button onClick={() => openTarget('games')}>Open Games</Button>
+        )}
+        <Button onClick={onClose}>Done</Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

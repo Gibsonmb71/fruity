@@ -186,7 +186,9 @@ export default function RoomsPage({
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<IConfirmState | null>(null);
   const [bulkPlan, setBulkPlan] = useState<{ mode: 'auto' | 'rebalance'; plan: IRebalancePlan } | null>(null);
-  const [assignmentUndo, setAssignmentUndo] = useState<{ snapshot: IRoomAssignmentSnapshot; label: string } | null>(null);
+  const [assignmentUndo, setAssignmentUndo] = useState<{ snapshot: IRoomAssignmentSnapshot; label: string } | null>(
+    null,
+  );
   const [scheduleError, setScheduleError] = useState('');
   const [roomMenu, setRoomMenu] = useState<{ room: TournamentRoom; anchor: HTMLElement } | null>(null);
   const [uncontrolledTab, setUncontrolledTab] = useState(ControlPages.Live);

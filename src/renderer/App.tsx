@@ -112,7 +112,9 @@ function TournamentEditor() {
       releasedRoundNumber: mgr.tournamentServerService.releasedRoundNumber,
       inboxCount: mgr.tournamentServerService.inbox.length,
       conflictCount: mgr.tournamentServerService.conflicts.length,
-      inboxScheduledMatchIds: mgr.tournamentServerService.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
+      inboxScheduledMatchIds: mgr.tournamentServerService.inbox
+        .map((item) => item.scheduledMatchId)
+        .filter(Boolean) as string[],
     });
     const next =
       saved ??
@@ -455,7 +457,12 @@ function QuickFindDialog({
               <ListItemText
                 primary={
                   <Box component="span" sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-                    <Typography component="span" variant="overline" color="primary.main" sx={{ fontSize: '0.62rem', lineHeight: 1 }}>
+                    <Typography
+                      component="span"
+                      variant="overline"
+                      color="primary.main"
+                      sx={{ fontSize: '0.62rem', lineHeight: 1 }}
+                    >
                       {item.category}
                     </Typography>
                     <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>

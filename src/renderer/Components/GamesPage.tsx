@@ -134,7 +134,9 @@ export default function GamesPage(props: IGamesPageProps) {
           onClick={() => setNeedsReview((current) => !current)}
           onDelete={needsReview ? () => setNeedsReview(false) : undefined}
           deleteIcon={needsReview ? undefined : undefined}
-          aria-label={needsReview ? `Clear Needs review filter, ${reviewCount} games` : `Show ${reviewCount} games needing review`}
+          aria-label={
+            needsReview ? `Clear Needs review filter, ${reviewCount} games` : `Show ${reviewCount} games needing review`
+          }
         />
       </Box>
       {!hasSchedule ? (
@@ -288,7 +290,15 @@ interface ISingleRoundProps {
 }
 
 function SingleRound(props: ISingleRoundProps) {
-  const { round, expanded: expandedProp, forceNumericDisplay, filterTeam, needsReview, initialRoundNumber, initialMatchId } = props;
+  const {
+    round,
+    expanded: expandedProp,
+    forceNumericDisplay,
+    filterTeam,
+    needsReview,
+    initialRoundNumber,
+    initialMatchId,
+  } = props;
   const tournManager = useContext(TournamentContext);
   const [expanded, setExpanded] = useState(expandedProp || initialRoundNumber === round.number);
   const canAddMatch = useMemo(() => tournManager.tournament.readyToAddMatches(), [tournManager]);

@@ -43,7 +43,10 @@ export function resolvePublicationReadiness(
     {
       id: 'game-data',
       status: statusForProblem(invalidMatches.length > 0, matches.length === 0),
-      text: invalidMatches.length > 0 ? `${invalidMatches.length} invalid game${invalidMatches.length === 1 ? '' : 's'}` : 'Game data valid',
+      text:
+        invalidMatches.length > 0
+          ? `${invalidMatches.length} invalid game${invalidMatches.length === 1 ? '' : 's'}`
+          : 'Game data valid',
     },
     {
       id: 'statistics',
@@ -64,7 +67,8 @@ export function resolvePublicationReadiness(
   }
 
   const completenessUnknown = !browserRoomScoringEnabled || scheduled.length === 0;
-  const completenessProblem = browserRoomScoringEnabled && scheduled.length > 0 && acceptedScheduled.length !== scheduled.length;
+  const completenessProblem =
+    browserRoomScoringEnabled && scheduled.length > 0 && acceptedScheduled.length !== scheduled.length;
   checks.push({
     id: 'completeness',
     status: statusForProblem(completenessProblem, completenessUnknown),
@@ -72,10 +76,10 @@ export function resolvePublicationReadiness(
       ? scheduled.length === 0
         ? 'Game completeness cannot be verified without a Match Plan'
         : completenessProblem
-          ? `${scheduled.length - acceptedScheduled.length} scheduled game${
-              scheduled.length - acceptedScheduled.length === 1 ? '' : 's'
-            } not accepted`
-          : 'All scheduled games are accepted'
+        ? `${scheduled.length - acceptedScheduled.length} scheduled game${
+            scheduled.length - acceptedScheduled.length === 1 ? '' : 's'
+          } not accepted`
+        : 'All scheduled games are accepted'
       : 'Game completeness cannot be verified automatically for manual entry',
   });
 
@@ -91,7 +95,7 @@ export function resolvePublicationReadiness(
   const status = checks.some((check) => check.status === 'problem')
     ? 'problem'
     : checks.some((check) => check.status === 'unknown')
-      ? 'unknown'
-      : 'verified';
+    ? 'unknown'
+    : 'verified';
   return { checks, status, applicableNaqt };
 }

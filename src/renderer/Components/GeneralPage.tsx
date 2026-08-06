@@ -119,7 +119,13 @@ function GameEntryPanel() {
         </Button>
       )}
       {mode === 'browser' && (
-        <Button size="small" variant="text" color="warning" sx={{ mt: 1 }} onClick={() => void changeMode('traditional')}>
+        <Button
+          size="small"
+          variant="text"
+          color="warning"
+          sx={{ mt: 1 }}
+          onClick={() => void changeMode('traditional')}
+        >
           Disable browser room scoring
         </Button>
       )}

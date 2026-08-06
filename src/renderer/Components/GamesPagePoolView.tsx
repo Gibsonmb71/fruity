@@ -52,7 +52,9 @@ function poolMatrixSeries(phase: Phase, pool: Pool, needsReview: boolean) {
   }
 
   for (let i = 1; i <= pool.roundRobins; i++) {
-    matrices.push(<PoolMatrix key={`${pool.name}_${i}`} phase={phase} pool={pool} nthRoundRobin={i} needsReview={needsReview} />);
+    matrices.push(
+      <PoolMatrix key={`${pool.name}_${i}`} phase={phase} pool={pool} nthRoundRobin={i} needsReview={needsReview} />,
+    );
   }
   return matrices;
 }

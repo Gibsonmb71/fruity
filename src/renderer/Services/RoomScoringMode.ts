@@ -44,10 +44,7 @@ export function checkBrowserRoomScoringDisable(
 }
 
 /** A small pure helper used by the UI to decide whether a clean server stop is needed. */
-export function shouldStopServerBeforeDisabling(
-  check: IRoomScoringDisableCheck,
-  serverRunning: boolean,
-): boolean {
+export function shouldStopServerBeforeDisabling(check: IRoomScoringDisableCheck, serverRunning: boolean): boolean {
   return check.canDisable && serverRunning;
 }
 

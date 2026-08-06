@@ -13,7 +13,10 @@ describe('Quick Find', () => {
       target: 'games',
       teamName: 'Ninety Six A',
     });
-    expect(items.find((item) => item.label === 'Round 1')?.navigation).toMatchObject({ roundNumber: 1, focus: 'round' });
+    expect(items.find((item) => item.label === 'Round 1')?.navigation).toMatchObject({
+      roundNumber: 1,
+      focus: 'round',
+    });
   });
 
   test('prioritizes a label match and limits results', () => {

@@ -110,7 +110,11 @@ export default function StatReportPage() {
         />
       </Box>
 
-      <PublicationReadiness readiness={publicationReadiness} detailsOpen={detailsOpen} onToggleDetails={() => setDetailsOpen((open) => !open)} />
+      <PublicationReadiness
+        readiness={publicationReadiness}
+        detailsOpen={detailsOpen}
+        onToggleDetails={() => setDetailsOpen((open) => !open)}
+      />
 
       <Stack
         direction={{ xs: 'column', md: 'row' }}
@@ -127,7 +131,12 @@ export default function StatReportPage() {
           ))}
         </Tabs>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-          <Button size="small" variant="outlined" endIcon={<MoreHoriz />} onClick={(event) => setScopeAnchor(event.currentTarget)}>
+          <Button
+            size="small"
+            variant="outlined"
+            endIcon={<MoreHoriz />}
+            onClick={(event) => setScopeAnchor(event.currentTarget)}
+          >
             Scope: {scopeButtonLabel}
           </Button>
           <Button
@@ -141,24 +150,56 @@ export default function StatReportPage() {
         </Stack>
       </Stack>
       <Menu anchorEl={scopeAnchor} open={scopeAnchor !== null} onClose={() => setScopeAnchor(null)}>
-        <MenuItem selected={scopeMode === 'all'} onClick={() => { setScopeMode('all'); setScopeAnchor(null); }}>
+        <MenuItem
+          selected={scopeMode === 'all'}
+          onClick={() => {
+            setScopeMode('all');
+            setScopeAnchor(null);
+          }}
+        >
           Entire tournament
         </MenuItem>
-        <MenuItem selected={scopeMode === 'prelim'} onClick={() => { setScopeMode('prelim'); setScopeAnchor(null); }}>
+        <MenuItem
+          selected={scopeMode === 'prelim'}
+          onClick={() => {
+            setScopeMode('prelim');
+            setScopeAnchor(null);
+          }}
+        >
           Preliminaries
         </MenuItem>
-        <MenuItem selected={scopeMode === 'playoffs'} onClick={() => { setScopeMode('playoffs'); setScopeAnchor(null); }}>
+        <MenuItem
+          selected={scopeMode === 'playoffs'}
+          onClick={() => {
+            setScopeMode('playoffs');
+            setScopeAnchor(null);
+          }}
+        >
           Playoffs and finals
         </MenuItem>
-        <MenuItem selected={scopeMode === 'selected'} onClick={() => { setScopeMode('selected'); setScopeAnchor(null); }}>
+        <MenuItem
+          selected={scopeMode === 'selected'}
+          onClick={() => {
+            setScopeMode('selected');
+            setScopeAnchor(null);
+          }}
+        >
           Custom stage selection
         </MenuItem>
-        {scopeMode === 'selected' && reportPages.map((phase) => (
-          <MenuItem key={phase.code} onClick={() => setSelectedPhaseCodes((codes) => codes.includes(phase.code) ? codes.filter((code) => code !== phase.code) : [...codes, phase.code])}>
-            <Checkbox checked={selectedPhaseCodes.includes(phase.code)} size="small" />
-            <ListItemText primary={phase.name} />
-          </MenuItem>
-        ))}
+        {scopeMode === 'selected' &&
+          reportPages.map((phase) => (
+            <MenuItem
+              key={phase.code}
+              onClick={() =>
+                setSelectedPhaseCodes((codes) =>
+                  codes.includes(phase.code) ? codes.filter((code) => code !== phase.code) : [...codes, phase.code],
+                )
+              }
+            >
+              <Checkbox checked={selectedPhaseCodes.includes(phase.code)} size="small" />
+              <ListItemText primary={phase.name} />
+            </MenuItem>
+          ))}
         {canIncludeCarryover && (
           <MenuItem onClick={() => setIncludeCarryover((included) => !included)}>
             <Checkbox checked={includeCarryover} size="small" />

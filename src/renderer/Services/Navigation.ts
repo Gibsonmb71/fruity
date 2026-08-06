@@ -24,9 +24,6 @@ export interface INavigationIntent {
 /** Metadata accepted by helpers before the destination is attached. */
 export type INavigationPayload = Omit<INavigationIntent, 'target'>;
 
-export function createNavigationIntent(
-  target: ReadinessTarget,
-  payload: INavigationPayload = {},
-): INavigationIntent {
+export function createNavigationIntent(target: ReadinessTarget, payload: INavigationPayload = {}): INavigationIntent {
   return { target, ...payload };
 }

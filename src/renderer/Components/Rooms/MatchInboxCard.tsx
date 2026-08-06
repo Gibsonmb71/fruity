@@ -149,7 +149,8 @@ export default function MatchInboxCard({
     const selector = navigation.scheduledMatchId
       ? `[data-inbox-scheduled-match-id="${navigation.scheduledMatchId}"]`
       : '[data-inbox-session-id]';
-    const target = cardRef.current.querySelector<HTMLElement>(selector) ?? cardRef.current.querySelector<HTMLElement>('button');
+    const target =
+      cardRef.current.querySelector<HTMLElement>(selector) ?? cardRef.current.querySelector<HTMLElement>('button');
     target?.scrollIntoView({ block: 'center' });
     target?.focus({ preventScroll: true });
     onNavigationHandled?.();
