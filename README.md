@@ -3,7 +3,7 @@
 </h1>
 
 <p align="center">
-  <strong>More than a stats app</strong>
+  <strong>More than a stats app.</strong>
 </p>
 
 <p align="center">
