@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import SessionStore, { SessionWriteError } from '../main/server/SessionStore';
+import SessionStore, { fingerprintFinal, SessionWriteError } from '../main/server/SessionStore';
 import { SessionDisplayState, SessionStatus, staleSessionThresholdMs } from '../main/server/ServerTypes';
 import { makeStandardModaqMatch, testTeamNames } from './TestFixtures';
 
@@ -140,6 +140,39 @@ describe('snapshot update', () => {
   });
 });
 
+describe('recovery validation', () => {
+  test('canonicalizes final metadata and quarantines an unsafe live final flag', () => {
+    const { store } = makeStore();
+    const qbj = makeStandardModaqMatch();
+    const diagnostics = store.restore([
+      {
+        id: 'recovery-session',
+        token: 'recovery-token',
+        roundNumber: 1,
+        leftTeam: testTeamNames[0],
+        rightTeam: testTeamNames[1],
+        createdAt: '2026-08-04T12:00:00.000Z',
+        lastSeenAt: '2026-08-04T12:00:01.000Z',
+        status: SessionStatus.Playing,
+        latestQbj: qbj,
+        finalReceived: true,
+        finalFingerprint: 'corrupt-fingerprint',
+        finalRevision: 0,
+      },
+    ]);
+
+    const restored = store.get('recovery-session');
+    expect(restored?.status).toBe(SessionStatus.Submitted);
+    expect(restored?.finalFingerprint).toBe(fingerprintFinal(qbj));
+    expect(restored?.finalRevision).toBe(1);
+    expect(diagnostics).toHaveLength(3);
+    expect(store.updateSnapshot('recovery-session', 'recovery-token', qbj)).toMatchObject({
+      ok: false,
+      error: SessionWriteError.FinalAwaitingReview,
+    });
+  });
+});
+
 describe('final transition', () => {
   test('a final submission moves the session to submitted and is new', () => {
     const { store } = makeStore();
@@ -248,6 +281,33 @@ describe('accepted transition', () => {
 
     expect(session.status).toBe(SessionStatus.Rejected);
     expect(session.rejectionReason).toBe('wrong round');
+  });
+
+  test('a verdict for an earlier final cannot accept or reject a later retry', () => {
+    const { store } = makeStore();
+    const session = newSession(store);
+    const firstFinal = makeStandardModaqMatch();
+    store.submitFinal(session.id, session.token, firstFinal);
+    const firstRevision = session.finalRevision;
+    const firstFingerprint = session.finalFingerprint;
+    store.markRejected(session.id, 'correct and retry', {
+      finalRevision: firstRevision,
+      finalFingerprint: firstFingerprint,
+    });
+
+    store.submitFinal(session.id, session.token, { ...makeStandardModaqMatch(), marker: 'second-final' });
+
+    expect(
+      store.markAccepted(session.id, { finalRevision: firstRevision, finalFingerprint: firstFingerprint }),
+    ).toBeUndefined();
+    expect(
+      store.markRejected(session.id, 'stale rejection', {
+        finalRevision: firstRevision,
+        finalFingerprint: firstFingerprint,
+      }),
+    ).toBeUndefined();
+    expect(session.status).toBe(SessionStatus.Submitted);
+    expect(session.finalRevision).toBe(firstRevision + 1);
   });
 
   test('an accepted session refuses further snapshots', () => {

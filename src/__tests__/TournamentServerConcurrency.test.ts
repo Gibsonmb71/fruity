@@ -60,4 +60,20 @@ describe('renderer server polling races', () => {
 
     expect(service.sessions.map((session) => session.sessionId)).toEqual(['newer']);
   });
+
+  test('an in-flight presence response cannot repopulate a replacement tournament', async () => {
+    const older = deferred<Array<{ roomId: string; connected: boolean }>>();
+    const invoke = vi.fn().mockImplementation(() => older.promise);
+    (global as any).window = {
+      electron: { ipcRenderer: { invoke, sendMessage: () => undefined } },
+    };
+
+    const service = new TournamentServerService(makeTestTournament());
+    const refresh = service.refreshPresence();
+    service.reset();
+    older.resolve([{ roomId: 'old-room', connected: true }]);
+    await refresh;
+
+    expect(service.roomPresence).toEqual([]);
+  });
 });

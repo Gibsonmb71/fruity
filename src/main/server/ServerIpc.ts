@@ -156,8 +156,8 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
   ipcMain.on(IpcRendToMain.TournamentServerSubmissionVerdict, (_event: IpcMainEvent, verdict: ISubmissionVerdict) => {
     if (!server || !verdict?.sessionId) return;
     if (verdict.tournamentKey && server.getStatus().tournamentKey !== verdict.tournamentKey) return;
-    if (verdict.accepted) server.acceptSession(verdict.sessionId);
-    else server.rejectSession(verdict.sessionId, verdict.reason);
+    if (verdict.accepted) server.acceptSession(verdict.sessionId, verdict);
+    else server.rejectSession(verdict.sessionId, verdict.reason, verdict);
   });
 }
 

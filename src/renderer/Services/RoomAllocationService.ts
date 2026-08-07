@@ -454,7 +454,7 @@ export function allocateRound(
   }
 
   for (const match of sortedMatches(matches)) {
-    if (match.roomAssignmentLocked || isLifecycleFrozen(match)) {
+    if (match.roomAssignmentLocked || isLifecycleFrozen(match) || match.quarantined) {
       if (!assignments.some((assignment) => assignment.matchId === match.id)) preserve(match, 'frozen');
     }
   }
@@ -475,7 +475,7 @@ export function allocateRound(
 
   for (const match of sortedMatches(matches)) {
     const eligibility = getEligibility(match);
-    if (!eligibility || match.status === ScheduledMatchStatus.Cancelled) continue;
+    if (!eligibility || match.status === ScheduledMatchStatus.Cancelled || match.quarantined) continue;
     if (assignments.some((assignment) => assignment.matchId === match.id)) continue;
 
     const room = candidateRooms(match, eligibility, preferenceFor(preferences, match.id), takenRoomIds)[0];
@@ -641,6 +641,7 @@ export function applyRebalance(tournament: Tournament, plan: IRebalancePlan): IR
     if (
       match.roomAssignmentLocked ||
       isLifecycleFrozen(match) ||
+      (match.quarantined && change.toRoomId !== undefined) ||
       (match.status === ScheduledMatchStatus.Cancelled && change.toRoomId !== undefined)
     ) {
       issues.push(error(`${match.describe()} is no longer movable.`, [match.id]));
@@ -725,7 +726,7 @@ export function planAutoAssignUnassigned(tournament: Tournament, roundNumbers: n
         .map((match) => match.roomId as string),
     );
     const unassigned = sortedMatches(matches).filter(
-      (match) => !match.roomId && match.status !== ScheduledMatchStatus.Cancelled,
+      (match) => !match.roomId && match.status !== ScheduledMatchStatus.Cancelled && !match.quarantined,
     );
 
     for (const match of unassigned) {
@@ -837,6 +838,13 @@ export function planSwap(tournament: Tournament, matchId: string, targetRoomId: 
   if (match.roomAssignmentLocked) {
     return { kind: 'illegal', issues: [error('This room assignment is locked.', [match.id])], changes: [] };
   }
+  if (match.quarantined) {
+    return {
+      kind: 'illegal',
+      issues: [error('This scheduled match is quarantined and needs director review.', [match.id])],
+      changes: [],
+    };
+  }
 
   const eligibility = resolveEligibleRooms(match, tournament);
   if (!eligibility.eligibleRooms.some((room) => room.id === targetRoomId)) {
@@ -858,7 +866,7 @@ export function planSwap(tournament: Tournament, matchId: string, targetRoomId: 
       changes: [{ matchId: match.id, fromRoomId: match.roomId, toRoomId: targetRoomId }],
     };
   }
-  if (occupant.roomAssignmentLocked || isLifecycleFrozen(occupant)) {
+  if (occupant.roomAssignmentLocked || isLifecycleFrozen(occupant) || occupant.quarantined) {
     return {
       kind: 'illegal',
       issues: [error(`${targetRoom.name} is occupied by a protected game.`, [match.id, occupant.id])],
@@ -958,6 +966,9 @@ export function assignRoom(
   }
   if (match.status === ScheduledMatchStatus.Cancelled && roomId !== undefined) {
     return [error('Historical or cancelled games cannot be reassigned.', [match.id])];
+  }
+  if (match.quarantined && roomId !== undefined) {
+    return [error('This scheduled match is quarantined and needs director review.', [match.id])];
   }
   if (match.roomAssignmentLocked && !options.unlock && roomId !== match.roomId) {
     return [error('This room assignment is locked.', [match.id])];

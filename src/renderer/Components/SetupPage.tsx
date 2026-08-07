@@ -329,6 +329,8 @@ export default function SetupPage({ section, onSectionChange, onNavigateTarget }
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    releaseAllowed:
+      service.currentRoundNumber !== null && service.canReleaseRound(service.currentRoundNumber).canRelease,
     inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
     roomPresence: service.roomPresence.map((presence) => ({

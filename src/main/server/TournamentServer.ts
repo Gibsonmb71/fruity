@@ -16,6 +16,7 @@ import {
   IRoomPresence,
   IServerStatus,
   ISessionSummary,
+  ISubmissionVerdict,
   ITournamentServerRecovery,
   ITournamentSnapshot,
   defaultServerPort,
@@ -394,6 +395,8 @@ export default class TournamentServer {
         submittedAt: session.lastSeenAt,
         tournamentKey: session.tournamentKey,
         sessionStatus: session.status,
+        finalRevision: session.finalRevision,
+        finalFingerprint: session.finalFingerprint,
       }));
     if (changed) this.notifySessionsChanged();
     return pending;
@@ -472,13 +475,17 @@ export default class TournamentServer {
   }
 
   /** Mark a session accepted, after the statskeeper approved the match in the Match Inbox */
-  acceptSession(sessionId: string) {
-    if (this.sessions.markAccepted(sessionId)) this.notifySessionsChanged();
+  acceptSession(sessionId: string, expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>) {
+    if (this.sessions.markAccepted(sessionId, expectedFinal)) this.notifySessionsChanged();
   }
 
   /** Mark a session rejected */
-  rejectSession(sessionId: string, reason?: string) {
-    if (this.sessions.markRejected(sessionId, reason)) this.notifySessionsChanged();
+  rejectSession(
+    sessionId: string,
+    reason?: string,
+    expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>,
+  ) {
+    if (this.sessions.markRejected(sessionId, reason, expectedFinal)) this.notifySessionsChanged();
   }
 
   private notifySessionsChanged() {
@@ -629,6 +636,8 @@ export default class TournamentServer {
       submittedAt: session.lastSeenAt,
       tournamentKey: session.tournamentKey,
       sessionStatus: session.status,
+      finalRevision: session.finalRevision,
+      finalFingerprint: session.finalFingerprint,
     };
     try {
       this.options.onFinalSubmission(submission);

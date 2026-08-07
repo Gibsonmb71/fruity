@@ -35,6 +35,9 @@ export interface IInboxItem {
   scheduledMatchId?: string;
   roomId?: string;
   roomName?: string;
+  /** The exact server final this inbox item represents, for stale-verdict protection. */
+  finalRevision?: number;
+  finalFingerprint?: string;
   /** Result of running the submission through the shared QBJ importer */
   importResult: MatchImportResult;
 }
@@ -94,7 +97,7 @@ export default class TournamentServerService {
   conflicts: IMatchSubmissionConflict[] = [];
 
   /** Acceptances are not acknowledged to the server until the .yft replacement is durable. */
-  private pendingDurableAcceptances = new Set<string>();
+  private pendingDurableAcceptances = new Map<string, ISubmissionVerdict>();
 
   /** Rejections are also held until the NeedsAttention state is durable, so a crash cannot leave a
    * recovery session rejected while the last saved .yft still says Submitted. */
@@ -150,7 +153,7 @@ export default class TournamentServerService {
     this.dataChangedReactCallback();
   }
 
-  setTournament(tournament: Tournament) {
+  setTournament(tournament: Tournament): boolean {
     this.tournament = tournament;
     this.inbox = [];
     this.conflicts = [];
@@ -159,7 +162,7 @@ export default class TournamentServerService {
     this.pendingDurableVerdicts.clear();
     // Push even while stopped so the main process can scope any recovery data before the next
     // start. This does not bind a port or make the optional server visible on the LAN.
-    this.pushTournamentSnapshot();
+    return this.pushTournamentSnapshot();
   }
 
   /**
@@ -325,12 +328,7 @@ export default class TournamentServerService {
         if (scheduled.roundNumber === roundNumber && scheduled.status === ScheduledMatchStatus.Scheduled) {
           const transition = transitionScheduledMatch(scheduled, ScheduledMatchStatus.Ready);
           if (!transition.ok) {
-            this.roundOverride = previousRoundOverride;
-            this.tournament.releasedRoundNumber = previousReleasedRound;
-            this.tournament.scheduledMatches.forEach((candidate) => {
-              const status = previousStatuses.get(candidate.id);
-              if (status) candidate.status = status;
-            });
+            this.restoreRoundOperation(previousRoundOverride, previousReleasedRound, previousStatuses);
             this.lastError = transition.reason;
             this.dataChangedReactCallback();
             return false;
@@ -338,7 +336,9 @@ export default class TournamentServerService {
         }
       }
     }
-    if (this.status.running) this.pushTournamentSnapshot();
+    if (this.status.running && !this.pushTournamentSnapshot()) {
+      return this.rollbackAfterSnapshotFailure(previousRoundOverride, previousReleasedRound, previousStatuses);
+    }
     this.onScheduleChanged();
     this.dataChangedReactCallback();
     return true;
@@ -351,6 +351,37 @@ export default class TournamentServerService {
   /** Release one round to rooms without touching accepted history. */
   canReleaseRound(roundNumber: number) {
     return checkTournamentRoundRelease(this.tournament, roundNumber);
+  }
+
+  private restoreRoundOperation(
+    roundOverride: number | null,
+    releasedRoundNumber: number | null,
+    statuses: Map<string, ScheduledMatchStatus>,
+  ) {
+    this.roundOverride = roundOverride;
+    this.tournament.releasedRoundNumber = releasedRoundNumber;
+    this.tournament.scheduledMatches.forEach((scheduled) => {
+      const status = statuses.get(scheduled.id);
+      if (status !== undefined) scheduled.status = status;
+    });
+  }
+
+  private rollbackAfterSnapshotFailure(
+    previousRoundOverride: number | null,
+    previousReleasedRound: number | null,
+    previousStatuses: Map<string, ScheduledMatchStatus>,
+  ): false {
+    const snapshotError = this.lastError || 'The Tournament Server did not accept the schedule update.';
+    this.restoreRoundOperation(previousRoundOverride, previousReleasedRound, previousStatuses);
+    // A send can fail after the private snapshot was delivered but before one of the public
+    // projections was sent. Best-effortly publish the rolled-back state so the main process cannot
+    // retain the newly released round when the renderer rejected the operation.
+    const rollbackSynced = !this.status.running || this.pushTournamentSnapshot();
+    this.lastError = rollbackSynced
+      ? snapshotError
+      : `${snapshotError} The rolled-back schedule could not be sent to the Tournament Server.`;
+    this.dataChangedReactCallback();
+    return false;
   }
 
   releaseRound(roundNumber: number): boolean {
@@ -372,37 +403,58 @@ export default class TournamentServerService {
       if (scheduled.roundNumber === roundNumber && scheduled.status === ScheduledMatchStatus.Scheduled) {
         const transition = transitionScheduledMatch(scheduled, ScheduledMatchStatus.Ready);
         if (!transition.ok) {
-          this.tournament.releasedRoundNumber = previousReleasedRound;
-          this.roundOverride = previousRoundOverride;
-          this.tournament.scheduledMatches.forEach((candidate) => {
-            const status = previousStatuses.get(candidate.id);
-            if (status) candidate.status = status;
-          });
+          this.restoreRoundOperation(previousRoundOverride, previousReleasedRound, previousStatuses);
           this.lastError = transition.reason;
           this.dataChangedReactCallback();
           return false;
         }
       }
     }
-    this.pushTournamentSnapshot();
+    if (this.status.running && !this.pushTournamentSnapshot()) {
+      return this.rollbackAfterSnapshotFailure(previousRoundOverride, previousReleasedRound, previousStatuses);
+    }
     this.onScheduleChanged();
     this.dataChangedReactCallback();
     return true;
   }
 
-  clearReleasedRound() {
+  clearReleasedRound(): boolean {
+    const previousReleasedRound = this.tournament.releasedRoundNumber;
+    const previousRoundOverride = this.roundOverride;
     this.tournament.releasedRoundNumber = null;
     this.roundOverride = null;
-    this.pushTournamentSnapshot();
+    if (this.status.running && !this.pushTournamentSnapshot()) {
+      const snapshotError = this.lastError || 'The Tournament Server did not accept the round reset.';
+      this.tournament.releasedRoundNumber = previousReleasedRound;
+      this.roundOverride = previousRoundOverride;
+      const rollbackSynced = this.pushTournamentSnapshot();
+      this.lastError = rollbackSynced
+        ? snapshotError
+        : `${snapshotError} The rolled-back round state could not be sent to the Tournament Server.`;
+      this.dataChangedReactCallback();
+      return false;
+    }
     this.onScheduleChanged();
     this.dataChangedReactCallback();
+    return true;
   }
 
-  setAutoReleaseNextRound(enabled: boolean) {
+  setAutoReleaseNextRound(enabled: boolean): boolean {
+    const previous = this.tournament.autoReleaseNextRound;
     this.tournament.autoReleaseNextRound = enabled;
-    this.pushTournamentSnapshot();
+    if (this.status.running && !this.pushTournamentSnapshot()) {
+      const snapshotError = this.lastError || 'The Tournament Server did not accept the auto-release setting.';
+      this.tournament.autoReleaseNextRound = previous;
+      const rollbackSynced = this.pushTournamentSnapshot();
+      this.lastError = rollbackSynced
+        ? snapshotError
+        : `${snapshotError} The rolled-back auto-release state could not be sent to the Tournament Server.`;
+      this.dataChangedReactCallback();
+      return false;
+    }
     this.onScheduleChanged();
     this.dataChangedReactCallback();
+    return true;
   }
 
   /** Candidate next round for the manual release control. */
@@ -453,34 +505,56 @@ export default class TournamentServerService {
    * Only moves a game forward from waiting. A game already submitted or accepted must not be dragged
    * back to playing by a stale request.
    */
-  handleSessionStarted(scheduledMatchId: string) {
+  handleSessionStarted(scheduledMatchId: string): boolean {
     const scheduled = this.findScheduledMatch(scheduledMatchId);
-    if (!scheduled) return;
+    if (!scheduled) return false;
     if (
       scheduled.status === ScheduledMatchStatus.Scheduled ||
       scheduled.status === ScheduledMatchStatus.Ready ||
       scheduled.status === ScheduledMatchStatus.NeedsAttention
     ) {
+      const previousStatus = scheduled.status;
       const transition = transitionScheduledMatch(scheduled, ScheduledMatchStatus.Playing);
-      if (!transition.ok) return;
-      this.pushTournamentSnapshot();
+      if (!transition.ok) return false;
+      if (!this.pushTournamentSnapshot()) {
+        const snapshotError = this.lastError || 'The Tournament Server did not accept the room start.';
+        scheduled.status = previousStatus;
+        const rollbackSynced = this.pushTournamentSnapshot();
+        this.lastError = rollbackSynced
+          ? snapshotError
+          : `${snapshotError} The rolled-back room state could not be sent to the Tournament Server.`;
+        this.dataChangedReactCallback();
+        return false;
+      }
       this.onScheduleChanged();
       this.dataChangedReactCallback();
+      return true;
     }
+    return false;
   }
 
   /** Send the current tournament projection to the main process so the server can serve it */
-  pushTournamentSnapshot() {
+  pushTournamentSnapshot(): boolean {
     // TournamentManager is also exercised in Node-only tests where the Electron preload bridge
     // does not exist yet. The real renderer always has window.electron.
-    if (typeof window === 'undefined' || !window.electron) return;
-    window.electron.ipcRenderer.sendMessage(IpcRendToMain.TournamentServerSetSnapshot, this.buildTournamentSnapshot());
-    const publicSnapshot = this.buildPublicLiveSnapshot();
-    window.electron.ipcRenderer.sendMessage(IpcRendToMain.TournamentServerSetPublicLiveSnapshot, publicSnapshot);
-    window.electron.ipcRenderer.sendMessage(
-      IpcRendToMain.TournamentServerSetPublicPairingsSnapshot,
-      this.buildPublicPairingsSnapshot(),
-    );
+    if (typeof window === 'undefined' || !window.electron) return true;
+    try {
+      window.electron.ipcRenderer.sendMessage(
+        IpcRendToMain.TournamentServerSetSnapshot,
+        this.buildTournamentSnapshot(),
+      );
+      const publicSnapshot = this.buildPublicLiveSnapshot();
+      window.electron.ipcRenderer.sendMessage(IpcRendToMain.TournamentServerSetPublicLiveSnapshot, publicSnapshot);
+      window.electron.ipcRenderer.sendMessage(
+        IpcRendToMain.TournamentServerSetPublicPairingsSnapshot,
+        this.buildPublicPairingsSnapshot(),
+      );
+      return true;
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+      return false;
+    }
   }
 
   /** Build the deliberately reduced public view. Disabled tournaments return null and expose no data. */
@@ -501,7 +575,9 @@ export default class TournamentServerService {
     const portToUse = port ?? this.requestedPort;
     this.requestedPort = portToUse;
     // Give the server the tournament before it can take any requests.
-    this.pushTournamentSnapshot();
+    if (!this.pushTournamentSnapshot()) {
+      return { ...this.status, running: false, errorMessage: this.lastError };
+    }
     try {
       const status = (await window.electron.ipcRenderer.invoke(
         IpcBidirectional.TournamentServerStart,
@@ -510,7 +586,9 @@ export default class TournamentServerService {
       if (!status.tournamentKey || status.tournamentKey === this.recoveryKey()) {
         this.status = status;
         this.lastError = status.errorMessage ?? '';
-        if (status.running) this.pushTournamentSnapshot();
+        if (status.running && !this.pushTournamentSnapshot()) {
+          return { ...status, errorMessage: this.lastError };
+        }
       }
       this.dataChangedReactCallback();
       return status;
@@ -544,7 +622,8 @@ export default class TournamentServerService {
         IpcBidirectional.TournamentServerGetStatus,
       )) as IServerStatus;
       if (generation !== this.currentPoll('status')) return;
-      if (!nextStatus.tournamentKey || nextStatus.tournamentKey === this.recoveryKey()) this.status = nextStatus;
+      if (nextStatus.tournamentKey && nextStatus.tournamentKey !== this.recoveryKey()) return;
+      this.status = nextStatus;
       const pending = (await window.electron.ipcRenderer.invoke(
         IpcBidirectional.TournamentServerGetPendingSubmissions,
       )) as IMatchSubmission[];
@@ -664,6 +743,17 @@ export default class TournamentServerService {
     if (submission.tournamentKey && submission.tournamentKey !== this.recoveryKey()) return;
     const scheduled = this.findScheduledMatch(submission.scheduledMatchId);
 
+    // A result that names a scheduled game is never allowed to fall back to the generic/manual
+    // import path when that game has been deleted or replaced. Keep it visible as a fatal inbox
+    // item so the director can account for the stale room result without creating an unlinked
+    // official Match.
+    if (submission.scheduledMatchId && !scheduled) {
+      const invalid = new MatchImportResult(TournamentServerService.makeSourceLabel(submission));
+      invalid.markFatal('The scheduled game no longer exists in this tournament; review the room result manually.');
+      this.replaceInboxItem(submission, invalid);
+      return;
+    }
+
     // A game the tournament has already recorded must not be quietly overwritten. Keep both
     // payloads and surface the collision instead: two results for one game means something went
     // wrong in the room and a human has to decide which is right.
@@ -672,7 +762,7 @@ export default class TournamentServerService {
       // recovery write. The accepted scheduled link is proof that this exact session's result is
       // already durable in the tournament; acknowledge it without creating a second inbox item.
       if (submission.sessionStatus === SessionStatus.Submitted) {
-        this.pendingDurableAcceptances.add(submission.sessionId);
+        this.pendingDurableAcceptances.set(submission.sessionId, this.verdictForSubmission(submission, true));
         this.confirmDurableAcceptance(submission.sessionId);
         return;
       }
@@ -702,20 +792,25 @@ export default class TournamentServerService {
         // Case D: the durable .yft already records the rejection/review state, but the transient
         // server still has the old Submitted session. A stale final must not be accepted again;
         // close that session so the room can start a fresh retry against NeedsAttention.
-        this.sendVerdict({
-          sessionId: submission.sessionId,
-          accepted: false,
-          reason: 'The tournament already recorded this result as needing attention; please retry the game.',
-          tournamentKey: this.recoveryKey(),
-        });
+        const verdictSent = this.sendVerdict(
+          this.verdictForSubmission(
+            submission,
+            false,
+            'The tournament already recorded this result as needing attention; please retry the game.',
+          ),
+        );
+        if (!verdictSent) {
+          this.lastError = this.lastError || 'The stale room verdict could not be reconciled yet.';
+        }
         return;
       }
       if (
         scheduled.roundNumber !== submission.roundNumber ||
-        !scheduled.matchesTeams(submission.leftTeam, submission.rightTeam)
+        !scheduled.matchesTeams(submission.leftTeam, submission.rightTeam) ||
+        (submission.roomId !== undefined && scheduled.roomId !== submission.roomId)
       ) {
         const invalid = new MatchImportResult(TournamentServerService.makeSourceLabel(submission));
-        invalid.markFatal('The submitted teams or round do not match the scheduled game.');
+        invalid.markFatal('The submitted room, teams, or round do not match the scheduled game.');
         this.replaceInboxItem(submission, invalid);
         return;
       }
@@ -747,7 +842,12 @@ export default class TournamentServerService {
     }
 
     this.replaceInboxItem(submission, importResult);
-    this.pushTournamentSnapshot();
+    if (!this.pushTournamentSnapshot()) {
+      // Keep the inbox item and the recovery-backed server final; a later poll or user action can
+      // retry the projection without losing the reviewable result.
+      this.onScheduleChanged();
+      return;
+    }
     this.onScheduleChanged();
     this.dataChangedReactCallback();
   }
@@ -765,6 +865,8 @@ export default class TournamentServerService {
         roomName: submission.roomId
           ? this.tournament.rooms.find((room) => room.id === submission.roomId)?.name
           : undefined,
+        finalRevision: submission.finalRevision,
+        finalFingerprint: submission.finalFingerprint,
         importResult,
       },
       ...this.inbox.filter((item) => item.sessionId !== submission.sessionId),
@@ -779,6 +881,22 @@ export default class TournamentServerService {
    */
   static makeSourceLabel(submission: IMatchSubmission) {
     return `Room: ${submission.leftTeam} vs ${submission.rightTeam} (R${submission.roundNumber})`;
+  }
+
+  private verdictForSubmission(
+    source: { sessionId: string; finalRevision?: number; finalFingerprint?: string },
+    accepted: boolean,
+    reason?: string,
+  ): ISubmissionVerdict {
+    const verdict: ISubmissionVerdict = {
+      sessionId: source.sessionId,
+      accepted,
+      tournamentKey: this.recoveryKey(),
+    };
+    if (reason !== undefined) verdict.reason = reason;
+    if (source.finalRevision !== undefined) verdict.finalRevision = source.finalRevision;
+    if (source.finalFingerprint !== undefined) verdict.finalFingerprint = source.finalFingerprint;
+    return verdict;
   }
 
   findInboxItem(sessionId: string) {
@@ -827,8 +945,17 @@ export default class TournamentServerService {
     }
     if (
       scheduled &&
-      (scheduled.roundNumber !== item.roundNumber || !scheduled.matchesTeams(item.leftTeam, item.rightTeam))
+      (scheduled.roundNumber !== item.roundNumber ||
+        !scheduled.matchesTeams(item.leftTeam, item.rightTeam) ||
+        (item.roomId !== undefined && scheduled.roomId !== item.roomId))
     ) {
+      this.lastError = 'The scheduled assignment changed while this result was awaiting review.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    if (item.scheduledMatchId && !scheduled) {
+      this.lastError = 'The scheduled game no longer exists; this result cannot be accepted automatically.';
+      this.dataChangedReactCallback();
       return false;
     }
     if (scheduled && scheduled.status !== ScheduledMatchStatus.Submitted) return false;
@@ -905,7 +1032,7 @@ export default class TournamentServerService {
     }
 
     this.inbox = this.inbox.filter((i) => i.sessionId !== sessionId);
-    this.pendingDurableAcceptances.add(sessionId);
+    this.pendingDurableAcceptances.set(sessionId, this.verdictForSubmission(item, true));
     try {
       this.onMatchAccepted(importResult);
       this.maybeAutoReleaseNextRound();
@@ -915,7 +1042,12 @@ export default class TournamentServerService {
       this.lastError = errorMessage(error);
     }
     // The accepted result may have made the next round current, so rooms need to hear about it.
-    this.pushTournamentSnapshot();
+    const snapshotSynced = this.pushTournamentSnapshot();
+    if (!snapshotSynced) {
+      // The local commit and pending durable verdict remain authoritative until the next retry; do
+      // not undo an accepted Match merely because the optional live projection IPC failed.
+      this.onScheduleChanged();
+    }
     this.dataChangedReactCallback();
     return true;
   }
@@ -934,13 +1066,13 @@ export default class TournamentServerService {
     }
 
     this.inbox = this.inbox.filter((i) => i.sessionId !== sessionId);
-    this.pendingDurableVerdicts.set(sessionId, {
-      sessionId,
-      accepted: false,
-      reason,
-      tournamentKey: this.recoveryKey(),
-    });
-    this.pushTournamentSnapshot();
+    this.pendingDurableVerdicts.set(sessionId, this.verdictForSubmission(item, false, reason));
+    const snapshotSynced = this.pushTournamentSnapshot();
+    if (!snapshotSynced) {
+      // The rejection remains pending until the .yft save and a later projection/verdict retry.
+      this.lastError =
+        this.lastError || 'The Tournament Server projection is unavailable; the rejection remains pending.';
+    }
     this.onScheduleChanged();
     this.dataChangedReactCallback();
     return true;
@@ -973,8 +1105,9 @@ export default class TournamentServerService {
       if (this.sendVerdict(verdict)) this.pendingDurableVerdicts.delete(sessionId);
       return;
     }
-    if (!this.pendingDurableAcceptances.has(sessionId)) return;
-    if (this.sendVerdict({ sessionId, accepted: true, tournamentKey: this.recoveryKey() })) {
+    const pending = this.pendingDurableAcceptances.get(sessionId);
+    if (!pending) return;
+    if (this.sendVerdict(pending)) {
       this.pendingDurableAcceptances.delete(sessionId);
       this.pendingDurableVerdicts.delete(sessionId);
     }
@@ -989,7 +1122,7 @@ export default class TournamentServerService {
 
   /** Flush all result verdicts whose official schedule state is covered by the last durable YFT save. */
   confirmDurableDecisions() {
-    for (const sessionId of Array.from(this.pendingDurableAcceptances)) this.confirmDurableAcceptance(sessionId);
+    for (const sessionId of Array.from(this.pendingDurableAcceptances.keys())) this.confirmDurableAcceptance(sessionId);
     for (const sessionId of Array.from(this.pendingDurableVerdicts.keys())) {
       this.confirmDurableDecision(sessionId);
     }
@@ -997,11 +1130,18 @@ export default class TournamentServerService {
 
   /** Compatibility alias for callers that only need to flush accepted Matches. */
   confirmDurableAcceptances() {
-    for (const sessionId of Array.from(this.pendingDurableAcceptances)) this.confirmDurableAcceptance(sessionId);
+    for (const sessionId of Array.from(this.pendingDurableAcceptances.keys())) this.confirmDurableAcceptance(sessionId);
   }
 
   /** Drop everything, e.g. when a different tournament file is opened */
   reset() {
+    // Presence/help responses do not carry a tournament key. Advance every outstanding poll
+    // generation so a response started for the previous document cannot populate the new one after
+    // a switch. Keep the counters monotonic: clearing them could let an old generation numerically
+    // collide with the first request for the replacement tournament.
+    for (const [kind, generation] of this.pollGenerations) {
+      this.pollGenerations.set(kind, generation + 1);
+    }
     this.inbox = [];
     this.sessions = [];
     this.conflicts = [];
@@ -1014,7 +1154,9 @@ export default class TournamentServerService {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'The tournament server operation failed.';
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return 'The tournament server operation failed.';
 }
 
 export const TournamentServerContext = createContext<TournamentServerService | null>(null);

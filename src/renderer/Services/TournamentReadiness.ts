@@ -70,6 +70,8 @@ export interface IReadinessServerState {
   releasedRoundNumber: number | null;
   inboxCount: number;
   conflictCount?: number;
+  /** Result of the authoritative release gate, when the caller has the server/service authority. */
+  releaseAllowed?: boolean;
   sessions?: IReadinessSession[];
   roomPresence?: Array<{ roomId: string; connected: boolean; readyDeviceCount?: number }>;
   inboxScheduledMatchIds?: string[];
@@ -668,9 +670,11 @@ export function resolveTournamentReadiness(
     state = 'round-in-progress';
   } else if (currentRoundNumber !== null && server?.releasedRoundNumber !== currentRoundNumber) {
     state = 'round-ready';
-    primaryAction = readinessAction('release-round', `Release Round ${currentRoundNumber}`, 'control:live', {
-      roundNumber: currentRoundNumber,
-    });
+    if (server?.releaseAllowed !== false) {
+      primaryAction = readinessAction('release-round', `Release Round ${currentRoundNumber}`, 'control:live', {
+        roundNumber: currentRoundNumber,
+      });
+    }
   } else if (currentRoundNumber !== null) {
     state = 'round-ready';
   }

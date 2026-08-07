@@ -260,6 +260,7 @@ export default function RoomsPage({
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    releaseAllowed: currentRound !== null && service.canReleaseRound(currentRound).canRelease,
     inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: activeSessions.map((session) => ({ roomId: session.roomId, status: session.status })),
     roomPresence: service.roomPresence.map((presence) => ({

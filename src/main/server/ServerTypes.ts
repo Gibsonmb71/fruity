@@ -547,6 +547,10 @@ export interface IMatchSubmission {
   tournamentKey?: string;
   /** Recovery status when a durable server session is being reconciled after restart. */
   sessionStatus?: SessionStatus;
+  /** Monotonic final revision used to reject a verdict for an earlier resubmission. */
+  finalRevision?: number;
+  /** Canonical final fingerprint used as a second guard against stale verdicts. */
+  finalFingerprint?: string;
 }
 
 /** Renderer's verdict on a submission */
@@ -556,6 +560,10 @@ export interface ISubmissionVerdict {
   reason?: string;
   /** Stable tournament identity prevents a delayed verdict from affecting a newly opened file. */
   tournamentKey?: string;
+  /** The final revision the director reviewed; stale decisions must not affect a later retry. */
+  finalRevision?: number;
+  /** Optional canonical fingerprint for an even stronger stale-decision check. */
+  finalFingerprint?: string;
 }
 
 // #endregion

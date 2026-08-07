@@ -186,7 +186,13 @@ describe('the full path from room submission to an accepted match', () => {
     service.confirmDurableAcceptances();
     expect(server.sessions.get(session.sessionId)?.status).toBe(SessionStatus.Accepted);
     expect(verdicts).toEqual([
-      { sessionId: session.sessionId, accepted: true, tournamentKey: tournament.operationalId },
+      {
+        sessionId: session.sessionId,
+        accepted: true,
+        tournamentKey: tournament.operationalId,
+        finalRevision: 1,
+        finalFingerprint: server.sessions.get(session.sessionId)?.finalFingerprint,
+      },
     ]);
   });
 
@@ -327,6 +333,50 @@ describe('the full path from room submission to an accepted match', () => {
         tournamentKey: tournament.operationalId,
       },
     ]);
+  });
+
+  test('a result for a deleted scheduled game stays unlinked and cannot be accepted as generic play', () => {
+    service.handleSubmission({
+      sessionId: 'stale-schedule-session',
+      roundNumber: 1,
+      leftTeam: testTeamNames[0],
+      rightTeam: testTeamNames[1],
+      scheduledMatchId: 'deleted-scheduled-match',
+      qbj: makeStandardModaqMatch(),
+      submittedAt: new Date().toISOString(),
+      tournamentKey: tournament.operationalId,
+      sessionStatus: SessionStatus.Submitted,
+    });
+
+    const item = service.inbox[0];
+    expect(item.importResult.status).toBe(ImportResultStatus.FatalErr);
+    expect(service.acceptSubmission('stale-schedule-session')).toBe(false);
+    expect(tournament.getRoundObjByNumber(1)?.matches).toHaveLength(0);
+  });
+
+  test('a result from the wrong room is reviewable but cannot be accepted against the assignment', () => {
+    const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1], 'assigned-scheduled-match');
+    scheduled.phaseCode = tournament.getPrelimPhase()?.code ?? '1';
+    scheduled.roomId = 'room-a';
+    scheduled.status = ScheduledMatchStatus.Playing;
+    tournament.scheduledMatches = [scheduled];
+
+    service.handleSubmission({
+      sessionId: 'wrong-room-session',
+      roundNumber: 1,
+      leftTeam: testTeamNames[0],
+      rightTeam: testTeamNames[1],
+      roomId: 'room-b',
+      scheduledMatchId: scheduled.id,
+      qbj: makeStandardModaqMatch(),
+      submittedAt: new Date().toISOString(),
+      tournamentKey: tournament.operationalId,
+      sessionStatus: SessionStatus.Submitted,
+    });
+
+    expect(service.inbox[0]?.importResult.status).toBe(ImportResultStatus.FatalErr);
+    expect(service.acceptSubmission('wrong-room-session')).toBe(false);
+    expect(scheduled.status).toBe(ScheduledMatchStatus.Playing);
   });
 
   test('live snapshots never create a match, no matter how many arrive', async () => {

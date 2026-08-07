@@ -347,7 +347,7 @@ export class TournamentManager {
     await this.commitLoadedTournament(loadResult.tournament, null, true, loadResult);
   }
 
-  private async parseYftFile(filePath: string, objFromFile: object, curYfVersion?: string): Promise<boolean> {
+  private async parseYftFile(filePath: string | null, objFromFile: object, curYfVersion?: string): Promise<boolean> {
     try {
       earlyYftFileConversions(objFromFile);
     } catch (err: unknown) {
@@ -532,6 +532,7 @@ export class TournamentManager {
     const parser = new FileParser(refTargets, this.tournament);
     parser.buildTypesByIdArrays(objectList);
     let numTeamsImported = 0;
+    const importErrors: string[] = [];
     const maxTeamsAllowed = this.tournament.getExpectedNumberOfTeams();
     let maxTeamsReached = false;
     for (const reg of registrationList) {
@@ -539,31 +540,37 @@ export class TournamentManager {
         maxTeamsReached = true;
         break;
       }
-      numTeamsImported += this.importSingleRegistrationObj(reg, parser);
+      numTeamsImported += this.importSingleRegistrationObj(reg, parser, importErrors);
     }
 
     if (numTeamsImported === 0) {
       this.openGenericModal(
         'Team Import',
-        `No teams were imported because no new teams were found or the maximum number of teams was reached.`,
+        `No teams were imported because no new teams were found or the maximum number of teams was reached.${
+          importErrors.length > 0 ? ` ${importErrors[0]}` : ''
+        }`,
       );
     } else {
       this.openGenericModal(
         'Team Import',
         `Imported ${numTeamsImported} teams.${
           maxTeamsReached ? ' Not all teams were imported because the maximum number teams was reached.' : ''
-        }`,
+        }${importErrors.length > 0 ? ` ${importErrors.length} registration(s) could not be imported.` : ''}`,
       );
     }
     this.markFileDirty();
   }
 
-  private importSingleRegistrationObj(registration: IQbjRegistration, parser: FileParser) {
+  private importSingleRegistrationObj(registration: IQbjRegistration, parser: FileParser, importErrors: string[] = []) {
     let registrationFromFile;
     try {
       registrationFromFile = parser.parseRegistration(registration as IIndeterminateQbj);
-    } catch {
-      // TODO: track errors?
+    } catch (error: unknown) {
+      importErrors.push(
+        error instanceof Error && error.message
+          ? error.message
+          : 'A registration could not be parsed because its data was invalid.',
+      );
       return 0;
     }
     if (!registrationFromFile) return 0;
@@ -783,7 +790,9 @@ export class TournamentManager {
   async useRecoveredBackup() {
     if (!this.recoveredBackup) return;
     const recovered = this.recoveredBackup;
-    if (!(await this.parseYftFile(recovered.filePath, recovered.fileContents))) return;
+    // Parse the recovery candidate without adopting its former path. The path becomes active only
+    // when the automatic replacement below reports durable success.
+    if (!(await this.parseYftFile(null, recovered.fileContents))) return;
     // Recovery contents represent a separate, possibly newer document. Keep the active model
     // dirty until the primary replacement reports durable success, including when the backup had
     // no original path and therefore cannot be saved automatically yet.
@@ -915,7 +924,12 @@ export class TournamentManager {
     this.reportScope = null;
     // A different tournament means any pending room submissions are about the wrong thing.
     this.tournamentServerService.reset();
-    this.tournamentServerService.setTournament(this.tournament);
+    if (!this.tournamentServerService.setTournament(this.tournament)) {
+      this.makeToast(
+        this.tournamentServerService.lastError || 'The Tournament Server could not load the new tournament.',
+        'error',
+      );
+    }
   }
 
   /** Keep track of which view the user is on, so that they can leave the Teams page, then
@@ -1865,7 +1879,12 @@ export class TournamentManager {
     if (!doesntAffectFile) this.tournament.dataRevision += 1;
     // Keep both the room projection and the public read-only live projection current for every
     // accepted match, schedule edit, and persisted display-setting change.
-    this.tournamentServerService.pushTournamentSnapshot();
+    if (!this.tournamentServerService.pushTournamentSnapshot()) {
+      this.makeToast(
+        this.tournamentServerService.lastError || 'The Tournament Server projection could not be updated.',
+        'error',
+      );
+    }
     this.dataChangedReactCallback();
     if (doesntAffectFile) return;
 

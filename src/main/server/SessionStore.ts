@@ -8,6 +8,7 @@ import {
   SessionDisplayState,
   SessionStatus,
   staleSessionThresholdMs,
+  ISubmissionVerdict,
 } from './ServerTypes';
 
 /** Why a write to a session was refused */
@@ -159,7 +160,7 @@ export default class SessionStore {
       }
       restoredIds.add(value.id);
 
-      const status = value.status as SessionStatus;
+      let status = value.status as SessionStatus;
       const latestQbj = value.latestQbj && typeof value.latestQbj === 'object' ? value.latestQbj : null;
       if (
         (status === SessionStatus.Submitted || status === SessionStatus.Accepted) &&
@@ -173,10 +174,23 @@ export default class SessionStore {
         continue;
       }
 
+      const hasFinal = value.finalReceived === true;
+      const canonicalFinalFingerprint = hasFinal && latestQbj !== null ? fingerprintFinal(latestQbj) : undefined;
       let restoredFinalFingerprint: string | undefined;
-      if (typeof value.finalFingerprint === 'string') restoredFinalFingerprint = value.finalFingerprint;
-      else if (value.finalReceived === true && latestQbj !== null)
-        restoredFinalFingerprint = fingerprintFinal(latestQbj);
+      if (canonicalFinalFingerprint !== undefined) {
+        if (value.finalFingerprint !== undefined && value.finalFingerprint !== canonicalFinalFingerprint) {
+          diagnostics.push(
+            `Recovery session ${value.id} had mismatched final metadata; the stored final was retained.`,
+          );
+        }
+        // The payload is authoritative. Never trust a separately persisted hash when it disagrees
+        // with the final QBJ that will be re-offered to the director.
+        restoredFinalFingerprint = canonicalFinalFingerprint;
+      }
+      if (hasFinal && (status === SessionStatus.Created || status === SessionStatus.Playing)) {
+        diagnostics.push(`Recovery session ${value.id} had a final flag in ${status}; it was restored as Submitted.`);
+        status = SessionStatus.Submitted;
+      }
       let restoredFinalRevision = 0;
       if (
         typeof value.finalRevision === 'number' &&
@@ -184,7 +198,11 @@ export default class SessionStore {
         value.finalRevision >= 0
       ) {
         restoredFinalRevision = value.finalRevision;
-      } else if (value.finalReceived === true) {
+      } else if (hasFinal) {
+        restoredFinalRevision = 1;
+      }
+      if (hasFinal && restoredFinalRevision < 1) {
+        diagnostics.push(`Recovery session ${value.id} had an invalid final revision; revision 1 was restored.`);
         restoredFinalRevision = 1;
       }
 
@@ -343,9 +361,13 @@ export default class SessionStore {
   }
 
   /** Mark a session accepted after the statskeeper approved it */
-  markAccepted(sessionId: string): ISession | undefined {
+  markAccepted(
+    sessionId: string,
+    expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>,
+  ): ISession | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
+    if (!SessionStore.matchesExpectedFinal(session, expectedFinal)) return undefined;
     if (session.status === SessionStatus.Accepted) return session;
     if (session.status !== SessionStatus.Submitted || !session.finalReceived || session.latestQbj === null) {
       return undefined;
@@ -370,9 +392,14 @@ export default class SessionStore {
   }
 
   /** Mark a session rejected. The room may submit again afterwards. */
-  markRejected(sessionId: string, reason?: string): ISession | undefined {
+  markRejected(
+    sessionId: string,
+    reason?: string,
+    expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>,
+  ): ISession | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
+    if (!SessionStore.matchesExpectedFinal(session, expectedFinal)) return undefined;
     if (session.status === SessionStatus.Accepted) return undefined;
     if (session.status === SessionStatus.Rejected) {
       if (reason) session.rejectionReason = reason;
@@ -392,6 +419,20 @@ export default class SessionStore {
 
   clear() {
     this.sessions.clear();
+  }
+
+  /** A verdict may only mutate the final revision the director actually reviewed. */
+  private static matchesExpectedFinal(
+    session: ISession,
+    expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>,
+  ): boolean {
+    if (!expectedFinal) return true;
+    if (expectedFinal.finalRevision !== undefined && session.finalRevision !== expectedFinal.finalRevision)
+      return false;
+    if (expectedFinal.finalFingerprint !== undefined && session.finalFingerprint !== expectedFinal.finalFingerprint) {
+      return false;
+    }
+    return true;
   }
 
   /** Project a session for the client that owns it. Never includes the token. */

@@ -131,6 +131,14 @@ describe('resolveTournamentReadiness', () => {
     expect(readiness.primaryAction?.target).toBe('control:match-plan');
   });
 
+  test('does not expose release as a command when the authoritative gate blocks it', () => {
+    const { tournament } = makeScheduledTournament();
+    const readiness = resolveTournamentReadiness(tournament, runningServer({ releaseAllowed: false }));
+
+    expect(readiness.state).toBe('round-ready');
+    expect(readiness.primaryAction).toBeNull();
+  });
+
   test('recognizes the end of a scheduled tournament once every planned game is accepted', () => {
     const { tournament, match } = makeScheduledTournament();
     match.status = ScheduledMatchStatus.Accepted;
