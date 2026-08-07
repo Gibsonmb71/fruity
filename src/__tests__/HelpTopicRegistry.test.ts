@@ -153,6 +153,51 @@ describe('the registry is complete', () => {
   });
 });
 
+/**
+ * A few facts the help is not allowed to get wrong.
+ *
+ * Deliberately not prose tests: wording stays free to change, and reviewing the copy against the
+ * code is still the real check. These pin only the claims that were actually wrong once, where the
+ * mistake reads as perfectly plausible quiz-bowl English and so would survive review again.
+ */
+describe('claims the help must not make', () => {
+  function textOf(topic: HelpTopicId): string {
+    return getHelpText(topic)
+      .flatMap((section) => [section.header ?? '', ...section.content])
+      .join(' ')
+      .toLowerCase();
+  }
+
+  test('overtime toss-ups are part of toss-ups read, and the help says so rather than the opposite', () => {
+    // Match.tossupsRead is the whole game including overtime; overtimeTossupsRead says how many of
+    // those were overtime. Claiming an exclusion from TUH would contradict both the model and NAQT.
+    const text = textOf('games.overtime');
+
+    expect(text).not.toMatch(
+      /(excluded|not counted|do not count|don’t count|separate from).{0,40}(tuh|toss-ups (read|heard))/,
+    );
+    expect(text).toMatch(/toss-ups read|toss-ups heard/);
+  });
+
+  test('regulation toss-ups is not described as the divisor for every statistic', () => {
+    // It is a normalization length and a validation baseline. Per-toss-up statistics divide by the
+    // toss-ups actually heard.
+    const text = textOf('rules.regulation-tossups');
+
+    expect(text).not.toMatch(/divisor (behind|for) every/);
+  });
+
+  test('the public display is not described as showing scores in progress', () => {
+    // buildPublicLiveSnapshot publishes standings, individuals, accepted results and the released
+    // round. Live in-progress scores go to the Control page and nowhere else.
+    const text = textOf('control.live-display');
+
+    // Matched as an affirmative offer, so the copy stays free to say what it does *not* publish.
+    expect(text).not.toMatch(/(watch|follow|see|view)[^.]{0,40}(scores in progress|live scores)/);
+    expect(text).toContain('accepted results');
+  });
+});
+
 describe('what the UI asks for', () => {
   test('the scan actually finds the help in the source, so the checks below mean something', () => {
     expect(helpReferences().length).toBeGreaterThan(20);

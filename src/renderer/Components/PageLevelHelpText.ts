@@ -260,14 +260,14 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
     header: 'Timed rounds',
     content: [
       'The round ends on the clock, so a game can finish before every regulation toss-up has been read.',
-      'Turn this on for a tournament run to a timer. It lets a game be saved with fewer toss-ups heard than the regulation count without that counting as an error, and it is what browser room scoring uses to work out how many questions were actually played.',
+      'Turn this on for a tournament run to a timer. A game with fewer toss-ups heard than the regulation count is then ordinary rather than something to review, and browser room scoring uses it to work out how many questions were actually played.',
     ],
   },
   'rules.regulation-tossups': {
     header: 'Toss-ups in regulation',
     content: [
-      'How many toss-ups a full game is scored over.',
-      'This is the divisor behind every per-game rate in the stat report, so a game whose toss-ups heard disagree with it is flagged for review. Change it only to match the question set actually being played.',
+      'How long a full game is: the number of toss-ups a game is expected to reach.',
+      'It is the baseline game entry checks a game against, and the game length that rates like points per game are scaled to. It is not the divisor for per-toss-up statistics — those use the toss-ups actually heard. Change it only to match the question set being played.',
     ],
   },
   'rules.answer-values': {
@@ -294,29 +294,29 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
   'rules.overtime': {
     header: 'Overtime',
     content: [
-      'How a tied game is broken. Sudden death ends overtime the moment one team converts a toss-up; otherwise a fixed minimum number of toss-ups is read.',
-      'This decides what game entry expects when a score comes in tied, and how many extra questions a room may play past regulation.',
+      'The smallest number of toss-ups an overtime period runs to. Sudden death means one, so overtime can end as soon as a toss-up is converted.',
+      'It is what game entry checks a recorded overtime against, and what tells a room browser how early overtime may end. It is a minimum, not a cap: it does not limit how long an overtime may run.',
     ],
   },
   'rules.overtime-bonuses': {
     header: 'Bonuses in overtime',
     content: [
       'Whether a toss-up converted in overtime is followed by a bonus.',
-      'Most formats do not play overtime bonuses. Leaving it off keeps overtime bonus points out of both game entry and every bonus statistic.',
+      'Most formats do not play them. With this off, overtime conversions are not counted as bonuses heard, and points per game and per-toss-up rates are computed from regulation alone. With it on, overtime counts in all of them.',
     ],
   },
   'rules.maximum-players': {
     header: 'Maximum active players',
     content: [
-      'How many players from one team may be at the table at once.',
-      'A game entered with more active players than this is flagged. Raise it only for a format that genuinely seats more than the standard four.',
+      'How many players from one team are at the table at once.',
+      'It sets the toss-ups heard each team is expected to add up to — this many players times the toss-ups read — and a team adding up to more than that is an error. Raise it only for a format that genuinely seats more than four.',
     ],
   },
   'rules.lightning': {
     header: 'Lightning rounds',
     content: [
       'A separate scored round played alongside the toss-up/bonus cycle, used by a few formats.',
-      'Turning it on adds a lightning points field for each team in game entry and a lightning column to the stat report. Leave it off for a standard tournament.',
+      'Turning it on adds a lightning points field for each team in game entry and a lightning column to the stat report. Browser room scoring cannot score lightning rounds, so rooms are unavailable while it is on.',
     ],
   },
   'rules.lightning-divisor': {
@@ -330,14 +330,14 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
     header: 'Stages',
     content: [
       'A stage is one block of the tournament — prelims, playoffs, finals — spanning a consecutive range of rounds.',
-      'Rounds must belong to a stage before games can be entered in them, and statistics are computed per stage. Changing a stage that already has games is restricted, because it would move those games between statistical groupings.',
+      'Rounds must belong to a stage before games can be entered in them, and statistics are computed per stage. A stage’s round range cannot be narrowed past a round that already has games, because that would move those games between statistical groupings.',
     ],
   },
   'format.pool': {
     header: 'Pools',
     content: [
       'A pool is a group of teams that play each other inside one stage.',
-      'The pool size and its number of round robins determine how many games the stage expects, which is what drives schedule generation and the completeness checks on the Reports page.',
+      'Its size and number of round robins decide which pairings the stage expects, which is what schedule generation produces, what the Match Plan is checked for completeness against, and what the By Pool grids track.',
     ],
   },
   'format.tiebreaker': {
@@ -392,7 +392,7 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
   'control.rebalance': {
     header: 'Rebalance upcoming',
     content: [
-      'Recomputes room assignments for the future rounds you select, which can move games that already had a room.',
+      'Recomputes room assignments across the upcoming rounds, which can move games that already had a room.',
       'Games that are playing, submitted, accepted, or marked Keep room are never moved. Use it after adding, disabling, or reordering rooms. You preview every change before applying it.',
     ],
   },
@@ -400,21 +400,21 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
     header: 'Releasing a round',
     content: [
       'Rooms cannot start a round until you release it. Releasing is what makes the next matchup appear on the room browsers.',
-      'A round can only be released once every one of its games has an eligible room and any rebracketing before it has been confirmed. Releasing does not start any game; a scorekeeper still presses Start.',
+      'A round can be released once every game in it has an enabled, eligible room, the previous round is complete, nothing in it needs attention, and any rebracketing before it has been confirmed. Releasing does not start a game; a scorekeeper still presses Start.',
     ],
   },
   'control.hold': {
     header: 'Hold new room starts',
     content: [
-      'Stops rooms starting a new game while leaving games already in progress running.',
-      'The tournament-day pause: use it for a fire alarm, a protest, or a schedule change you are still making. Rooms see your hold message. Existing games keep scoring and can still be submitted.',
+      'Stops rooms starting a new game. Games already in progress are not interrupted and can still be submitted.',
+      'The tournament-day pause: use it for a protest, a packet problem, or a schedule change you are still making. Rooms see your hold message. To stop a game that is already being scored, ask the room directly — Hold will not.',
     ],
   },
   'control.pairing-code': {
     header: 'Pairing code',
     content: [
       'The 8-digit code someone types at /join to pair a browser with this room. It is short because it gets read off a printed sheet.',
-      'It is not the room’s credential: exchanging it once gives that browser a long access token, which is stored in the browser and never shown as text. Print it on the setup sheet or read it out.',
+      'It is not the room’s credential: exchanging it once gives that browser a long access token, stored in the browser and never shown as text. Issuing a new code only stops the old code being used to pair — browsers already paired to this room keep working.',
     ],
   },
   'control.reset-room-access': {
@@ -434,15 +434,15 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
   'control.live-display': {
     header: 'Live display',
     content: [
-      'A read-only page anyone on the network can open to watch scores in progress.',
-      'It is separate from public pairings: turning one on does not turn on the other. It exposes no room credentials and no controls.',
+      'A read-only page anyone on the network can open, showing standings, individual statistics, recently accepted results, and the released round’s pairings.',
+      'It publishes accepted results only — not live scores from games in progress, which stay on the Control page. It is separate from public pairings: turning one on does not turn on the other, and neither exposes room credentials or controls.',
     ],
   },
   'control.room-inheritance': {
     header: 'How a game ends up in a room',
     content: [
-      'Each step narrows the one before it, and the last one wins:',
-      '1. Enabled rooms — every room not switched off. 2. Stage room eligibility — the rooms a stage is allowed to use. 3. Round override — a different room set for one round. 4. Pool preference or restriction — the rooms a pool prefers, or is locked to. 5. The specific room on the game in the Match Plan.',
+      'A room is eligible for a game only if it passes every one of these at once — they narrow each other, none overrides the rest:',
+      'Enabled rooms; the stage’s room set; a round override; a pool’s locked room restriction; and the rounds a room is available for. The Match Plan then holds the one room chosen from what is left, and a room that stops being eligible is reported rather than used.',
     ],
   },
   'games.tuh': {
@@ -456,14 +456,14 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
     header: 'Carryover',
     content: [
       'Also count this game in the standings of the stages listed, not only the one it was played in.',
-      'Set automatically for a pool configured to carry results over. Change it by hand only for a game that genuinely counts in more than one stage.',
+      'Set automatically on the earlier game when two teams are bracketed into a pool that carries results over. Change it by hand only for a game that genuinely counts in more than one stage.',
     ],
   },
   'games.forfeit': {
     header: 'Forfeit',
     content: [
-      'The other team wins without the game being played.',
-      'A forfeit records a win and a loss and nothing else: no toss-ups, no player statistics, no bonus or lightning scoring. It still counts in the win-loss record, so a forfeited game is not the same as a game you simply never enter.',
+      'This team loses without the game being played; the other team wins.',
+      'A forfeit records a win and a loss and nothing else: no toss-ups, no player statistics, no bonus or lightning scoring. It still counts in the win-loss record. Marking both teams instead records the game as not played, counting for neither.',
     ],
   },
   'games.ignored-warning': {
@@ -476,8 +476,8 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
   'games.overtime': {
     header: 'Overtime',
     content: [
-      'Toss-ups played past regulation, recorded separately so they can be excluded from per-game rates.',
-      'You only need it when the game was tied at the end of regulation. What counts as overtime — sudden death or a fixed number of toss-ups — comes from the scoring rules.',
+      'How many of this game’s toss-ups were played past regulation. They are already part of Toss-ups read, and of every player’s toss-ups heard; this says how many of them were overtime.',
+      'You only need it when the game was tied at the end of regulation. Unless the rules play bonuses in overtime, those toss-ups are left out of bonuses heard and of the rates computed per regulation-length game.',
     ],
   },
   'games.special-scoring': {
@@ -505,7 +505,7 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
     header: 'Publication readiness',
     content: [
       'What YellowFruit can and cannot verify about the data behind this report.',
-      'It checks that games exist, that their statistics are usable, that toss-ups heard are consistent, that the schedule looks complete, and that forfeits are accounted for. A problem here does not stop you exporting; it tells you what a reader would find wrong.',
+      'Each check reads verified, a problem, or unknown — unknown meaning it cannot be established here, as game completeness cannot be without a Match Plan. It never stops you exporting. It tells you what a reader would find wrong, and what nobody has checked.',
     ],
   },
   'reports.sqbs-scope': {
