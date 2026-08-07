@@ -20,11 +20,18 @@ export interface IAppPreferences {
   secondaryBackupFolder?: string;
 }
 
+export type AppPreferencesUpdateResult =
+  | { ok: true; preferences: IAppPreferences }
+  | { ok: false; preferences: IAppPreferences; error: string };
+
 function preferencesPath(): string {
   return path.join(app.getPath('userData'), 'preferences.json');
 }
 
 let cached: IAppPreferences | null = null;
+
+/** Serialize preference replacements so rapid changes cannot finish out of order. */
+let preferenceWritePromise: Promise<void> = Promise.resolve();
 
 /** Read the preferences, treating a missing or damaged file as "no preferences set". */
 export function readAppPreferences(): IAppPreferences {
@@ -44,19 +51,29 @@ export function readAppPreferences(): IAppPreferences {
   return { ...value };
 }
 
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error !== '') return error;
+  return 'Application preferences could not be saved.';
+}
+
 /** Merge a change into the preferences and write them atomically. */
-export function updateAppPreferences(change: Partial<IAppPreferences>): IAppPreferences {
+export async function updateAppPreferences(change: Partial<IAppPreferences>): Promise<AppPreferencesUpdateResult> {
   const next: IAppPreferences = { ...readAppPreferences(), ...change };
   if (next.secondaryBackupFolder === undefined || next.secondaryBackupFolder === '') {
     delete next.secondaryBackupFolder;
   }
+  // The setting still takes effect for this session even if persistence fails. Callers get the
+  // failure explicitly so the renderer can tell the director it will not survive a restart.
   cached = next;
-  writeFileAtomically(preferencesPath(), JSON.stringify(next)).catch((error: unknown) => {
-    // The in-memory value is still correct for this session; only persistence failed.
-    // eslint-disable-next-line no-console
-    console.error(
-      `Application preferences could not be saved: ${error instanceof Error ? error.message : 'unknown error'}`,
-    );
-  });
-  return { ...next };
+  const write = preferenceWritePromise
+    .catch(() => undefined)
+    .then(() => writeFileAtomically(preferencesPath(), JSON.stringify(next)));
+  preferenceWritePromise = write;
+  try {
+    await write;
+    return { ok: true, preferences: { ...next } };
+  } catch (error: unknown) {
+    return { ok: false, preferences: { ...next }, error: messageOf(error) };
+  }
 }
