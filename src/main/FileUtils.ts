@@ -66,8 +66,13 @@ export function getSecondaryBackupHealth(): ISecondaryBackupHealth {
   return secondaryBackup.getHealth();
 }
 
+function preferenceSaveHealth(health: ISecondaryBackupHealth, error?: string): ISecondaryBackupHealth {
+  if (!error) return health;
+  return { ...health, lastError: `Backup folder setting could not be saved: ${error}` };
+}
+
 /** Ask the director where redundant copies should go. */
-export function chooseSecondaryBackupFolder(window: BrowserWindow | null): ISecondaryBackupHealth {
+export async function chooseSecondaryBackupFolder(window: BrowserWindow | null): Promise<ISecondaryBackupHealth> {
   if (!window) return secondaryBackup.getHealth();
   const chosen = dialog.showOpenDialogSync(window, {
     title: 'Choose a backup folder',
@@ -75,14 +80,14 @@ export function chooseSecondaryBackupFolder(window: BrowserWindow | null): ISeco
   });
   if (!chosen || chosen.length === 0) return secondaryBackup.getHealth();
   secondaryBackup.setFolder(chosen[0]);
-  updateAppPreferences({ secondaryBackupFolder: chosen[0] });
-  return secondaryBackup.getHealth();
+  const saved = await updateAppPreferences({ secondaryBackupFolder: chosen[0] });
+  return preferenceSaveHealth(secondaryBackup.getHealth(), saved.ok ? undefined : saved.error);
 }
 
-export function clearSecondaryBackupFolder(): ISecondaryBackupHealth {
+export async function clearSecondaryBackupFolder(): Promise<ISecondaryBackupHealth> {
   secondaryBackup.setFolder(null);
-  updateAppPreferences({ secondaryBackupFolder: undefined });
-  return secondaryBackup.getHealth();
+  const saved = await updateAppPreferences({ secondaryBackupFolder: undefined });
+  return preferenceSaveHealth(secondaryBackup.getHealth(), saved.ok ? undefined : saved.error);
 }
 
 /** Try the last failed copy again, for the case where the drive has come back. */
