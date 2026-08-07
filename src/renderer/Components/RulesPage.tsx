@@ -28,7 +28,6 @@ function RulesPage({ showPageHeader = true }: IRulesPageProps) {
         <YfPageHeader
           title="Rules"
           description="How games are scored. Start from a standard rule set, then adjust whatever differs."
-          helpTopic="setup.rules"
         />
       )}
       {readOnly && (

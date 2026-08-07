@@ -17,7 +17,7 @@ import {
 import { useHotkeys } from 'react-hotkeys-hook';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
-import { YfAcceptButton, YfCancelButton } from '../Utils/GeneralReactUtils';
+import { YfAcceptButton, YfCancelButton, YfHelpPopover } from '../Utils/GeneralReactUtils';
 import { SqbsExportModalContext } from '../Modal Managers/SqbsExportModalManager';
 import { Phase } from '../DataModel/Phase';
 
@@ -78,7 +78,10 @@ function SqbsExportDialogCore() {
           {introHelpText}
         </Typography>
         <FormControl variant="standard" size="small">
-          <FormLabel>Stages to export</FormLabel>
+          <FormLabel>
+            Stages to export
+            <YfHelpPopover topic="reports.sqbs-scope" label="Help for SQBS stage selection" />
+          </FormLabel>
           <FormGroup>
             {modalManager.availablePhases.map((ph) => (
               <FormControlLabel

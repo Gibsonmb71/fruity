@@ -68,6 +68,7 @@ function TossupSettingsCard() {
   return (
     <YfCard
       title="Toss-ups"
+      helpTopic="rules.answer-values"
       description="Every point value a toss-up can be worth. At least one has to be positive."
       variant="rows"
       fullHeight

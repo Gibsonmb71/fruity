@@ -6,7 +6,7 @@ import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
 import { LeftOrRight } from '../Utils/UtilTypes';
 import { ValidationStatuses } from '../DataModel/Interfaces';
-import { YfNumericField } from '../Utils/GeneralReactUtils';
+import { YfHelpPopover, YfNumericField } from '../Utils/GeneralReactUtils';
 import MatchPlayerStatsTable from './MatchPlayerStatsTable';
 import MatchSpecialScoring from './MatchSpecialScoring';
 
@@ -203,7 +203,12 @@ function ForfeitControl(props: ITeamSelectProps) {
             onChange={(event) => handleChange(event.target.checked)}
           />
         }
-        label="Loses by forfeit"
+        label={
+          <>
+            Loses by forfeit
+            <YfHelpPopover topic="games.forfeit" label="Help for forfeits" />
+          </>
+        }
       />
       {otherTeam.forfeitLoss && !isForfeit && (
         <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>

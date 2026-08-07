@@ -65,7 +65,7 @@ function PhaseStandings(props: IPhaseStandingsProps) {
   if (!phaseStats) return null;
 
   return (
-    <YfCard title={phase.name}>
+    <YfCard title={phase.name} helpTopic={nextPhase ? 'format.rebracketing' : undefined}>
       <Grid container spacing={2}>
         {thisTournament.isLastFullPhase(phase) && (
           <>

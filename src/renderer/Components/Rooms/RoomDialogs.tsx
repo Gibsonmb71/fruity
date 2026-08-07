@@ -25,6 +25,7 @@ import {
 } from '../../../main/server/ServerTypes';
 import RoomQr from './RoomQr';
 import { applyRebalance, planRoomDisable } from '../../Services/RoomAllocationService';
+import { YfHelpPopover } from '../../Utils/GeneralReactUtils';
 
 export interface IConfirmDialogProps {
   open: boolean;
@@ -271,7 +272,10 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
         </div>
 
         <div className="rooms-dialog-section rooms-pairing-summary">
-          <h3>Pair this room</h3>
+          <h3>
+            Pair this room
+            <YfHelpPopover topic="control.pairing-code" label="Help for pairing codes" />
+          </h3>
           <Typography variant="body2" color="text.secondary">
             On a new browser, open <strong>/join</strong> and enter this code. The code is not the room&apos;s access
             credential.
@@ -307,7 +311,10 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
         )}
 
         <div className="rooms-dialog-section">
-          <h3>Advanced access</h3>
+          <h3>
+            Advanced access
+            <YfHelpPopover topic="control.reset-room-access" label="Help for resetting room access" />
+          </h3>
           <Typography variant="body2" color="text.secondary">
             Resetting access disconnects previously paired browsers and invalidates old QR codes. It does not change the
             pairing code or tournament results.

@@ -1,6 +1,7 @@
 import {
   Stack,
   Accordion,
+  Chip,
   AccordionSummary,
   AccordionDetails,
   Typography,
@@ -90,11 +91,7 @@ export default function GamesPage(props: IGamesPageProps) {
 
   return (
     <>
-      <YfPageHeader
-        title="Games"
-        description="Every game entered for this tournament, by round or by pool."
-        helpTopic="games"
-      />
+      <YfPageHeader title="Games" description="Every game entered for this tournament, by round or by pool." />
       <Box
         sx={{
           display: 'flex',
@@ -528,11 +525,23 @@ function MatchListItem(props: IMatchListItemProps) {
             <Edit fontSize="small" />
           </IconButton>
         </Tooltip>
-        <Tooltip title="Delete game">
-          <IconButton size="small" onClick={() => tournManager.tryDeleteMatch(match, round)}>
-            <Delete fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        {/*
+          An accepted official result is half of a pair: deleting it would leave the Match Plan
+          pointing at a game that no longer exists. Correction is the real workflow, and it is the
+          pencil next to this, so a disabled bin would only be a dead control to click at. The
+          service layer refuses the deletion regardless of what is rendered here.
+        */}
+        {isOfficialResult ? (
+          <Tooltip title='Accepted official result. Corrections go through "Correct official result…".'>
+            <Chip label="Official" size="small" variant="outlined" sx={{ alignSelf: 'center' }} />
+          </Tooltip>
+        ) : (
+          <Tooltip title="Delete game">
+            <IconButton size="small" aria-label="Delete game" onClick={() => tournManager.tryDeleteMatch(match, round)}>
+              <Delete fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
       </Box>
     </Box>
   );

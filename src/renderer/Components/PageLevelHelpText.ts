@@ -5,8 +5,21 @@ export type HelpTextSection = {
   content: string[];
 };
 
-/** Stable ids for page, subsection, and inline help. Components use ids instead of embedding copy. */
+/**
+ * Stable ids for page, subsection, and inline help. Components use ids instead of embedding copy.
+ *
+ * Two kinds of topic live here and they are not interchangeable:
+ *
+ * - Page and subsection topics (`setup.rules`, `control.match-plan`) are what the Help action in the
+ *   top header opens. They describe a whole area of the application.
+ * - Field topics (`rules.bonus-divisor`, `control.keep-room`) are what an inline `?` next to one
+ *   control opens. They describe that control and nothing else.
+ *
+ * Attaching a page topic to a single field is the mistake worth naming: the reader clicked a
+ * question mark beside one setting and got an essay about the page they were already looking at.
+ */
 export type HelpTopicId =
+  // Page and subsection topics, reached from the Help action in the header.
   | 'setup'
   | 'setup.tournament'
   | 'setup.rules'
@@ -19,11 +32,52 @@ export type HelpTopicId =
   | 'control.rooms'
   | 'control.display'
   | 'reports'
-  | 'general.game-entry'
   | 'control.server'
   | 'control.pairing'
   | 'control.match-inbox'
-  | 'control.public-pairings';
+  | 'control.public-pairings'
+  // Scoring rules, one topic per setting.
+  | 'rules.timed'
+  | 'rules.regulation-tossups'
+  | 'rules.answer-values'
+  | 'rules.bonus-divisor'
+  | 'rules.bouncebacks'
+  | 'rules.overtime'
+  | 'rules.overtime-bonuses'
+  | 'rules.maximum-players'
+  | 'rules.lightning'
+  | 'rules.lightning-divisor'
+  // Format structure.
+  | 'format.stage'
+  | 'format.pool'
+  | 'format.tiebreaker'
+  | 'format.finals'
+  | 'format.carryover'
+  | 'format.rebracketing'
+  // Tournament-day control.
+  | 'control.browser-scoring'
+  | 'control.keep-room'
+  | 'control.auto-assign'
+  | 'control.rebalance'
+  | 'control.release-round'
+  | 'control.hold'
+  | 'control.pairing-code'
+  | 'control.reset-room-access'
+  | 'control.network-interface'
+  | 'control.live-display'
+  | 'control.room-inheritance'
+  // Game entry.
+  | 'games.tuh'
+  | 'games.carryover'
+  | 'games.forfeit'
+  | 'games.ignored-warning'
+  | 'games.overtime'
+  | 'games.special-scoring'
+  // Reports and export.
+  | 'reports.scope'
+  | 'reports.include-carryover'
+  | 'reports.readiness'
+  | 'reports.sqbs-scope';
 
 const GeneralPageHelpText: HelpTextSection[] = [
   {
@@ -193,6 +247,297 @@ const ControlDisplayHelpText: HelpTextSection[] = [
   },
 ];
 
+const TournamentServerHelpText: HelpTextSection[] = RoomsPageHelpText.slice(0, 1);
+
+/**
+ * One short answer per setting: what it means, when you'd change it, what changes as a result.
+ *
+ * These are read while someone is mid-decision with a dialog open, so they are three sentences at
+ * most. Anything that needs more room belongs in the page-level Help the header opens.
+ */
+const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
+  'rules.timed': {
+    header: 'Timed rounds',
+    content: [
+      'The round ends on the clock, so a game can finish before every regulation toss-up has been read.',
+      'Turn this on for a tournament run to a timer. It lets a game be saved with fewer toss-ups heard than the regulation count without that counting as an error, and it is what browser room scoring uses to work out how many questions were actually played.',
+    ],
+  },
+  'rules.regulation-tossups': {
+    header: 'Toss-ups in regulation',
+    content: [
+      'How many toss-ups a full game is scored over.',
+      'This is the divisor behind every per-game rate in the stat report, so a game whose toss-ups heard disagree with it is flagged for review. Change it only to match the question set actually being played.',
+    ],
+  },
+  'rules.answer-values': {
+    header: 'Toss-up point values',
+    content: [
+      'Every point value a toss-up buzz can be worth, including negatives.',
+      'The rule set you picked already sets these. Add or remove a value only for a set that scores differently — an unusual power tier, or no negatives. Game entry offers exactly these values, and browser room scoring refuses to run on values it cannot represent.',
+    ],
+  },
+  'rules.bonus-divisor': {
+    header: 'Bonus divisor',
+    content: [
+      'Used to validate bonus totals. Leave this at the rule set default unless the packet uses unusual bonus scoring.',
+      'A total that is not a multiple of the divisor is reported as a warning; it never blocks saving a game.',
+    ],
+  },
+  'rules.bouncebacks': {
+    header: 'Bouncebacks',
+    content: [
+      'Bonus parts the controlling team misses are offered to the other team.',
+      'Turn this on only if the format really plays that way. It adds a bounceback points field to every team in game entry, and bounceback points are counted separately from ordinary bonus points throughout the stat report.',
+    ],
+  },
+  'rules.overtime': {
+    header: 'Overtime',
+    content: [
+      'How a tied game is broken. Sudden death ends overtime the moment one team converts a toss-up; otherwise a fixed minimum number of toss-ups is read.',
+      'This decides what game entry expects when a score comes in tied, and how many extra questions a room may play past regulation.',
+    ],
+  },
+  'rules.overtime-bonuses': {
+    header: 'Bonuses in overtime',
+    content: [
+      'Whether a toss-up converted in overtime is followed by a bonus.',
+      'Most formats do not play overtime bonuses. Leaving it off keeps overtime bonus points out of both game entry and every bonus statistic.',
+    ],
+  },
+  'rules.maximum-players': {
+    header: 'Maximum active players',
+    content: [
+      'How many players from one team may be at the table at once.',
+      'A game entered with more active players than this is flagged. Raise it only for a format that genuinely seats more than the standard four.',
+    ],
+  },
+  'rules.lightning': {
+    header: 'Lightning rounds',
+    content: [
+      'A separate scored round played alongside the toss-up/bonus cycle, used by a few formats.',
+      'Turning it on adds a lightning points field for each team in game entry and a lightning column to the stat report. Leave it off for a standard tournament.',
+    ],
+  },
+  'rules.lightning-divisor': {
+    header: 'Lightning divisor',
+    content: [
+      'Used to validate lightning round totals, the same way the bonus divisor validates bonuses.',
+      'Change it only if the lightning round is scored in units other than the rule set default. A total that does not divide evenly is a warning, not an error.',
+    ],
+  },
+  'format.stage': {
+    header: 'Stages',
+    content: [
+      'A stage is one block of the tournament — prelims, playoffs, finals — spanning a consecutive range of rounds.',
+      'Rounds must belong to a stage before games can be entered in them, and statistics are computed per stage. Changing a stage that already has games is restricted, because it would move those games between statistical groupings.',
+    ],
+  },
+  'format.pool': {
+    header: 'Pools',
+    content: [
+      'A pool is a group of teams that play each other inside one stage.',
+      'The pool size and its number of round robins determine how many games the stage expects, which is what drives schedule generation and the completeness checks on the Reports page.',
+    ],
+  },
+  'format.tiebreaker': {
+    header: 'Tiebreaker stage',
+    content: [
+      'A short stage attached to the stage before it, for games played only to break a tie in those standings.',
+      'A tiebreaker stage has no pools; converting an existing stage into one deletes its pools. Use it so tiebreaker games are recorded without distorting the pool play they resolve.',
+    ],
+  },
+  'format.finals': {
+    header: 'Finals stage',
+    content: [
+      'A stage for placement games played after pool play has finished — an overall final, a third-place game, a small-school final.',
+      'Finals stages have no pools; converting an existing stage into one deletes its pools. Their games count in the stat report but do not affect playoff pool standings.',
+    ],
+  },
+  'format.carryover': {
+    header: 'Carryover',
+    content: [
+      'Results from the previous stage are carried into this pool, so two teams who already played each other do not play again.',
+      'Available only for a single round robin. It changes how many games the pool expects and which earlier games appear in this stage’s standings.',
+    ],
+  },
+  'format.rebracketing': {
+    header: 'Rebracketing',
+    content: [
+      'Placing each team into the next stage’s pools based on how they finished this one.',
+      'With a format template YellowFruit suggests the placement and you confirm it; with a custom format you assign every team by hand. Nothing is moved until you confirm, and confirming a stage is what lets its next round be released to rooms.',
+    ],
+  },
+  'control.browser-scoring': {
+    header: 'Browser room scoring',
+    content: [
+      'Off, results are entered or imported here in Games — the traditional YellowFruit workflow, and still the default.',
+      'On, paired room browsers submit finished games to the Match Inbox, where you accept or reject each one. Nothing is ever added to the tournament automatically. Turning it off again is refused while a room still has a game in progress or a result awaiting review.',
+    ],
+  },
+  'control.keep-room': {
+    header: 'Keep room',
+    content: [
+      'Protects a room you chose deliberately from being moved by Auto-assign or Rebalance.',
+      'Use it when a game has to be in a specific room — a room with a buzzer set that works, a room near the building entrance. Everything else stays free for the allocator to move.',
+    ],
+  },
+  'control.auto-assign': {
+    header: 'Auto-assign unassigned',
+    content: [
+      'Fills in a room for every future game that has none, and touches nothing else.',
+      'Rooms already chosen — by you or by an earlier run — are left exactly as they are. You see the full list of proposed changes before anything is applied.',
+    ],
+  },
+  'control.rebalance': {
+    header: 'Rebalance upcoming',
+    content: [
+      'Recomputes room assignments for the future rounds you select, which can move games that already had a room.',
+      'Games that are playing, submitted, accepted, or marked Keep room are never moved. Use it after adding, disabling, or reordering rooms. You preview every change before applying it.',
+    ],
+  },
+  'control.release-round': {
+    header: 'Releasing a round',
+    content: [
+      'Rooms cannot start a round until you release it. Releasing is what makes the next matchup appear on the room browsers.',
+      'A round can only be released once every one of its games has an eligible room and any rebracketing before it has been confirmed. Releasing does not start any game; a scorekeeper still presses Start.',
+    ],
+  },
+  'control.hold': {
+    header: 'Hold new room starts',
+    content: [
+      'Stops rooms starting a new game while leaving games already in progress running.',
+      'The tournament-day pause: use it for a fire alarm, a protest, or a schedule change you are still making. Rooms see your hold message. Existing games keep scoring and can still be submitted.',
+    ],
+  },
+  'control.pairing-code': {
+    header: 'Pairing code',
+    content: [
+      'The 8-digit code someone types at /join to pair a browser with this room. It is short because it gets read off a printed sheet.',
+      'It is not the room’s credential: exchanging it once gives that browser a long access token, which is stored in the browser and never shown as text. Print it on the setup sheet or read it out.',
+    ],
+  },
+  'control.reset-room-access': {
+    header: 'Reset room access',
+    content: [
+      'Invalidates the long access token every browser paired to this room is holding.',
+      'Use it when a device has left the building or was paired by mistake. Every browser for this room has to pair again with the code; a game already in progress in this room cannot continue and should be finished first.',
+    ],
+  },
+  'control.network-interface': {
+    header: 'Network address',
+    content: [
+      'Which of this computer’s network addresses the room devices should open.',
+      'A laptop on Wi-Fi with a VPN or a virtual adapter has several, and only the one on the same network as the room devices works. Use Test connection to confirm the one you picked before printing it on room sheets.',
+    ],
+  },
+  'control.live-display': {
+    header: 'Live display',
+    content: [
+      'A read-only page anyone on the network can open to watch scores in progress.',
+      'It is separate from public pairings: turning one on does not turn on the other. It exposes no room credentials and no controls.',
+    ],
+  },
+  'control.room-inheritance': {
+    header: 'How a game ends up in a room',
+    content: [
+      'Each step narrows the one before it, and the last one wins:',
+      '1. Enabled rooms — every room not switched off. 2. Stage room eligibility — the rooms a stage is allowed to use. 3. Round override — a different room set for one round. 4. Pool preference or restriction — the rooms a pool prefers, or is locked to. 5. The specific room on the game in the Match Plan.',
+    ],
+  },
+  'games.tuh': {
+    header: 'Toss-ups read',
+    content: [
+      'How many toss-ups were actually heard in this game, including any played in overtime.',
+      'It must agree with the per-player toss-ups heard, and with the regulation count unless the rules allow a game to end early. A disagreement is what most game-entry warnings are about.',
+    ],
+  },
+  'games.carryover': {
+    header: 'Carryover',
+    content: [
+      'Also count this game in the standings of the stages listed, not only the one it was played in.',
+      'Set automatically for a pool configured to carry results over. Change it by hand only for a game that genuinely counts in more than one stage.',
+    ],
+  },
+  'games.forfeit': {
+    header: 'Forfeit',
+    content: [
+      'The other team wins without the game being played.',
+      'A forfeit records a win and a loss and nothing else: no toss-ups, no player statistics, no bonus or lightning scoring. It still counts in the win-loss record, so a forfeited game is not the same as a game you simply never enter.',
+    ],
+  },
+  'games.ignored-warning': {
+    header: 'Ignored warnings',
+    content: [
+      'Dismisses a warning for this game only, so the game can be saved without changing the number that caused it.',
+      'For the case where the unusual number is genuinely correct. Errors can never be ignored. Restore brings the warning back if you want to look again.',
+    ],
+  },
+  'games.overtime': {
+    header: 'Overtime',
+    content: [
+      'Toss-ups played past regulation, recorded separately so they can be excluded from per-game rates.',
+      'You only need it when the game was tied at the end of regulation. What counts as overtime — sudden death or a fixed number of toss-ups — comes from the scoring rules.',
+    ],
+  },
+  'games.special-scoring': {
+    header: 'Bonus, bounceback and lightning',
+    content: [
+      'The scoring that is not toss-up buzzes: bonus points, bounceback points, and lightning round points.',
+      'Which of these appear depends on the scoring rules, and totals are checked against the relevant divisor. They are not entered for a forfeit.',
+    ],
+  },
+  'reports.scope': {
+    header: 'Report scope',
+    content: [
+      'Which stages the statistics on this page are computed from.',
+      'Use it to publish prelim standings separately from playoff standings, or to look at one stage on its own. It changes what you are looking at and what an HTML export contains; it never changes any recorded game.',
+    ],
+  },
+  'reports.include-carryover': {
+    header: 'Include carried-over games',
+    content: [
+      'Also count games carried into the selected stages from an earlier stage.',
+      'Include them for standings that reflect a team’s full record going into the playoffs; leave them out to see only what was played inside the selected stages.',
+    ],
+  },
+  'reports.readiness': {
+    header: 'Publication readiness',
+    content: [
+      'What YellowFruit can and cannot verify about the data behind this report.',
+      'It checks that games exist, that their statistics are usable, that toss-ups heard are consistent, that the schedule looks complete, and that forfeits are accounted for. A problem here does not stop you exporting; it tells you what a reader would find wrong.',
+    ],
+  },
+  'reports.sqbs-scope': {
+    header: 'Stages to export',
+    content: [
+      'Which stages go into the SQBS file, and whether they are combined into one file or split into one file per stage.',
+      'SQBS represents one bracket at a time, so a multi-stage tournament usually exports as separate files. This affects the exported file only.',
+    ],
+  },
+};
+
+/** Every topic that describes one control rather than a whole page. */
+export type TargetedHelpTopicId = Exclude<
+  HelpTopicId,
+  | 'setup'
+  | 'setup.tournament'
+  | 'setup.rules'
+  | 'setup.teams'
+  | 'setup.format'
+  | 'games'
+  | 'control'
+  | 'control.live'
+  | 'control.match-plan'
+  | 'control.rooms'
+  | 'control.display'
+  | 'reports'
+  | 'control.server'
+  | 'control.pairing'
+  | 'control.match-inbox'
+  | 'control.public-pairings'
+>;
+
 /** The centralized registry used by both the page dialog and compact inline help. */
 export const helpRegistry: Record<HelpTopicId, HelpTextSection[]> = {
   setup: [...GeneralPageHelpText, ...RulesPageHelpText, ...SchedulePageHelpText, ...TeamsPageHelpText],
@@ -207,15 +552,9 @@ export const helpRegistry: Record<HelpTopicId, HelpTextSection[]> = {
   'control.rooms': ControlRoomsHelpText,
   'control.display': ControlDisplayHelpText,
   reports: StatReportPageHelpText,
-  'general.game-entry': [
-    {
-      header: 'Game entry mode',
-      content: [
-        'Traditional entry keeps scoring inside YellowFruit. Browser room scoring lets paired room browsers submit finals to the Match Inbox for explicit review.',
-      ],
-    },
-  ],
-  'control.server': RoomsPageHelpText,
+  // Scoped to the Tournament Server section rather than repeating the whole Control page, so the
+  // inline `?` beside that heading answers a narrower question than the header's Help does.
+  'control.server': TournamentServerHelpText,
   'control.pairing': ControlRoomsHelpText,
   'control.match-inbox': [
     {
@@ -226,6 +565,10 @@ export const helpRegistry: Record<HelpTopicId, HelpTextSection[]> = {
     },
   ],
   'control.public-pairings': ControlDisplayHelpText,
+  ...(Object.fromEntries(Object.entries(fieldHelp).map(([topic, section]) => [topic, [section]])) as Record<
+    TargetedHelpTopicId,
+    HelpTextSection[]
+  >),
 };
 
 export function getHelpText(topic: HelpTopicId): HelpTextSection[] {

@@ -58,7 +58,11 @@ function OvertimeSettingsCard() {
   return (
     <YfCard title="Overtime" variant="rows" fullHeight>
       <SettingsList>
-        <SettingRow label="Sudden death" description="Overtime ends as soon as one team converts a toss-up.">
+        <SettingRow
+          label="Sudden death"
+          description="Overtime ends as soon as one team converts a toss-up."
+          helpTopic="rules.overtime"
+        >
           <Switch checked={suddenDeath} disabled={readOnly} onChange={handleSuddenDeathChange} />
         </SettingRow>
         {minTossupsVisible && (
@@ -77,7 +81,7 @@ function OvertimeSettingsCard() {
             />
           </SettingRow>
         )}
-        <SettingRow label="Use bonuses">
+        <SettingRow label="Use bonuses" helpTopic="rules.overtime-bonuses">
           <Switch checked={otUseBonuses} disabled={readOnly || !tournUseBonuses} onChange={handleUseBonusChange} />
         </SettingRow>
       </SettingsList>
