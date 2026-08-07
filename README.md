@@ -173,11 +173,9 @@ npm run build
 
 Fruity is based on [YellowFruit](https://github.com/ANadig/YellowFruit) by Andrew Nadig.
 
-YellowFruit provides the core tournament model, statkeeping, reporting, and file compatibility that Fruity builds on. Fruity extends that foundation with tournament scheduling and tournament-day operations while keeping the traditional YellowFruit workflow available.
-
 ## Contributing
 
-Bug reports, testing, and contributions are welcome.
+Bug reports, testing, and contributions are welcome. (please do send them)
 
 Please use [GitHub Issues](https://github.com/Gibsonmb71/fruity/issues) for bugs and feature requests.
 
