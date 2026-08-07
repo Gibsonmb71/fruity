@@ -139,6 +139,6 @@ export function restartScheduledGame(tournament: Tournament, scheduledMatchId: s
 /** The confirmation text for a restart, which has to name what is being given up. */
 export function describeRestartConfirmation(game: IStrandedGame): string {
   return game.kind === 'submitted'
-    ? `Round ${game.roundName}: ${game.leftTeam} vs ${game.rightTeam} was submitted but never reviewed here. Restarting means this room scores the game again from the beginning, and whatever was submitted is not recorded. If the scorekeeper still has the result, import their QBJ file instead.`
-    : `Round ${game.roundName}: ${game.leftTeam} vs ${game.rightTeam} was being scored when the previous computer stopped. Restarting means the room scores it again from the beginning. If the scorekeeper still has the result, import their QBJ file instead.`;
+    ? `Round ${game.roundNumber}: ${game.leftTeam} vs ${game.rightTeam} was submitted but never reviewed here. Restarting means this room scores the game again from the beginning, and whatever was submitted is not recorded. If the scorekeeper still has the result, import their QBJ file instead.`
+    : `Round ${game.roundNumber}: ${game.leftTeam} vs ${game.rightTeam} was being scored when the previous computer stopped. Restarting means the room scores it again from the beginning. If the scorekeeper still has the result, import their QBJ file instead.`;
 }
