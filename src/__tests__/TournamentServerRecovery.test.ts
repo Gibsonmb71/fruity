@@ -6,9 +6,13 @@ import TournamentServer from '../main/server/TournamentServer';
 import { IMatchSubmission, ITournamentSnapshot, SessionStatus, sessionTokenHeader } from '../main/server/ServerTypes';
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
+import { ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { makeStandardModaqMatch, testTeamNames } from './TestFixtures';
 
-function snapshot(recoveryKey = 'recovery-test'): ITournamentSnapshot {
+function snapshot(
+  recoveryKey = 'recovery-test',
+  overrides: Partial<Pick<ITournamentSnapshot, 'assignments'>> = {},
+): ITournamentSnapshot {
   const format = scoringRulesToModaqGameFormat(new ScoringRules(CommonRuleSets.AcfPowers));
   return {
     name: 'Recovery Tournament',
@@ -18,8 +22,9 @@ function snapshot(recoveryKey = 'recovery-test'): ITournamentSnapshot {
     gameFormatErrors: format.ok ? [] : format.errors,
     gameFormatWarnings: format.ok ? format.warnings : [],
     timedRounds: false,
+    roomScoringMode: 'browser',
     rooms: [],
-    assignments: [],
+    assignments: overrides.assignments ?? [],
     currentRoundNumber: 1,
     releasedRoundNumber: 1,
     recoveryKey,
@@ -27,11 +32,13 @@ function snapshot(recoveryKey = 'recovery-test'): ITournamentSnapshot {
 }
 
 const bundleDirectories: string[] = [];
+const recoveryDirectories: string[] = [];
 const servers: TournamentServer[] = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.stop()));
   for (const directory of bundleDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  for (const directory of recoveryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
 function makeServer(recoveryFilePath: string, submissions: IMatchSubmission[]) {
@@ -50,6 +57,7 @@ function makeServer(recoveryFilePath: string, submissions: IMatchSubmission[]) {
 describe('Tournament Server recovery store', () => {
   test('pending final and session linkage survive a server restart', async () => {
     const recoveryDirectory = mkdtempSync(path.join(tmpdir(), 'yf-recovery-data-'));
+    recoveryDirectories.push(recoveryDirectory);
     const recoveryFilePath = path.join(recoveryDirectory, 'recovery.json');
     const firstSubmissions: IMatchSubmission[] = [];
     const first = makeServer(recoveryFilePath, firstSubmissions);
@@ -95,12 +103,11 @@ describe('Tournament Server recovery store', () => {
     expect(retry.status).toBe(200);
     expect((await retry.json()).newSubmission).toBe(false);
     expect(secondSubmissions).toHaveLength(0);
-
-    rmSync(recoveryDirectory, { recursive: true, force: true });
   });
 
   test('a different tournament identity clears old transient state', async () => {
     const recoveryDirectory = mkdtempSync(path.join(tmpdir(), 'yf-recovery-key-'));
+    recoveryDirectories.push(recoveryDirectory);
     const recoveryFilePath = path.join(recoveryDirectory, 'recovery.json');
     const first = makeServer(recoveryFilePath, []);
     first.setTournamentSnapshot(snapshot('tournament-a'));
@@ -112,7 +119,55 @@ describe('Tournament Server recovery store', () => {
 
     expect(second.sessions.getAll()).toHaveLength(0);
     expect(second.getPendingSubmissions()).toHaveLength(0);
+  });
 
-    rmSync(recoveryDirectory, { recursive: true, force: true });
+  test('an Accepted recovery session is re-offered when the durable assignment is missing', async () => {
+    const recoveryDirectory = mkdtempSync(path.join(tmpdir(), 'yf-recovery-accepted-'));
+    recoveryDirectories.push(recoveryDirectory);
+    const recoveryFilePath = path.join(recoveryDirectory, 'recovery.json');
+    const first = makeServer(recoveryFilePath, []);
+    first.setTournamentSnapshot(snapshot());
+    const session = first.sessions.create(1, testTeamNames[0], testTeamNames[1]);
+    first.sessions.submitFinal(session.id, session.token, makeStandardModaqMatch());
+    first.acceptSession(session.id);
+    await first.stop();
+
+    const second = makeServer(recoveryFilePath, []);
+    second.setTournamentSnapshot(snapshot());
+    const pending = second.getPendingSubmissions();
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0].sessionId).toBe(session.id);
+    expect(second.sessions.get(session.id)?.status).toBe(SessionStatus.Submitted);
+  });
+
+  test('a durable accepted assignment reconciles a Submitted recovery session without reoffering it', async () => {
+    const recoveryDirectory = mkdtempSync(path.join(tmpdir(), 'yf-recovery-durable-'));
+    recoveryDirectories.push(recoveryDirectory);
+    const recoveryFilePath = path.join(recoveryDirectory, 'recovery.json');
+    const first = makeServer(recoveryFilePath, []);
+    first.setTournamentSnapshot(snapshot());
+    const session = first.sessions.create(1, testTeamNames[0], testTeamNames[1], {
+      scheduledMatchId: 'scheduled-result',
+      roomId: 'room-101',
+    });
+    first.sessions.submitFinal(session.id, session.token, makeStandardModaqMatch());
+    await first.stop();
+
+    const acceptedAssignment = {
+      scheduledMatchId: 'scheduled-result',
+      roomId: 'room-101',
+      roundNumber: 1,
+      roundName: '1',
+      leftTeam: testTeamNames[0],
+      rightTeam: testTeamNames[1],
+      status: ScheduledMatchStatus.Accepted,
+      resultMatchId: 'Match_1',
+    };
+    const second = makeServer(recoveryFilePath, []);
+    second.setTournamentSnapshot(snapshot('recovery-test', { assignments: [acceptedAssignment] }));
+
+    expect(second.getPendingSubmissions()).toHaveLength(0);
+    expect(second.sessions.get(session.id)?.status).toBe(SessionStatus.Accepted);
   });
 });

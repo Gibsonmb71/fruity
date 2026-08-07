@@ -26,6 +26,7 @@ import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScori
 import { ImportResultStatus } from '../renderer/DataModel/MatchImportResult';
 import { StatsValidity } from '../renderer/DataModel/Match';
 import Tournament from '../renderer/DataModel/Tournament';
+import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { makeModaqQbjMatch, makeStandardModaqMatch, makeTestTournament, testTeamNames } from './TestFixtures';
 
 let server: TournamentServer;
@@ -50,9 +51,11 @@ function snapshotFor(t: Tournament): ITournamentSnapshot {
     gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
     gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
     timedRounds: false,
+    roomScoringMode: 'browser',
     rooms: [],
     assignments: [],
-    currentRoundNumber: null,
+    currentRoundNumber: 2,
+    releasedRoundNumber: 2,
   };
 }
 
@@ -63,6 +66,8 @@ beforeEach(async () => {
   writeFileSync(path.join(bundleDir, 'index.html'), '<!doctype html><title>Room</title>');
 
   tournament = makeTestTournament();
+  tournament.roomScoringMode = 'browser';
+  tournament.releasedRoundNumber = 2;
 
   // Stand in for the preload bridge. The renderer service only uses sendMessage and invoke, so this
   // routes those straight to the server instead of across processes.
@@ -171,11 +176,24 @@ describe('the full path from room submission to an accepted match', () => {
     // Labeled with the room it came from, in the same field a file import uses.
     expect(match.importedFile).toContain(testTeamNames[0]);
 
-    // The inbox is cleared, the session is marked accepted, and the file is dirty.
+    // The inbox is cleared and the file is dirty, but the server verdict waits until the primary
+    // .yft replacement is durable so a crash cannot acknowledge an unsaved official result.
     expect(service.inbox).toHaveLength(0);
-    expect(server.sessions.get(session.sessionId)?.status).toBe(SessionStatus.Accepted);
-    expect(verdicts).toEqual([{ sessionId: session.sessionId, accepted: true }]);
+    expect(server.sessions.get(session.sessionId)?.status).toBe(SessionStatus.Submitted);
+    expect(verdicts).toEqual([]);
     expect(acceptedCount).toBe(1);
+
+    service.confirmDurableAcceptances();
+    expect(server.sessions.get(session.sessionId)?.status).toBe(SessionStatus.Accepted);
+    expect(verdicts).toEqual([
+      {
+        sessionId: session.sessionId,
+        accepted: true,
+        tournamentKey: tournament.operationalId,
+        finalRevision: 1,
+        finalFingerprint: server.sessions.get(session.sessionId)?.finalFingerprint,
+      },
+    ]);
   });
 
   test('an accepted remote match is indistinguishable from a manually imported one', async () => {
@@ -227,6 +245,10 @@ describe('the full path from room submission to an accepted match', () => {
 
     expect(tournament.getRoundObjByNumber(1)?.matches).toHaveLength(0);
     expect(service.inbox).toHaveLength(0);
+    // Rejection is acknowledged after the corrected NeedsAttention state is durably saved, just as
+    // acceptance waits for the official Match to be persisted.
+    expect(server.sessions.get(session.sessionId)?.status).toBe(SessionStatus.Submitted);
+    service.confirmDurableDecisions();
     expect(server.sessions.get(session.sessionId)?.status).toBe(SessionStatus.Rejected);
     expect(server.sessions.get(session.sessionId)?.rejectionReason).toBe('Teams were swapped');
     expect(acceptedCount).toBe(0);
@@ -235,6 +257,7 @@ describe('the full path from room submission to an accepted match', () => {
   test('a rejected room can correct and resubmit, and that submission can be accepted', async () => {
     const { session } = await playAndSubmit(makeStandardModaqMatch(), 1);
     service.rejectSubmission(session.sessionId, 'Wrong game');
+    service.confirmDurableDecisions();
 
     // The room submits again with the same credentials.
     const retry = await fetch(`${baseUrl}/api/v1/sessions/${session.sessionId}/final`, {
@@ -265,6 +288,95 @@ describe('the full path from room submission to an accepted match', () => {
     expect(service.inbox).toHaveLength(1);
     service.acceptSubmission(session.sessionId);
     expect(tournament.getRoundObjByNumber(1)?.matches).toHaveLength(1);
+  });
+
+  test('a local accept failure rolls back the official match list and keeps the inbox item', async () => {
+    const { session } = await playAndSubmit(makeStandardModaqMatch());
+    const round = tournament.getRoundObjByNumber(1)!;
+    const originalAddMatch = round.addMatch;
+    round.addMatch = (() => {
+      throw new Error('injected match commit failure');
+    }) as typeof round.addMatch;
+
+    expect(service.acceptSubmission(session.sessionId)).toBe(false);
+
+    round.addMatch = originalAddMatch;
+    expect(round.matches).toHaveLength(0);
+    expect(service.inbox).toHaveLength(1);
+    expect(service.lastError).toContain('injected match commit failure');
+  });
+
+  test('a recovered Submitted session cannot reverse a durable rejection', () => {
+    const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1], 'recovery-scheduled');
+    scheduled.status = ScheduledMatchStatus.NeedsAttention;
+    tournament.scheduledMatches = [scheduled];
+
+    service.handleSubmission({
+      sessionId: 'recovered-session',
+      roundNumber: 1,
+      leftTeam: testTeamNames[0],
+      rightTeam: testTeamNames[1],
+      scheduledMatchId: scheduled.id,
+      qbj: makeStandardModaqMatch(),
+      submittedAt: new Date().toISOString(),
+      tournamentKey: tournament.operationalId,
+      sessionStatus: SessionStatus.Submitted,
+    });
+
+    expect(service.inbox).toHaveLength(0);
+    expect(scheduled.status).toBe(ScheduledMatchStatus.NeedsAttention);
+    expect(verdicts).toEqual([
+      {
+        sessionId: 'recovered-session',
+        accepted: false,
+        reason: 'The tournament already recorded this result as needing attention; please retry the game.',
+        tournamentKey: tournament.operationalId,
+      },
+    ]);
+  });
+
+  test('a result for a deleted scheduled game stays unlinked and cannot be accepted as generic play', () => {
+    service.handleSubmission({
+      sessionId: 'stale-schedule-session',
+      roundNumber: 1,
+      leftTeam: testTeamNames[0],
+      rightTeam: testTeamNames[1],
+      scheduledMatchId: 'deleted-scheduled-match',
+      qbj: makeStandardModaqMatch(),
+      submittedAt: new Date().toISOString(),
+      tournamentKey: tournament.operationalId,
+      sessionStatus: SessionStatus.Submitted,
+    });
+
+    const item = service.inbox[0];
+    expect(item.importResult.status).toBe(ImportResultStatus.FatalErr);
+    expect(service.acceptSubmission('stale-schedule-session')).toBe(false);
+    expect(tournament.getRoundObjByNumber(1)?.matches).toHaveLength(0);
+  });
+
+  test('a result from the wrong room is reviewable but cannot be accepted against the assignment', () => {
+    const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1], 'assigned-scheduled-match');
+    scheduled.phaseCode = tournament.getPrelimPhase()?.code ?? '1';
+    scheduled.roomId = 'room-a';
+    scheduled.status = ScheduledMatchStatus.Playing;
+    tournament.scheduledMatches = [scheduled];
+
+    service.handleSubmission({
+      sessionId: 'wrong-room-session',
+      roundNumber: 1,
+      leftTeam: testTeamNames[0],
+      rightTeam: testTeamNames[1],
+      roomId: 'room-b',
+      scheduledMatchId: scheduled.id,
+      qbj: makeStandardModaqMatch(),
+      submittedAt: new Date().toISOString(),
+      tournamentKey: tournament.operationalId,
+      sessionStatus: SessionStatus.Submitted,
+    });
+
+    expect(service.inbox[0]?.importResult.status).toBe(ImportResultStatus.FatalErr);
+    expect(service.acceptSubmission('wrong-room-session')).toBe(false);
+    expect(scheduled.status).toBe(ScheduledMatchStatus.Playing);
   });
 
   test('live snapshots never create a match, no matter how many arrive', async () => {
@@ -352,6 +464,7 @@ describe('validation failures reaching the inbox', () => {
   test('a later submission from the same room replaces its earlier inbox entry', async () => {
     const { session } = await playAndSubmit(makeStandardModaqMatch(), 1);
     service.rejectSubmission(session.sessionId);
+    service.confirmDurableDecisions();
 
     await fetch(`${baseUrl}/api/v1/sessions/${session.sessionId}/final`, {
       method: 'POST',
@@ -388,7 +501,6 @@ describe('multiple rooms at once', () => {
       1,
       [testTeamNames[2], testTeamNames[3]],
     );
-
     expect(service.inbox).toHaveLength(2);
 
     service.acceptSubmission(roomA.session.sessionId);

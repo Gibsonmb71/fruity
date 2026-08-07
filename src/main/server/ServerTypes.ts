@@ -26,6 +26,12 @@ export const sessionTokenHeader = 'x-yf-session-token';
  */
 export const roomTokenHeader = 'x-yf-room-token';
 
+/** Optional, non-secret browser identity used only for presence and operator-facing workflows. */
+export const deviceIdHeader = 'x-yf-device-id';
+
+/** Optional display name supplied by the person running a room browser. */
+export const operatorNameHeader = 'x-yf-operator-name';
+
 /** Prefix for all HTTP API routes */
 export const apiPrefix = '/api/v1';
 
@@ -78,6 +84,8 @@ export interface ITournamentSnapshot {
    * this to work out how many tossups were actually heard; see `QbjMatchNormalizer`.
    */
   timedRounds: boolean;
+  /** Explicitly identifies the room-scoring workflow for the legacy generic session endpoint. */
+  roomScoringMode?: 'browser' | 'traditional';
   /** Configured playing locations, including their access tokens. Tokens are never served. */
   rooms: IRoomDescriptor[];
   /** Every scheduled game that has a room, so the server can tell a room what it's playing */
@@ -91,6 +99,10 @@ export interface ITournamentSnapshot {
   currentRoundNumber: number | null;
   /** The round tournament control has released to rooms. Kept separate from the derived current round. */
   releasedRoundNumber?: number | null;
+  /** When true, room browsers may continue current games but may not start a new one. */
+  holdNewRoomStarts?: boolean;
+  /** Optional director-facing explanation shown to scorekeepers while the hold is active. */
+  holdMessage?: string;
   /** Stable tournament identity used to scope app-data recovery state. Never served to rooms. */
   recoveryKey?: string;
 }
@@ -99,12 +111,36 @@ export interface ITournamentSnapshot {
 export interface IRoomDescriptor {
   id: string;
   name: string;
+  description?: string;
   /**
    * Capability token for this room. Used only to authorize incoming requests and never included in
    * any response.
    */
   accessToken: string;
+  /** Human pairing code. Internal snapshot data only; never served by an authenticated room route. */
+  pairingCode?: string;
   enabled: boolean;
+}
+
+/** Deliberately small room list used by the join screen. It contains no credentials. */
+export interface IRoomJoinDescriptor {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** The one-time result of successfully exchanging a human pairing code for a room identity. */
+export interface IRoomJoinResponse {
+  roomId: string;
+  roomName: string;
+  roomDescription?: string;
+  accessToken: string;
+}
+
+export interface IRoomJoinRequest {
+  code: string;
+  /** Optional narrowing when two installations happen to show similar room names. */
+  roomId?: string;
 }
 
 /** One scheduled game with a room, projected for the server */
@@ -117,6 +153,10 @@ export interface IAssignmentDescriptor {
   leftTeam: string;
   rightTeam: string;
   status: ScheduledMatchStatus;
+  /** Present only for durable accepted history; used by recovery reconciliation, never shown to rooms. */
+  resultMatchId?: string;
+  /** Malformed operational history is visible but never startable. */
+  quarantined?: boolean;
 }
 
 /** An empty snapshot, used before the renderer has pushed anything or with no tournament open */
@@ -128,6 +168,7 @@ export const emptyTournamentSnapshot: ITournamentSnapshot = {
   gameFormatErrors: ['YellowFruit has not sent tournament information to the server yet.'],
   gameFormatWarnings: [],
   timedRounds: false,
+  roomScoringMode: 'traditional',
   rooms: [],
   assignments: [],
   currentRoundNumber: null,
@@ -191,6 +232,12 @@ export interface ISession {
   latestQbj: object | null;
   /** True once a final submission has been recorded, so re-submits are idempotent */
   finalReceived: boolean;
+  /** SHA-256 of the canonical final payload currently under review. */
+  finalFingerprint?: string;
+  /** Monotonic review revision; a corrected final is a new review after rejection. */
+  finalRevision: number;
+  /** Operational tournament identity captured when this session was created. */
+  tournamentKey?: string;
   /** Message from the statskeeper when a submission is rejected */
   rejectionReason?: string;
 }
@@ -258,6 +305,12 @@ export enum RoomBlockedReason {
   RulesUnusable = 'rulesUnusable',
   /** The room is disabled */
   RoomDisabled = 'roomDisabled',
+  /** A final is awaiting tournament-control review. */
+  Submitted = 'submitted',
+  /** The assignment needs human repair before it can be played. */
+  NeedsAttention = 'needsAttention',
+  /** Tournament control has paused new room starts without interrupting games already in progress. */
+  Hold = 'hold',
 }
 
 /**
@@ -293,6 +346,18 @@ export interface IRoomAssignmentResponse {
   timedRounds: boolean;
   /** The highest round the director has released, if any. */
   releasedRoundNumber?: number | null;
+  /** Whether new starts are paused. Existing sessions continue to work. */
+  holdNewRoomStarts?: boolean;
+  holdMessage?: string;
+  /** Aggregate room presence, useful to the room and to reconnecting pages. */
+  presence?: IRoomPresence;
+  /** Open request for this room, if any. */
+  helpRequest?: IHelpRequest | null;
+  /** Most recent terminal outcome for the current assignment, if one was reviewed. */
+  lastOutcome?: {
+    status: SessionStatus.Accepted | SessionStatus.Rejected;
+    rejectionReason?: string;
+  };
 }
 
 /** Enough to pick up an in-progress session after a reload */
@@ -337,6 +402,8 @@ export interface ISessionSummary {
   msSinceLastSeen: number;
   score: ISessionScoreLine | null;
   rejectionReason?: string;
+  /** Operational tournament identity used to discard stale renderer events. */
+  tournamentKey?: string;
 }
 
 /** Presence of a permanent room page, including rooms that are waiting between games. */
@@ -345,11 +412,83 @@ export interface IRoomPresence {
   lastSeenAt: string | null;
   msSinceLastSeen: number | null;
   connected: boolean;
+  devices?: IRoomDevicePresence[];
+  readyDeviceCount?: number;
+}
+
+/** A single browser/device check-in. Device ids are labels, not credentials. */
+export interface IRoomDevicePresence {
+  roomId: string;
+  deviceId: string;
+  operatorName?: string;
+  lastSeenAt: string;
+  msSinceLastSeen: number;
+  connected: boolean;
+  ready: boolean;
+}
+
+export interface IRoomPresenceUpdateRequest {
+  deviceId?: string;
+  operatorName?: string;
+  ready?: boolean;
+}
+
+export type HelpRequestCategory =
+  | 'wrong-matchup'
+  | 'team-missing'
+  | 'rules-question'
+  | 'scoring-problem'
+  | 'device-network'
+  | 'wrong-room'
+  | 'other';
+export type HelpRequestState = 'open' | 'resolved' | 'cancelled';
+
+export const helpRequestCategoryLabels: Record<HelpRequestCategory, string> = {
+  'wrong-matchup': 'Wrong matchup',
+  'team-missing': "Team hasn't arrived",
+  'rules-question': 'Rules question',
+  'scoring-problem': 'Scoring problem',
+  'device-network': 'Device/network problem',
+  'wrong-room': 'Wrong room',
+  other: 'Other',
+};
+
+/** Authoritative matchup context captured when a room asks for help. */
+export interface IHelpMatchupContext {
+  roundNumber: number;
+  roundName: string;
+  leftTeam: string;
+  rightTeam: string;
+}
+
+/** A compact, durable-in-memory help signal shared between room browsers and tournament control. */
+export interface IHelpRequest {
+  id: string;
+  roomId: string;
+  roomName: string;
+  category: HelpRequestCategory;
+  message: string;
+  status: HelpRequestState;
+  createdAt: string;
+  updatedAt: string;
+  deviceId?: string;
+  operatorName?: string;
+  currentMatchup?: IHelpMatchupContext;
+  resolutionNote?: string;
+}
+
+export interface ICreateHelpRequest {
+  category: HelpRequestCategory;
+  message?: string;
+  deviceId?: string;
+  operatorName?: string;
+  currentMatchup?: IHelpMatchupContext;
 }
 
 /** Versioned app-data recovery payload. The .yft remains the tournament source of truth. */
 export interface ITournamentServerRecovery {
-  version: 1;
+  /** Version 1 had no final fingerprints; version 2 adds review identity and timestamps. */
+  version: 1 | 2;
   recoveryKey: string;
   savedAt: string;
   sessions: ISession[];
@@ -379,6 +518,8 @@ export interface IServerStatus {
   networkAddresses?: INetworkAddress[];
   /** Set when the last start attempt failed */
   errorMessage?: string;
+  /** Operational tournament key used to ignore stale renderer events. */
+  tournamentKey?: string;
 }
 
 /** A final match submission handed to the renderer for validation */
@@ -402,6 +543,14 @@ export interface IMatchSubmission {
   qbj: object;
   /** ISO 8601 */
   submittedAt: string;
+  /** Key of the tournament snapshot that created this session. */
+  tournamentKey?: string;
+  /** Recovery status when a durable server session is being reconciled after restart. */
+  sessionStatus?: SessionStatus;
+  /** Monotonic final revision used to reject a verdict for an earlier resubmission. */
+  finalRevision?: number;
+  /** Canonical final fingerprint used as a second guard against stale verdicts. */
+  finalFingerprint?: string;
 }
 
 /** Renderer's verdict on a submission */
@@ -409,6 +558,12 @@ export interface ISubmissionVerdict {
   sessionId: string;
   accepted: boolean;
   reason?: string;
+  /** Stable tournament identity prevents a delayed verdict from affecting a newly opened file. */
+  tournamentKey?: string;
+  /** The final revision the director reviewed; stale decisions must not affect a later retry. */
+  finalRevision?: number;
+  /** Optional canonical fingerprint for an even stronger stale-decision check. */
+  finalFingerprint?: string;
 }
 
 // #endregion

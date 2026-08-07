@@ -7,6 +7,7 @@ import {
   Collapse,
   IconButton,
   IconButtonProps,
+  Popover,
   Stack,
   styled,
   TextField,
@@ -15,8 +16,9 @@ import {
 } from '@mui/material';
 import React, { forwardRef, useEffect, useState } from 'react';
 import Grid from '@mui/material/Grid';
-import { ExpandMore } from '@mui/icons-material';
+import { ExpandMore, HelpOutlined } from '@mui/icons-material';
 import { invalidInteger } from './GeneralUtils';
+import { getHelpText, HelpTopicId } from '../Components/PageLevelHelpText';
 
 export enum YfCssClasses {
   HotkeyUnderline = 'yf-hotkey-underline',
@@ -132,6 +134,51 @@ export function YfCancelButton(props: ButtonProps) {
   );
 }
 
+/** Compact accessible help affordance. It opens on click/focus rather than relying on hover alone. */
+// eslint-disable-next-line react/require-default-props
+export function YfHelpPopover({ topic, label = 'Show help' }: { topic: HelpTopicId; label?: string }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const contents = getHelpText(topic);
+  return (
+    <>
+      <IconButton
+        size="small"
+        aria-label={label}
+        onClick={(event) => {
+          event.stopPropagation();
+          setAnchor(anchor ? null : event.currentTarget);
+        }}
+        sx={{ p: 0.25, color: 'text.secondary' }}
+      >
+        <HelpOutlined sx={{ fontSize: 16 }} />
+      </IconButton>
+      <Popover
+        open={anchor !== null}
+        anchorEl={anchor}
+        onClose={() => setAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { p: 1.5, maxWidth: 360 } } }}
+      >
+        {contents.map((section) => (
+          <Box key={section.header ?? section.content.join('\u0000')} sx={{ '& + &': { mt: 1.25 } }}>
+            {section.header && (
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                {section.header}
+              </Typography>
+            )}
+            {section.content.map((paragraph) => (
+              <Typography key={paragraph} variant="body2" color="text.secondary" sx={{ lineHeight: 1.45 }}>
+                {paragraph}
+              </Typography>
+            ))}
+          </Box>
+        ))}
+      </Popover>
+    </>
+  );
+}
+
 interface IYfPageHeaderProps {
   title: string;
   // eslint-disable-next-line react/require-default-props
@@ -140,11 +187,13 @@ interface IYfPageHeaderProps {
   actions?: React.ReactNode;
   // eslint-disable-next-line react/require-default-props
   status?: React.ReactNode;
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 /** Consistent title block at the top of a page. */
 export function YfPageHeader(props: IYfPageHeaderProps) {
-  const { title, description, actions, status } = props;
+  const { title, description, actions, status, helpTopic } = props;
   return (
     <Box
       sx={{
@@ -157,9 +206,12 @@ export function YfPageHeader(props: IYfPageHeaderProps) {
       }}
     >
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="h1" component="h1">
-          {title}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Typography variant="h1" component="h1">
+            {title}
+          </Typography>
+          {helpTopic && <YfHelpPopover topic={helpTopic} label={`Help for ${title}`} />}
+        </Box>
         {description && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             {description}
@@ -213,11 +265,13 @@ interface IYfFieldRowProps {
   /** Nudge the label to the top, for a control taller than one line. */
   // eslint-disable-next-line react/require-default-props
   alignTop?: boolean;
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 /** One label/control pair inside a `YfFieldGrid`. */
 export function YfFieldRow(props: React.PropsWithChildren<IYfFieldRowProps>) {
-  const { label, alignTop, children } = props;
+  const { label, alignTop, helpTopic, children } = props;
 
   return (
     <>
@@ -227,7 +281,10 @@ export function YfFieldRow(props: React.PropsWithChildren<IYfFieldRowProps>) {
         color="text.secondary"
         sx={{ alignSelf: alignTop ? 'start' : 'center', pt: alignTop ? '9px' : 0 }}
       >
-        {label}
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+          {label}
+          {helpTopic && <YfHelpPopover topic={helpTopic} label={`Help for ${String(label)}`} />}
+        </Box>
       </Typography>
       <Box sx={{ minWidth: 0 }}>{children}</Box>
     </>
@@ -260,11 +317,13 @@ interface IYfToggleRowProps {
   label: React.ReactNode;
   // eslint-disable-next-line react/require-default-props
   hint?: React.ReactNode;
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 /** One switch row inside a `YfToggleGrid`. */
 export function YfToggleRow(props: React.PropsWithChildren<IYfToggleRowProps>) {
-  const { label, hint, children } = props;
+  const { label, hint, helpTopic, children } = props;
 
   return (
     <Box
@@ -278,7 +337,10 @@ export function YfToggleRow(props: React.PropsWithChildren<IYfToggleRowProps>) {
     >
       <Box sx={{ minWidth: 0 }}>
         <Typography component="div" variant="body1" sx={{ lineHeight: 1.3 }}>
-          {label}
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+            {label}
+            {helpTopic && <YfHelpPopover topic={helpTopic} label={`Help for ${String(label)}`} />}
+          </Box>
         </Typography>
         {hint && (
           <Typography component="div" variant="caption" color="text.secondary">

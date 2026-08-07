@@ -4,12 +4,15 @@ import { PlayerStats, PoolTeamStats, PhaseStandings } from '../DataModel/StatSum
 import { ScheduledMatchStatus } from '../DataModel/ScheduledMatch';
 import Tournament from '../DataModel/Tournament';
 import { ScoringRules } from '../DataModel/ScoringRules';
+import { projectTournamentForReport } from './ReportScope';
 import {
   IPublicAnswerCount,
   IPublicIndividualStanding,
   IPublicLiveSnapshot,
   IPublicLiveSettings,
   IPublicNextRound,
+  IPublicPairingAssignment,
+  IPublicPairingsSnapshot,
   IPublicPhaseStanding,
   IPublicRecentResult,
   IPublicRoundSummary,
@@ -33,12 +36,15 @@ interface IAcceptedMatchLocation {
 export default function buildPublicLiveSnapshot(tournament: Tournament, now = new Date()): IPublicLiveSnapshot | null {
   if (!tournament.liveDisplaySettings.enabled) return null;
 
-  // The existing compiler is the source of truth. Full-report compilation is needed for cumulative
-  // team stats and individual stats, while the second argument gives phase standings their normal
-  // rank/tie display strings.
-  tournament.compileStats(true, true);
+  // Compile a report-only projection. The live snapshot is pushed whenever the renderer changes,
+  // so compiling the authoritative tournament here would make a read-only update mutate derived
+  // stats and ranking state behind the user's back.
+  const reportTournament = projectTournamentForReport(tournament, {
+    phaseCodes: tournament.phases.map((phase) => phase.code),
+    includeCarryover: true,
+  });
 
-  const rules = tournament.scoringRules;
+  const rules = reportTournament.scoringRules;
   const settings: IPublicLiveSettings = {
     slides: { ...tournament.liveDisplaySettings.slides },
     slideDurationSeconds: tournament.liveDisplaySettings.slideDurationSeconds,
@@ -47,22 +53,22 @@ export default function buildPublicLiveSnapshot(tournament: Tournament, now = ne
     showLastUpdated: tournament.liveDisplaySettings.showLastUpdated,
   };
 
-  const allMatches = listMatches(tournament);
-  const phaseRankByTeam = makeCurrentPhaseRankMap(tournament.stats);
-  const teamStandings = tournament.cumulativeStats
-    ? tournament.cumulativeStats.teamStats.map((stats) =>
+  const allMatches = listMatches(reportTournament);
+  const phaseRankByTeam = makeCurrentPhaseRankMap(reportTournament.stats);
+  const teamStandings = reportTournament.cumulativeStats
+    ? reportTournament.cumulativeStats.teamStats.map((stats) =>
         toTeamStanding(stats, stats.rank || phaseRankByTeam.get(stats.team.name) || ''),
       )
-    : tournament.getListOfAllTeams().map((team) => emptyTeamStanding(team.name));
+    : reportTournament.getListOfAllTeams().map((team) => emptyTeamStanding(team.name));
 
-  const individualSource = findIndividualSource(tournament.stats);
+  const individualSource = findIndividualSource(reportTournament.stats);
   const individualStandings = individualSource
     ? individualSource.players
         .filter((stats) => stats.tossupsHeard > 0)
         .map((stats) => toIndividualStanding(stats, rules))
     : [];
 
-  const phaseStandings = tournament.stats.map(toPhaseStanding);
+  const phaseStandings = reportTournament.stats.map(toPhaseStanding);
   const recentResults = allMatches
     .slice()
     .reverse()
@@ -85,6 +91,52 @@ export default function buildPublicLiveSnapshot(tournament: Tournament, now = ne
       individualPptuh: `PP${rules.regulationTossupCount}TUH`,
       teamPpb: rules.useBonuses ? 'PPB' : null,
     },
+  };
+}
+
+/**
+ * Build the public pairings projection independently of the slideshow setting. It is deliberately
+ * limited to the director-released round and omits cancelled history and every credential.
+ */
+export function buildPublicPairingsSnapshot(tournament: Tournament, now = new Date()): IPublicPairingsSnapshot | null {
+  if (tournament.liveDisplaySettings.publicPairingsEnabled !== true) return null;
+  const released = tournament.releasedRoundNumber;
+  const round =
+    released === null
+      ? null
+      : {
+          number: released,
+          name: tournament.getRoundObjByNumber(released)?.displayName() ?? `Round ${released}`,
+        };
+  const roomNames = new Map(tournament.rooms.map((room) => [room.id, room.name]));
+  const assignments: IPublicPairingAssignment[] =
+    released === null
+      ? []
+      : tournament.scheduledMatches
+          .filter(
+            (match) =>
+              match.roundNumber === released &&
+              match.roomId !== undefined &&
+              match.status !== ScheduledMatchStatus.Cancelled,
+          )
+          .map((match) => ({
+            roundNumber: match.roundNumber,
+            roundName: round?.name ?? `Round ${match.roundNumber}`,
+            leftTeam: match.leftTeamName,
+            rightTeam: match.rightTeamName,
+            roomName: roomNames.get(match.roomId as string) ?? '',
+          }))
+          .filter((assignment) => assignment.roomName !== '')
+          .sort((a, b) => a.roomName.localeCompare(b.roomName) || a.leftTeam.localeCompare(b.leftTeam));
+  return {
+    version: 1,
+    tournamentName: tournament.name || 'Untitled tournament',
+    lastUpdatedAt: now.toISOString(),
+    round,
+    assignments,
+    teamNames: Array.from(
+      new Set(assignments.flatMap((assignment) => [assignment.leftTeam, assignment.rightTeam])),
+    ).sort((a, b) => a.localeCompare(b)),
   };
 }
 

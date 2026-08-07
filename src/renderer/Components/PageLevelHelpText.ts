@@ -1,9 +1,29 @@
 import { ApplicationPages } from '../Enums';
 
-type HelpTextSection = {
+export type HelpTextSection = {
   header?: string;
   content: string[];
 };
+
+/** Stable ids for page, subsection, and inline help. Components use ids instead of embedding copy. */
+export type HelpTopicId =
+  | 'setup'
+  | 'setup.tournament'
+  | 'setup.rules'
+  | 'setup.teams'
+  | 'setup.format'
+  | 'games'
+  | 'control'
+  | 'control.live'
+  | 'control.match-plan'
+  | 'control.rooms'
+  | 'control.display'
+  | 'reports'
+  | 'general.game-entry'
+  | 'control.server'
+  | 'control.pairing'
+  | 'control.match-inbox'
+  | 'control.public-pairings';
 
 const GeneralPageHelpText: HelpTextSection[] = [
   {
@@ -142,17 +162,92 @@ const StatReportPageHelpText: HelpTextSection[] = [
   },
 ];
 
-export default function getAppPageHelpText(page: ApplicationPages) {
+const ControlMatchPlanHelpText: HelpTextSection[] = [
+  {
+    header: 'Match Plan',
+    content: [
+      'The Match Plan is the authoritative list of games the tournament intends to play. Assignments reach rooms only after the round is released by tournament control.',
+      'Accepted history is retained. Rebalancing changes future assignments only and never moves a game that is already playing, submitted, or accepted.',
+    ],
+  },
+];
+
+const ControlRoomsHelpText: HelpTextSection[] = [
+  {
+    header: 'Rooms',
+    content: [
+      'A room is a durable physical location with a human pairing code and a separate long access credential. Pair new browsers at /join; the access credential is never printed as text.',
+      'Connected and Ready are operational signals from the room browsers. They do not alter the schedule or a score already in progress.',
+    ],
+  },
+  ...RoomsPageHelpText,
+];
+
+const ControlDisplayHelpText: HelpTextSection[] = [
+  {
+    header: 'Public display and pairings',
+    content: [
+      'The audience and display URLs are read-only. Public pairings are a separate setting and page, so publishing the room schedule does not turn on the rotating standings display.',
+      'Public pairings include only the director-released/current round and contain no room credentials, sessions, or operational controls.',
+    ],
+  },
+];
+
+/** The centralized registry used by both the page dialog and compact inline help. */
+export const helpRegistry: Record<HelpTopicId, HelpTextSection[]> = {
+  setup: [...GeneralPageHelpText, ...RulesPageHelpText, ...SchedulePageHelpText, ...TeamsPageHelpText],
+  'setup.tournament': GeneralPageHelpText,
+  'setup.rules': RulesPageHelpText,
+  'setup.teams': TeamsPageHelpText,
+  'setup.format': SchedulePageHelpText,
+  games: GamesPageHelpText,
+  control: RoomsPageHelpText,
+  'control.live': RoomsPageHelpText,
+  'control.match-plan': ControlMatchPlanHelpText,
+  'control.rooms': ControlRoomsHelpText,
+  'control.display': ControlDisplayHelpText,
+  reports: StatReportPageHelpText,
+  'general.game-entry': [
+    {
+      header: 'Game entry mode',
+      content: [
+        'Traditional entry keeps scoring inside YellowFruit. Browser room scoring lets paired room browsers submit finals to the Match Inbox for explicit review.',
+      ],
+    },
+  ],
+  'control.server': RoomsPageHelpText,
+  'control.pairing': ControlRoomsHelpText,
+  'control.match-inbox': [
+    {
+      header: 'Match Inbox',
+      content: [
+        'Review and accept a submitted final only after checking its validation and score. Rejection returns the room to a correct-and-resubmit state without creating a duplicate game.',
+      ],
+    },
+  ],
+  'control.public-pairings': ControlDisplayHelpText,
+};
+
+export function getHelpText(topic: HelpTopicId): HelpTextSection[] {
+  return helpRegistry[topic] ?? [];
+}
+
+export function getContextualAppPageHelpText(page: ApplicationPages, topic?: HelpTopicId): HelpTextSection[] {
+  if (topic && helpRegistry[topic]) return getHelpText(topic);
   switch (page) {
     case ApplicationPages.Setup:
-      return [...GeneralPageHelpText, ...RulesPageHelpText, ...SchedulePageHelpText, ...TeamsPageHelpText];
+      return getHelpText('setup');
     case ApplicationPages.Games:
-      return GamesPageHelpText;
+      return getHelpText('games');
     case ApplicationPages.Control:
-      return RoomsPageHelpText;
+      return getHelpText('control.live');
     case ApplicationPages.Reports:
-      return StatReportPageHelpText;
+      return getHelpText('reports');
     default:
-      return undefined;
+      return [];
   }
+}
+
+export default function getAppPageHelpText(page: ApplicationPages) {
+  return getContextualAppPageHelpText(page);
 }

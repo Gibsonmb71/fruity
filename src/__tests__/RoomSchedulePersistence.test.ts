@@ -7,7 +7,9 @@
 import { describe, expect, test } from 'vitest';
 import FileParser from '../renderer/DataModel/FileParsing';
 import { IYftFileTournament } from '../renderer/DataModel/Tournament';
+import { Match } from '../renderer/DataModel/Match';
 import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
+import SqbsGenerator from '../renderer/DataModel/SqbsFileGeneration';
 import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
 import TournamentServerService from '../renderer/Services/TournamentServerService';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
@@ -151,6 +153,20 @@ describe('rooms in the .yft file', () => {
 
     expect(reopened.rooms.map((r) => r.name)).toEqual(['Good Room']);
   });
+
+  test('a skipped optional room entry produces a repair diagnostic', () => {
+    const { written } = saveAndReopen((tourn) => {
+      tourn.rooms = [new TournamentRoom('Good Room', 0)];
+    });
+    written.YfData.rooms = [{ name: 42 } as any, ...(written.YfData.rooms ?? [])];
+
+    const parser = new FileParser({});
+    parser.parseYftTournament(written, '4.0.18');
+
+    expect(parser.repaired).toBe(true);
+    expect(parser.requiresReview).toBe(true);
+    expect(parser.diagnostics).toContain('Room entry 1 was ignored because it was malformed.');
+  });
 });
 
 describe('scheduled matches in the .yft file', () => {
@@ -230,6 +246,37 @@ describe('scheduled matches in the .yft file', () => {
     const reopened = reopen(written);
 
     expect(reopened.scheduledMatches).toHaveLength(1);
+  });
+
+  test('legacy scheduled entries without lifecycle metadata default to Scheduled and are reported', () => {
+    const { written } = saveAndReopen((tourn) => {
+      tourn.scheduledMatches = [new ScheduledMatch(1, testTeamNames[0], testTeamNames[1])];
+    });
+    const legacyScheduled = written.YfData.scheduledMatches?.[0] as { status?: ScheduledMatchStatus } | undefined;
+    if (legacyScheduled) legacyScheduled.status = undefined;
+
+    const parser = new FileParser({});
+    const reopened = parser.parseYftTournament(written, '4.0.18');
+
+    expect(reopened?.scheduledMatches[0].status).toBe(ScheduledMatchStatus.Scheduled);
+    expect(parser.repaired).toBe(true);
+    expect(parser.requiresReview).toBe(false);
+    expect(parser.diagnostics[0]).toContain('legacy scheduled match entry');
+  });
+
+  test('a missing status on a linked historical result is quarantined', () => {
+    const { written } = saveAndReopen((tourn) => {
+      const scheduled = new ScheduledMatch(1, testTeamNames[0], testTeamNames[1]);
+      scheduled.resultMatchId = 'Match_1';
+      tourn.scheduledMatches = [scheduled];
+    });
+    const legacyScheduled = written.YfData.scheduledMatches?.[0] as { status?: ScheduledMatchStatus } | undefined;
+    if (legacyScheduled) legacyScheduled.status = undefined;
+
+    const reopened = reopen(written);
+
+    expect(reopened.scheduledMatches[0].status).toBe(ScheduledMatchStatus.NeedsAttention);
+    expect(reopened.scheduledMatches[0].isPlayable()).toBe(false);
   });
 });
 
@@ -381,6 +428,34 @@ describe('QBJ export stays clean', () => {
     expect(qbj).not.toContain('availableRoundNumbers');
     expect(qbj).not.toContain('roomAssignmentLocked');
     expect(qbj).not.toContain('preferredRoomIds');
+  });
+});
+
+describe('SQBS export stays clean', () => {
+  test('room and server-only metadata never crosses the SQBS boundary', () => {
+    const tournament = makeTestTournament();
+    tournament.roomScoringMode = 'browser';
+    tournament.releasedRoundNumber = 1;
+    const room = new TournamentRoom('Room 101', 0, 'room-boundary-id', 'room-secret-token', '12345678');
+    tournament.rooms = [room];
+    const phase = tournament.getPrelimPhase();
+    const left = tournament.findTeamByName(testTeamNames[0]);
+    const right = tournament.findTeamByName(testTeamNames[1]);
+    if (!phase || !left || !right) throw new Error('test tournament is missing its prelim phase or teams');
+    phase.rounds[0].addMatch(new Match(left, right, tournament.scoringRules.answerTypes));
+    const scheduled = new ScheduledMatch(1, left.name, right.name, 'scheduled-boundary-id');
+    scheduled.roomId = room.id;
+    scheduled.roomAssignmentLocked = true;
+    tournament.scheduledMatches = [scheduled];
+
+    const generator = new SqbsGenerator(tournament);
+    generator.generateFile([phase]);
+
+    expect(generator.errorMessage).toBe('');
+    expect(generator.fileOutput).not.toContain('room-secret-token');
+    expect(generator.fileOutput).not.toContain('scheduled-boundary-id');
+    expect(generator.fileOutput).not.toContain('room-boundary-id');
+    expect(generator.fileOutput).not.toContain('12345678');
   });
 });
 

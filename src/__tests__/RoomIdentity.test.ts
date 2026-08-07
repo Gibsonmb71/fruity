@@ -4,13 +4,28 @@
  * either can't connect or, worse, claims to be a different room.
  */
 import { describe, expect, test } from 'vitest';
-import { readRoomIdentity } from '../room/api';
+import {
+  adoptRoomIdentity,
+  clearRememberedRoomIdentity,
+  getRememberedRoomIdentity,
+  readRoomIdentity,
+  resolveRoomIdentity,
+} from '../room/api';
 import { TournamentRoom } from '../renderer/DataModel/TournamentRoom';
 
 /** Split a URL into the shape the room app reads from `window.location` */
 function locationOf(url: string) {
   const parsed = new URL(url);
-  return { pathname: parsed.pathname, search: parsed.search };
+  return { pathname: parsed.pathname, search: parsed.search, hash: parsed.hash };
+}
+
+function storage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
 }
 
 describe('readRoomIdentity', () => {
@@ -68,5 +83,29 @@ describe('readRoomIdentity', () => {
   test('a similar-looking path is not a room URL', () => {
     expect(readRoomIdentity(locationOf('http://host/rooms/room-1?token=t'))).toBeNull();
     expect(readRoomIdentity(locationOf('http://host/room?token=t'))).toBeNull();
+  });
+
+  test('remembers a QR identity and removes the token from visible routing state', () => {
+    const browserStorage = storage();
+    const replaced: string[] = [];
+    const identity = adoptRoomIdentity(
+      locationOf('http://host/room/room-1?token=secret#room'),
+      { replaceState: (_data, _unused, url) => replaced.push(String(url)) },
+      browserStorage,
+    );
+
+    expect(identity).toMatchObject({ roomId: 'room-1', token: 'secret', deviceId: expect.any(String) });
+    expect(replaced).toEqual(['/room/room-1#room']);
+    expect(getRememberedRoomIdentity(browserStorage)).toMatchObject({ roomId: 'room-1', token: 'secret' });
+  });
+
+  test('restores only the remembered room path and Change room clears it', () => {
+    const browserStorage = storage();
+    const history = { replaceState: () => undefined };
+    adoptRoomIdentity(locationOf('http://host/room/room-1?token=secret'), history, browserStorage);
+    expect(resolveRoomIdentity(locationOf('http://host/room/room-1'), browserStorage)?.token).toBe('secret');
+    expect(resolveRoomIdentity(locationOf('http://host/room/room-2'), browserStorage)).toBeNull();
+    clearRememberedRoomIdentity(browserStorage);
+    expect(getRememberedRoomIdentity(browserStorage)).toBeNull();
   });
 });

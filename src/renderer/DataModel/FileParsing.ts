@@ -20,7 +20,7 @@ import { IQbjRank } from './Rank';
 import { IQbjRanking, OverallRanking, Ranking } from './Ranking';
 import Registration, { IQbjRegistration, IYftFileRegistration } from './Registration';
 import { IQbjRound, IYftFileRound, Round, sortRounds } from './Round';
-import { ScheduledMatch } from './ScheduledMatch';
+import { ScheduledMatch, ScheduledMatchStatus } from './ScheduledMatch';
 import { IQbjScoringRules, IYftFileScoringRules, ScoringRules } from './ScoringRules';
 import { TournamentRoom } from './TournamentRoom';
 import { IQbjTeam, IYftFileTeam, Team } from './Team';
@@ -49,6 +49,15 @@ interface IYftObjectDict<T extends IYftDataModelObject> {
 
 export default class FileParser {
   tourn: Tournament;
+
+  /** Non-fatal metadata omissions found while parsing a candidate file. */
+  diagnostics: string[] = [];
+
+  /** Whether parsing regenerated or quarantined operational metadata. */
+  repaired = false;
+
+  /** Whether the repaired metadata needs director review before room scoring. */
+  requiresReview = false;
 
   refTargets: IRefTargetDict;
 
@@ -168,13 +177,37 @@ export default class FileParser {
       this.tourn.finalRankingsReady = yfExtraData.finalRankingsReady || false;
       this.tourn.usingScheduleTemplate = yfExtraData.usingScheduleTemplate || false;
       this.tourn.appVersion = yfExtraData.YfVersion || '';
-      this.tourn.rooms = FileParser.parseRoomList(yfExtraData.rooms);
-      this.tourn.scheduledMatches = FileParser.parseScheduledMatchList(yfExtraData.scheduledMatches);
+      if (typeof yfExtraData.tournamentId === 'string' && yfExtraData.tournamentId !== '') {
+        this.tourn.operationalId = yfExtraData.tournamentId;
+      }
+      const roomDiagnosticStart = this.diagnostics.length;
+      this.tourn.rooms = FileParser.parseRoomList(yfExtraData.rooms, this.diagnostics);
+      if (
+        this.diagnostics
+          .slice(roomDiagnosticStart)
+          .some((diagnostic) => diagnostic.startsWith('Room entry') || diagnostic.includes('room pairing code'))
+      ) {
+        this.repaired = true;
+        this.requiresReview = true;
+      }
+
+      const scheduledDiagnosticStart = this.diagnostics.length;
+      this.tourn.scheduledMatches = FileParser.parseScheduledMatchList(yfExtraData.scheduledMatches, this.diagnostics);
+      if (
+        this.diagnostics
+          .slice(scheduledDiagnosticStart)
+          .some((diagnostic) => diagnostic.startsWith('Scheduled-match entry'))
+      ) {
+        this.repaired = true;
+        this.requiresReview = true;
+      }
       this.tourn.releasedRoundNumber =
         typeof yfExtraData.releasedRoundNumber === 'number' && Number.isFinite(yfExtraData.releasedRoundNumber)
           ? yfExtraData.releasedRoundNumber
           : null;
       this.tourn.autoReleaseNextRound = yfExtraData.autoReleaseNextRound === true;
+      this.tourn.holdNewRoomStarts = yfExtraData.holdNewRoomStarts === true;
+      this.tourn.holdMessage = typeof yfExtraData.holdMessage === 'string' ? yfExtraData.holdMessage : '';
       this.tourn.rebracketedPhaseCodes = Array.isArray(yfExtraData.rebracketedPhaseCodes)
         ? yfExtraData.rebracketedPhaseCodes.filter((code): code is string => typeof code === 'string')
         : [];
@@ -190,6 +223,70 @@ export default class FileParser {
         this.tourn.roomScoringMode = hasLegacyRoomConfiguration ? 'browser' : 'traditional';
       }
       this.tourn.liveDisplaySettings = FileParser.parseLiveDisplaySettings(yfExtraData.liveDisplay);
+
+      const rawRooms = Array.isArray(yfExtraData.rooms) ? yfExtraData.rooms : [];
+      const roomsMissingIdentity = rawRooms.filter((entry) => {
+        if (typeof entry !== 'object' || entry === null || typeof (entry as { name?: unknown }).name !== 'string') {
+          return false;
+        }
+        const candidate = entry as { id?: unknown; accessToken?: unknown };
+        return (
+          typeof candidate.id !== 'string' ||
+          candidate.id.trim() === '' ||
+          typeof candidate.accessToken !== 'string' ||
+          candidate.accessToken.trim() === ''
+        );
+      }).length;
+      if (roomsMissingIdentity > 0) {
+        this.repaired = true;
+        this.requiresReview = true;
+        this.diagnostics.push(
+          `${roomsMissingIdentity} room entr${
+            roomsMissingIdentity === 1 ? 'y was' : 'ies were'
+          } assigned regenerated identity metadata.`,
+        );
+      }
+
+      const rawScheduledMatches = Array.isArray(yfExtraData.scheduledMatches) ? yfExtraData.scheduledMatches : [];
+      const scheduledMissingIds = rawScheduledMatches.filter((entry) => {
+        if (typeof entry !== 'object' || entry === null) return false;
+        const candidate = entry as { id?: unknown };
+        return typeof candidate.id !== 'string' || candidate.id.trim() === '';
+      }).length;
+      const scheduledUnknownStatuses = rawScheduledMatches.filter((entry) => {
+        if (typeof entry !== 'object' || entry === null) return false;
+        const candidate = entry as { status?: unknown };
+        return (
+          typeof candidate.status === 'string' &&
+          !Object.values(ScheduledMatchStatus).includes(candidate.status as ScheduledMatchStatus)
+        );
+      }).length;
+      const scheduledMissingStatuses = rawScheduledMatches.filter((entry) => {
+        if (typeof entry !== 'object' || entry === null) return false;
+        const candidate = entry as { status?: unknown; resultMatchId?: unknown };
+        return candidate.status === undefined && candidate.resultMatchId === undefined;
+      }).length;
+      if (scheduledMissingIds > 0) {
+        this.repaired = true;
+        this.requiresReview = true;
+        this.diagnostics.push(
+          `${scheduledMissingIds} scheduled match entr${
+            scheduledMissingIds === 1 ? 'y was' : 'ies were'
+          } assigned regenerated identity metadata.`,
+        );
+      }
+      if (scheduledUnknownStatuses > 0) {
+        this.repaired = true;
+        this.requiresReview = true;
+      }
+      if (scheduledMissingStatuses > 0) {
+        this.repaired = true;
+        this.diagnostics.push(
+          `${scheduledMissingStatuses} legacy scheduled match entr${
+            scheduledMissingStatuses === 1 ? 'y was' : 'ies were'
+          } assigned the default Scheduled status.`,
+        );
+      }
     } else {
       this.tourn.inferCarryoverStatus();
     }
@@ -205,13 +302,20 @@ export default class FileParser {
    * simply has none. An unreadable individual room is skipped rather than failing the whole open:
    * losing one room's configuration is recoverable, losing the tournament file is not.
    */
-  static parseRoomList(source: unknown): TournamentRoom[] {
+  static parseRoomList(source: unknown, diagnostics: string[] = []): TournamentRoom[] {
     if (!Array.isArray(source)) return [];
     const rooms: TournamentRoom[] = [];
     source.forEach((entry, index) => {
       const room = TournamentRoom.fromYftFileObject(entry, index);
       if (room) rooms.push(room);
+      else diagnostics.push(`Room entry ${index + 1} was ignored because it was malformed.`);
     });
+    const repairedCodes = TournamentRoom.ensureUniquePairingCodes(rooms);
+    if (repairedCodes > 0) {
+      diagnostics.push(
+        `${repairedCodes} room pairing code${repairedCodes === 1 ? '' : 's'} was generated or repaired while loading.`,
+      );
+    }
     return rooms.sort(TournamentRoom.compare);
   }
 
@@ -224,6 +328,7 @@ export default class FileParser {
       slides?: Partial<ILiveDisplaySettings['slides']>;
     };
     settings.enabled = candidate.enabled === true;
+    settings.publicPairingsEnabled = candidate.publicPairingsEnabled === true;
     if (candidate.slides && typeof candidate.slides === 'object') {
       for (const key of Object.keys(settings.slides) as (keyof ILiveDisplaySettings['slides'])[]) {
         if (typeof candidate.slides[key] === 'boolean') settings.slides[key] = candidate.slides[key] as boolean;
@@ -247,13 +352,23 @@ export default class FileParser {
   }
 
   /** Read the tournament's scheduled matches back. Unreadable entries are skipped, as with rooms. */
-  static parseScheduledMatchList(source: unknown): ScheduledMatch[] {
+  static parseScheduledMatchList(source: unknown, diagnostics: string[] = []): ScheduledMatch[] {
     if (!Array.isArray(source)) return [];
     const scheduled: ScheduledMatch[] = [];
-    for (const entry of source) {
+    source.forEach((entry, index) => {
       const match = ScheduledMatch.fromYftFileObject(entry);
-      if (match) scheduled.push(match);
-    }
+      if (match) {
+        const rawStatus = (entry as { status?: unknown })?.status;
+        if (
+          typeof rawStatus === 'string' &&
+          !Object.values(ScheduledMatchStatus).includes(rawStatus as ScheduledMatchStatus)
+        ) {
+          diagnostics.push(`Scheduled-match entry ${index + 1} had an unknown status and was quarantined.`);
+          match.quarantine(`Its persisted status ${rawStatus} was not recognized.`);
+        }
+        scheduled.push(match);
+      } else diagnostics.push(`Scheduled-match entry ${index + 1} was ignored because it was malformed.`);
+    });
     return scheduled;
   }
 

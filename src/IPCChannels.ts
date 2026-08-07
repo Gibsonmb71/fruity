@@ -34,6 +34,8 @@ export enum IpcRendToMain {
   TournamentServerSetSnapshot = 'TournamentServerSetSnapshot',
   /** Push the separate, deliberately reduced public live projection to the local server */
   TournamentServerSetPublicLiveSnapshot = 'TournamentServerSetPublicLiveSnapshot',
+  /** Push the independent public released-pairings projection to the local server */
+  TournamentServerSetPublicPairingsSnapshot = 'TournamentServerSetPublicPairingsSnapshot',
   /** The statskeeper accepted or rejected a match a room submitted */
   TournamentServerSubmissionVerdict = 'TournamentServerSubmissionVerdict',
 }
@@ -79,6 +81,8 @@ export enum IpcMainToRend {
   TournamentServerSessionsChanged = 'TournamentServerSessionsChanged',
   /** A room started its assigned game, so the scheduled match should show as being played */
   TournamentServerSessionStarted = 'TournamentServerSessionStarted',
+  /** A room browser's operational help-request view changed */
+  TournamentServerHelpRequestsChanged = 'TournamentServerHelpRequestsChanged',
 }
 
 /** Channels for both directions renderer<-->main */
@@ -108,6 +112,10 @@ export enum IpcBidirectional {
   TournamentServerGetPendingSubmissions = 'TournamentServerGetPendingSubmissions',
   /** Ask for the last check-in time of each configured room */
   TournamentServerGetRoomPresence = 'TournamentServerGetRoomPresence',
+  /** Ask for open/resolved/cancelled operational help requests */
+  TournamentServerGetHelpRequests = 'TournamentServerGetHelpRequests',
+  /** Resolve or cancel one operational help request from tournament control */
+  TournamentServerUpdateHelpRequest = 'TournamentServerUpdateHelpRequest',
 }
 
 export type IpcChannels = IpcRendToMain | IpcMainToRend | IpcBidirectional;
@@ -133,6 +141,7 @@ export const rendererListenableEvents = [
   IpcMainToRend.TournamentServerMatchSubmitted,
   IpcMainToRend.TournamentServerSessionsChanged,
   IpcMainToRend.TournamentServerSessionStarted,
+  IpcMainToRend.TournamentServerHelpRequestsChanged,
   IpcBidirectional.LoadBackup,
   IpcBidirectional.ExportQbjFile,
   IpcBidirectional.ImportQbjGamesRendererLaunch,
@@ -145,4 +154,6 @@ export const rendererListenableEvents = [
   IpcBidirectional.TournamentServerGetSessions,
   IpcBidirectional.TournamentServerGetPendingSubmissions,
   IpcBidirectional.TournamentServerGetRoomPresence,
+  IpcBidirectional.TournamentServerGetHelpRequests,
+  IpcBidirectional.TournamentServerUpdateHelpRequest,
 ];

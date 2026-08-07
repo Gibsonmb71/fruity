@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { ScheduledMatch, ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
+import {
+  ScheduledMatch,
+  ScheduledMatchStatus,
+  ScheduledMatchTransitionError,
+  transitionScheduledMatch,
+} from '../renderer/DataModel/ScheduledMatch';
 import { Phase, PhaseTypes } from '../renderer/DataModel/Phase';
 import { Pool } from '../renderer/DataModel/Pool';
 import { PoolTeam } from '../renderer/DataModel/PoolTeam';
@@ -311,7 +316,7 @@ describe('ScheduledMatch', () => {
     expect(restored).toEqual(scheduled);
   });
 
-  test('an unrecognized status falls back to scheduled rather than staying invalid', () => {
+  test('an unrecognized status is quarantined rather than made playable', () => {
     const restored = ScheduledMatch.fromYftFileObject({
       roundNumber: 1,
       leftTeamName: teamNames[0],
@@ -319,7 +324,39 @@ describe('ScheduledMatch', () => {
       status: 'somethingElse',
     });
 
-    expect(restored?.status).toBe(ScheduledMatchStatus.Scheduled);
+    expect(restored?.status).toBe(ScheduledMatchStatus.NeedsAttention);
+    expect(restored?.quarantined).toBe(true);
+    expect(restored?.isPlayable()).toBe(false);
+  });
+
+  test('legal transitions are explicit and terminal states reject stale changes', () => {
+    const scheduled = new ScheduledMatch(3, teamNames[0], teamNames[1]);
+
+    expect(transitionScheduledMatch(scheduled, ScheduledMatchStatus.Ready)).toEqual({ ok: true, changed: true });
+    expect(transitionScheduledMatch(scheduled, ScheduledMatchStatus.Submitted).ok).toBe(false);
+    expect(transitionScheduledMatch(scheduled, ScheduledMatchStatus.Playing)).toEqual({ ok: true, changed: true });
+    expect(transitionScheduledMatch(scheduled, ScheduledMatchStatus.Submitted)).toEqual({ ok: true, changed: true });
+    const missingResult = transitionScheduledMatch(scheduled, ScheduledMatchStatus.Accepted);
+    expect(missingResult.ok ? undefined : missingResult.error).toBe(
+      ScheduledMatchTransitionError.AcceptedMatchRequired,
+    );
+
+    scheduled.resultMatchId = 'Match_1';
+    expect(transitionScheduledMatch(scheduled, ScheduledMatchStatus.Accepted, { hasAcceptedResult: true })).toEqual({
+      ok: true,
+      changed: true,
+    });
+    const stale = transitionScheduledMatch(scheduled, ScheduledMatchStatus.Playing);
+    expect(stale.ok ? undefined : stale.error).toBe(ScheduledMatchTransitionError.AcceptedIsTerminal);
+  });
+
+  test('quarantine prevents a malformed game from entering play', () => {
+    const scheduled = new ScheduledMatch(3, teamNames[0], teamNames[1]);
+    scheduled.quarantine('ambiguous saved history');
+
+    const result = transitionScheduledMatch(scheduled, ScheduledMatchStatus.Playing);
+    expect(result.ok ? undefined : result.error).toBe(ScheduledMatchTransitionError.Quarantined);
+    expect(scheduled.isPlayable()).toBe(false);
   });
 
   test('unusable entries are rejected', () => {

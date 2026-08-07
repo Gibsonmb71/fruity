@@ -90,7 +90,11 @@ export default function GamesPage(props: IGamesPageProps) {
 
   return (
     <>
-      <YfPageHeader title="Games" description="Every game entered for this tournament, by round or by pool." />
+      <YfPageHeader
+        title="Games"
+        description="Every game entered for this tournament, by round or by pool."
+        helpTopic="games"
+      />
       <Box
         sx={{
           display: 'flex',
@@ -448,6 +452,11 @@ function MatchListItem(props: IMatchListItemProps) {
 
   const errorMessage = match.getErrorMessages()[0];
   const warningMessage = match.getWarningMessages()[0];
+  const scheduledContext = tournManager.tournament.scheduledMatches.find(
+    (scheduled) => scheduled.resultMatchId === match.id,
+  );
+  const isOfficialResult = scheduledContext?.isAccepted() === true;
+  const editLabel = isOfficialResult ? 'Correct official result…' : 'Edit game';
 
   useEffect(() => {
     if (!highlighted || !itemRef.current) return;
@@ -510,8 +519,12 @@ function MatchListItem(props: IMatchListItemProps) {
         )}
       </Box>
       <Box sx={{ display: 'flex', gap: 0.25, flexShrink: 0 }}>
-        <Tooltip title="Edit game">
-          <IconButton size="small" onClick={() => tournManager.openMatchEditModalExistingMatch(match, round)}>
+        <Tooltip title={editLabel}>
+          <IconButton
+            size="small"
+            aria-label={editLabel}
+            onClick={() => tournManager.openMatchEditModalExistingMatch(match, round)}
+          >
             <Edit fontSize="small" />
           </IconButton>
         </Tooltip>

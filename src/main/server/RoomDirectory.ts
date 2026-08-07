@@ -143,6 +143,15 @@ export function checkCanStart(
     };
   }
 
+  if (snapshot.holdNewRoomStarts) {
+    return {
+      reason: RoomBlockedReason.Hold,
+      message:
+        snapshot.holdMessage?.trim() ||
+        'Tournament control has paused new room starts. A game already in progress can continue.',
+    };
+  }
+
   if (snapshot.gameFormat === null) {
     return {
       reason: RoomBlockedReason.RulesUnusable,
@@ -154,6 +163,24 @@ export function checkCanStart(
     return {
       reason: RoomBlockedReason.AlreadyResolved,
       message: 'This game has already been finished by tournament control.',
+    };
+  }
+
+  if (assignment.quarantined) {
+    return {
+      reason: RoomBlockedReason.NeedsAttention,
+      message: 'This assignment needs tournament-control review before it can be scored.',
+    };
+  }
+
+  // A non-quarantined NeedsAttention assignment is the explicit retry state produced by a
+  // director rejecting a final. It is safe to start a fresh session; malformed persisted state is
+  // always quarantined and remains blocked above.
+
+  if (assignment.status === ScheduledMatchStatus.Submitted) {
+    return {
+      reason: RoomBlockedReason.Submitted,
+      message: 'This game has a final awaiting tournament-control review.',
     };
   }
 
@@ -207,6 +234,8 @@ export function buildAssignmentResponse(
     timedRounds: snapshot.timedRounds,
     releasedRoundNumber:
       snapshot.releasedRoundNumber === undefined ? snapshot.currentRoundNumber : snapshot.releasedRoundNumber,
+    holdNewRoomStarts: snapshot.holdNewRoomStarts,
+    holdMessage: snapshot.holdMessage,
   };
 }
 

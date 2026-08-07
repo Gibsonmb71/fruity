@@ -147,7 +147,7 @@ export class Round implements IQbjRound, IYftDataModelObject {
 
   /** Get the matches carried over into the given playoff phase */
   getCarryoverMatches(playoffPhase: Phase) {
-    return this.matches.filter((m) => m.carryoverPhases.includes(playoffPhase));
+    return this.matches.filter((m) => Array.isArray(m.carryoverPhases) && m.carryoverPhases.includes(playoffPhase));
   }
 
   addMatch(match: Match) {

@@ -192,9 +192,24 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Release the tournament server's port rather than leaving it bound after the app closes.
-app.on('will-quit', () => {
-  shutDownTournamentServer();
+// Release the tournament server's port rather than leaving it bound after the app closes. Electron
+// does not await async event handlers, so hold the quit event until the bounded server shutdown has
+// completed (or the process-level deadline is reached) and never leave an unhandled rejection.
+let shutdownInProgress = false;
+async function finishQuitAfterServerShutdown(event: { preventDefault: () => void }) {
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
+  event.preventDefault();
+  const deadline = new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, 3500);
+    timeout.unref?.();
+  });
+  await Promise.race([shutDownTournamentServer(), deadline]).catch(() => undefined);
+  app.quit();
+}
+
+app.on('will-quit', (event) => {
+  finishQuitAfterServerShutdown(event).catch(() => app.quit());
 });
 
 app

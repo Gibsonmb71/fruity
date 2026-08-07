@@ -43,7 +43,7 @@ export function readNavigationPreferences(identity: string): INavigationPreferen
       setupSection: parsed.setupSection,
       controlSection: parsed.controlSection,
     };
-  } catch (err: any) {
+  } catch {
     return null;
   }
 }
@@ -52,7 +52,7 @@ export function writeNavigationPreferences(identity: string, preferences: INavig
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(navigationStorageKey(identity), JSON.stringify(preferences));
-  } catch (err: any) {
+  } catch {
     // Navigation state is a convenience only; a full or unavailable storage must not affect editing.
   }
 }

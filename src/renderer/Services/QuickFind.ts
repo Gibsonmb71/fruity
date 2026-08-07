@@ -2,8 +2,7 @@ import { ApplicationPages, ControlPages, SetupPages } from '../Enums';
 import Tournament from '../DataModel/Tournament';
 import { ScheduledMatchStatus } from '../DataModel/ScheduledMatch';
 import { ReadinessTarget } from './TournamentReadiness';
-import { INavigationIntent } from './Navigation';
-import { validateSchedule } from './ScheduleService';
+import { createNavigationIntent, INavigationIntent } from './Navigation';
 
 export type QuickFindCategory = 'PAGE' | 'TEAM' | 'GAME' | 'ROUND' | 'ROOM' | 'ACTION';
 export type QuickFindAction =
@@ -57,7 +56,7 @@ function item(options: IItemOptions): IQuickFindItem {
     ...rest,
     target,
     actionId,
-    navigation: { target, actionId, ...navigation },
+    navigation: createNavigationIntent(target, { actionId, ...navigation }),
   };
 }
 
@@ -126,15 +125,6 @@ function firstUnresolvedRound(tournament: Tournament, context: IQuickFindContext
     .find((round) =>
       round.matches.some((match) => match.getErrorMessages().length > 0 || match.getWarningMessages().length > 0),
     )?.number;
-}
-
-function canReleaseRound(tournament: Tournament, roundNumber: number, context: IQuickFindContext): boolean {
-  if (context.releaseAllowed !== undefined) return context.releaseAllowed;
-  const matches = tournament.scheduledMatches.filter(
-    (match) => match.roundNumber === roundNumber && match.status !== ScheduledMatchStatus.Cancelled,
-  );
-  if (matches.length === 0 || matches.some((match) => !match.roomId)) return false;
-  return !validateSchedule(matches, tournament.rooms).some((issue) => issue.severity === 'error');
 }
 
 export function buildQuickFindItems(tournament: Tournament, context: IQuickFindContext = {}): IQuickFindItem[] {
@@ -241,12 +231,12 @@ export function buildQuickFindItems(tournament: Tournament, context: IQuickFindC
           Math.max(submittedCount, context.inboxCount ?? 0) === 1 ? '' : 's'
         } waiting in Control / Live`,
         target: 'control:live',
-        navigation: { focus: 'result-inbox', controlFocus: 'inbox' },
+        navigation: { focus: 'result-inbox' },
       }),
     );
   }
 
-  if (browserScoring && currentRound !== undefined && canReleaseRound(tournament, currentRound, context)) {
+  if (browserScoring && currentRound !== undefined && context.releaseAllowed === true) {
     actions.push(
       item({
         id: `action-release-round-${currentRound}`,
@@ -255,7 +245,7 @@ export function buildQuickFindItems(tournament: Tournament, context: IQuickFindC
         label: `Release Round ${currentRound}`,
         detail: 'Make the current round available to rooms',
         target: 'control:live',
-        navigation: { roundNumber: currentRound, focus: 'round', controlFocus: 'current-round' },
+        navigation: { roundNumber: currentRound, focus: 'round' },
       }),
     );
   }
@@ -305,7 +295,6 @@ export function buildQuickFindItems(tournament: Tournament, context: IQuickFindC
         roundNumber: match.roundNumber,
         phaseCode: match.phaseCode,
         focus: 'scheduled-match',
-        controlFocus: 'match-plan',
       },
     }),
   );

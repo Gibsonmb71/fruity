@@ -256,6 +256,24 @@ function SetupPreflight({
               actionLabel={readiness.roomOperations.currentAssignmentsValid ? undefined : 'Review Match Plan'}
               onAction={() => openTarget('control:match-plan')}
             />
+            <PreflightRow
+              label={`Configured rooms connected (${readiness.roomOperations.connectedRoomCount}/${readiness.roomOperations.configuredRoomCount})`}
+              status={readinessStatus(
+                readiness.roomOperations.configuredRoomsConnected,
+                !readiness.roomOperations.configuredRoomsConnected,
+              )}
+              actionLabel={readiness.roomOperations.configuredRoomsConnected ? undefined : 'Open Rooms'}
+              onAction={() => openTarget('control:rooms')}
+            />
+            <PreflightRow
+              label={`Configured rooms ready (${readiness.roomOperations.readyRoomCount}/${readiness.roomOperations.configuredRoomCount})`}
+              status={readinessStatus(
+                readiness.roomOperations.configuredRoomsReady,
+                !readiness.roomOperations.configuredRoomsReady,
+              )}
+              actionLabel={readiness.roomOperations.configuredRoomsReady ? undefined : 'Open Rooms'}
+              onAction={() => openTarget('control:rooms')}
+            />
           </>
         ) : (
           <PreflightRow
@@ -311,9 +329,15 @@ export default function SetupPage({ section, onSectionChange, onNavigateTarget }
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    releaseAllowed:
+      service.currentRoundNumber !== null && service.canReleaseRound(service.currentRoundNumber).canRelease,
     inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: service.sessions.map((session) => ({ roomId: session.roomId, status: session.status })),
-    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
+    roomPresence: service.roomPresence.map((presence) => ({
+      roomId: presence.roomId,
+      connected: presence.connected,
+      readyDeviceCount: presence.readyDeviceCount,
+    })),
   });
   const [preflightOpen, setPreflightOpen] = useState(false);
 

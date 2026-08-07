@@ -11,6 +11,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { IpcMainEvent, IpcMainInvokeEvent } from 'electron/main';
 import TournamentServer from './TournamentServer';
 import {
+  IHelpRequest,
   IMatchSubmission,
   IRoomPresence,
   IServerStatus,
@@ -19,7 +20,7 @@ import {
   ITournamentSnapshot,
   defaultServerPort,
 } from './ServerTypes';
-import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
+import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
 
 let server: TournamentServer | null = null;
@@ -59,8 +60,12 @@ function handleSessionsChanged(sessions: ISessionSummary[]) {
   sendToRenderer(IpcMainToRend.TournamentServerSessionsChanged, sessions);
 }
 
-function handleSessionStarted(sessionId: string, scheduledMatchId: string) {
-  sendToRenderer(IpcMainToRend.TournamentServerSessionStarted, { sessionId, scheduledMatchId });
+function handleSessionStarted(sessionId: string, scheduledMatchId: string, tournamentKey?: string) {
+  sendToRenderer(IpcMainToRend.TournamentServerSessionStarted, { sessionId, scheduledMatchId, tournamentKey });
+}
+
+function handleHelpRequestsChanged(requests: IHelpRequest[]) {
+  sendToRenderer(IpcMainToRend.TournamentServerHelpRequestsChanged, requests);
 }
 
 function getServer(): TournamentServer {
@@ -72,6 +77,7 @@ function getServer(): TournamentServer {
       onFinalSubmission: handleFinalSubmission,
       onSessionsChanged: handleSessionsChanged,
       onSessionStarted: handleSessionStarted,
+      onHelpRequestsChanged: handleHelpRequestsChanged,
     });
   }
   return server;
@@ -115,6 +121,19 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
     server ? server.getRoomPresence() : ([] as IRoomPresence[]),
   );
 
+  ipcMain.handle(IpcBidirectional.TournamentServerGetHelpRequests, () =>
+    server ? server.getHelpRequests() : ([] as IHelpRequest[]),
+  );
+
+  ipcMain.handle(
+    IpcBidirectional.TournamentServerUpdateHelpRequest,
+    (_event: IpcMainInvokeEvent, payload?: { id?: string; status?: 'resolved' | 'cancelled'; note?: string }) => {
+      if (!server || typeof payload?.id !== 'string') return null;
+      if (payload.status !== 'resolved' && payload.status !== 'cancelled') return null;
+      return server.updateHelpRequest(payload.id, payload.status, payload.note);
+    },
+  );
+
   ipcMain.on(IpcRendToMain.TournamentServerSetSnapshot, (_event: IpcMainEvent, snapshot: ITournamentSnapshot) => {
     // Only ever stored and served verbatim; the main process doesn't interpret the tournament.
     getServer().setTournamentSnapshot(snapshot);
@@ -127,10 +146,18 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
     },
   );
 
+  ipcMain.on(
+    IpcRendToMain.TournamentServerSetPublicPairingsSnapshot,
+    (_event: IpcMainEvent, snapshot: IPublicPairingsSnapshot | null) => {
+      getServer().setPublicPairingsSnapshot(snapshot);
+    },
+  );
+
   ipcMain.on(IpcRendToMain.TournamentServerSubmissionVerdict, (_event: IpcMainEvent, verdict: ISubmissionVerdict) => {
     if (!server || !verdict?.sessionId) return;
-    if (verdict.accepted) server.acceptSession(verdict.sessionId);
-    else server.rejectSession(verdict.sessionId, verdict.reason);
+    if (verdict.tournamentKey && server.getStatus().tournamentKey !== verdict.tournamentKey) return;
+    if (verdict.accepted) server.acceptSession(verdict.sessionId, verdict);
+    else server.rejectSession(verdict.sessionId, verdict.reason, verdict);
   });
 }
 

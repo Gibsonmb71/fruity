@@ -21,22 +21,23 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Add, ContentCopy, MoreVert, PlayArrow, Print, Settings, Stop } from '@mui/icons-material';
+import { Add, ContentCopy, MoreVert, Pause, PlayArrow, Print, Settings, Stop } from '@mui/icons-material';
 import { TournamentContext } from '../../TournamentManager';
 import { ControlPages } from '../../Enums';
 import { TournamentServerContext } from '../../Services/TournamentServerService';
 import {
   ISessionSummary,
+  IHelpRequest,
+  helpRequestCategoryLabels,
   SessionDisplayState,
   SessionStatus,
   staleRoomThresholdMs,
 } from '../../../main/server/ServerTypes';
-import { ScheduledMatch, ScheduledMatchStatus } from '../../DataModel/ScheduledMatch';
-import { TournamentRoom } from '../../DataModel/TournamentRoom';
+import { ScheduledMatch, ScheduledMatchStatus, transitionScheduledMatch } from '../../DataModel/ScheduledMatch';
+import { formatPairingCode, TournamentRoom } from '../../DataModel/TournamentRoom';
 import Tournament from '../../DataModel/Tournament';
 import {
   ScheduleIssueSeverity,
-  checkRoundRelease,
   checkRoomDeletion,
   hasBlockingIssue,
   mergeGeneratedSchedule,
@@ -56,18 +57,21 @@ import {
   captureRoomAssignmentSnapshot,
   planAutoAssignUnassigned,
   planRebalance,
+  planRoomDisable,
   planSwap,
+  rebalancePlanHasBlockingIssues,
   restoreRoomAssignmentSnapshot,
 } from '../../Services/RoomAllocationService';
 import { resolveTournamentReadiness } from '../../Services/TournamentReadiness';
 import { createNavigationIntent, INavigationIntent } from '../../Services/Navigation';
+import { dispatchReadinessAction } from '../../Services/TournamentActions';
 import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSetupDialog } from './RoomDialogs';
 import { MatchEditorDialog, ScheduleGeneratorDialog } from './ScheduleDialogs';
 import MatchPlanWorkspace from './MatchPlanWorkspace';
 import RebracketDialog from './RebracketDialog';
 import MatchInboxCard from './MatchInboxCard';
 import LiveDisplaySettingsCard from './LiveDisplaySettingsCard';
-import { YfPageHeader } from '../../Utils/GeneralReactUtils';
+import { YfHelpPopover, YfPageHeader } from '../../Utils/GeneralReactUtils';
 import { selectRoomAssignments } from '../../../shared/RoomAssignmentState';
 import './rooms.css';
 
@@ -182,10 +186,14 @@ export default function RoomsPage({
   const [roomEditor, setRoomEditor] = useState<TournamentRoom | null | undefined>(undefined);
   const [qrRoom, setQrRoom] = useState<TournamentRoom | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [setupPrintRoomId, setSetupPrintRoomId] = useState<string | null>(null);
   const [generatorOpen, setGeneratorOpen] = useState(false);
   const [matchEditor, setMatchEditor] = useState<ScheduledMatch | null | undefined>(undefined);
   const [rebracketOpen, setRebracketOpen] = useState(false);
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
+  const [holdDialogOpen, setHoldDialogOpen] = useState(false);
+  const [holdDraft, setHoldDraft] = useState('');
+  const [assignmentPrint, setAssignmentPrint] = useState<'released' | 'upcoming' | null>(null);
   const [confirmState, setConfirmState] = useState<IConfirmState | null>(null);
   const [bulkPlan, setBulkPlan] = useState<{ mode: 'auto' | 'rebalance'; plan: IRebalancePlan } | null>(null);
   const [assignmentUndo, setAssignmentUndo] = useState<{ snapshot: IRoomAssignmentSnapshot; label: string } | null>(
@@ -209,6 +217,12 @@ export default function RoomsPage({
   }, [service]);
 
   useEffect(() => {
+    const clearAssignmentPrint = () => setAssignmentPrint(null);
+    window.addEventListener('afterprint', clearAssignmentPrint);
+    return () => window.removeEventListener('afterprint', clearAssignmentPrint);
+  }, []);
+
+  useEffect(() => {
     if (!navigation) return undefined;
     if (navigation.target === 'control:match-plan' || navigation.focus === 'result-inbox') return undefined;
     const timer = window.setTimeout(() => onNavigationHandled(), 0);
@@ -219,9 +233,11 @@ export default function RoomsPage({
     if (!service.status.running) return undefined;
     service.refreshSessions();
     service.refreshPresence();
+    service.refreshHelpRequests();
     const handle = setInterval(() => {
       service.refreshSessions();
       service.refreshPresence();
+      service.refreshHelpRequests();
     }, pollIntervalMs);
     return () => clearInterval(handle);
   }, [service, service.status.running]);
@@ -244,9 +260,14 @@ export default function RoomsPage({
     releasedRoundNumber: service.releasedRoundNumber,
     inboxCount: service.inbox.length,
     conflictCount: service.conflicts.length,
+    releaseAllowed: currentRound !== null && service.canReleaseRound(currentRound).canRelease,
     inboxScheduledMatchIds: service.inbox.map((item) => item.scheduledMatchId).filter(Boolean) as string[],
     sessions: activeSessions.map((session) => ({ roomId: session.roomId, status: session.status })),
-    roomPresence: service.roomPresence.map((presence) => ({ roomId: presence.roomId, connected: presence.connected })),
+    roomPresence: service.roomPresence.map((presence) => ({
+      roomId: presence.roomId,
+      connected: presence.connected,
+      readyDeviceCount: presence.readyDeviceCount,
+    })),
   });
 
   const rebracketBoundary = useMemo(() => {
@@ -266,6 +287,26 @@ export default function RoomsPage({
 
   const serverAddress = service.selectedAddress;
   const nextRelease = service.nextRoundToRelease();
+  const releasedPrintRound = service.releasedRoundNumber ?? service.currentRoundNumber;
+  const releasedPrintMatches =
+    releasedPrintRound === null
+      ? []
+      : matches.filter(
+          (match) =>
+            match.roundNumber === releasedPrintRound &&
+            match.roomId !== undefined &&
+            match.status !== ScheduledMatchStatus.Cancelled,
+        );
+  const upcomingPrintMatches = matches.filter(
+    (match) =>
+      match.roomId !== undefined &&
+      match.status !== ScheduledMatchStatus.Accepted &&
+      match.status !== ScheduledMatchStatus.Cancelled,
+  );
+  const printAssignments = (kind: 'released' | 'upcoming') => {
+    setAssignmentPrint(kind);
+    window.setTimeout(() => window.print(), 0);
+  };
   const disabledRoomAssignments =
     nextRelease === null
       ? 0
@@ -275,13 +316,13 @@ export default function RoomsPage({
             match.roomId !== undefined &&
             rooms.some((room) => room.id === match.roomId && !room.enabled),
         ).length;
-  const releaseBlocked = nextRelease === null || !checkRoundRelease(matches, rooms, nextRelease).canRelease;
+  const releaseBlocked = nextRelease === null || !service.canReleaseRound(nextRelease).canRelease;
 
   const copyText = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
       manager.makeToast('Copied to clipboard');
-    } catch (err: any) {
+    } catch {
       manager.makeToast('Could not copy to clipboard', 'error');
     }
   };
@@ -310,11 +351,9 @@ export default function RoomsPage({
       confirmLabel: 'Delete room',
       destructive: true,
       onConfirm: () => {
-        const unassignmentIssues = check.affectedScheduledMatchIds.flatMap((matchId) =>
-          assignRoom(tournament, matchId, undefined, { source: 'auto', unlock: true }),
-        );
-        if (hasBlockingIssue(unassignmentIssues)) {
-          setScheduleError(unassignmentIssues.map((issue) => issue.message).join(' '));
+        const applied = applyRebalance(tournament, planRoomDisable(tournament, room.id, 'leave-unassigned'));
+        if (!applied.ok) {
+          setScheduleError(applied.issues.map((issue) => issue.message).join(' '));
           setConfirmState(null);
           return;
         }
@@ -328,15 +367,69 @@ export default function RoomsPage({
 
   const requestRegenerateToken = (room: TournamentRoom) => {
     setConfirmState({
-      title: `Regenerate ${room.name} token?`,
-      message: 'The current permanent URL will stop working immediately. Print or copy the new URL afterward.',
-      confirmLabel: 'Regenerate token',
+      title: `Reset ${room.name} access?`,
+      message:
+        'The current QR link and every browser using it will stop working immediately. Existing tournament results are unchanged; pair the room again with a new QR code or pairing code.',
+      confirmLabel: 'Reset access',
+      destructive: true,
       onConfirm: () => {
         room.regenerateToken();
         manager.markTournamentDataChanged();
         setConfirmState(null);
       },
     });
+  };
+
+  const requestRegeneratePairingCode = (room: TournamentRoom) => {
+    setConfirmState({
+      title: `New ${room.name} pairing code?`,
+      message:
+        'The old human pairing code will stop working. Browsers already paired to this room will continue working.',
+      confirmLabel: 'New pairing code',
+      onConfirm: () => {
+        room.regeneratePairingCode(
+          tournament.rooms.filter((candidate) => candidate.id !== room.id).map((candidate) => candidate.pairingCode),
+        );
+        manager.markTournamentDataChanged();
+        setConfirmState(null);
+      },
+    });
+  };
+
+  const toggleRoomStartHold = () => {
+    if (tournament.holdNewRoomStarts) {
+      tournament.holdNewRoomStarts = false;
+      tournament.holdMessage = '';
+      manager.markTournamentDataChanged();
+      return;
+    }
+    setHoldDraft('');
+    setHoldDialogOpen(true);
+  };
+
+  const confirmRoomStartHold = () => {
+    tournament.holdNewRoomStarts = true;
+    tournament.holdMessage =
+      holdDraft.trim().slice(0, 200) ||
+      'Tournament control has paused new room starts. A game already in progress can continue.';
+    manager.markTournamentDataChanged();
+    setHoldDialogOpen(false);
+  };
+
+  const setRoomEnabled = (room: TournamentRoom, enabled: boolean) => {
+    if (enabled === room.enabled) return true;
+    if (!enabled) {
+      const plan = planRoomDisable(tournament, room.id, 'leave-unassigned');
+      const applied = applyRebalance(tournament, plan);
+      if (!applied.ok) {
+        manager.makeToast(applied.issues[0]?.message ?? 'The room could not be disabled safely.', 'error');
+        return false;
+      }
+    } else {
+      room.enabled = true;
+    }
+    manager.markTournamentDataChanged();
+    return true;
   };
 
   const rememberAssignmentUndo = (snapshot: IRoomAssignmentSnapshot, changeCount: number) => {
@@ -438,7 +531,11 @@ export default function RoomsPage({
       tournament,
       plan.changes.map((change) => change.matchId),
     );
-    applyRebalance(tournament, plan);
+    const applied = applyRebalance(tournament, plan);
+    if (!applied.ok) {
+      manager.makeToast(applied.issues[0]?.message ?? 'The room plan could not be applied.', 'error');
+      return;
+    }
     rememberAssignmentUndo(snapshot, plan.changes.length);
     manager.markTournamentDataChanged();
     setBulkPlan(null);
@@ -472,7 +569,12 @@ export default function RoomsPage({
       confirmLabel: 'Cancel match',
       destructive: true,
       onConfirm: () => {
-        match.status = ScheduledMatchStatus.Cancelled;
+        const transition = transitionScheduledMatch(match, ScheduledMatchStatus.Cancelled);
+        if (!transition.ok) {
+          manager.makeToast(transition.reason, 'error');
+          setConfirmState(null);
+          return;
+        }
         manager.markTournamentDataChanged();
         setConfirmState(null);
       },
@@ -490,10 +592,16 @@ export default function RoomsPage({
     setGeneratorOpen(false);
   };
 
-  const releaseRound = () => {
-    if (nextRelease === null || releaseBlocked) return;
-    service.releaseRound(nextRelease);
+  const releaseRound = (): boolean => {
+    if (nextRelease === null || releaseBlocked) return false;
+    const released = service.releaseRound(nextRelease);
+    if (!released) manager.makeToast(service.lastError || 'That round could not be released.', 'error');
+    return released;
   };
+  let pageHelpTopic: 'control.match-plan' | 'control.rooms' | 'control.display' | 'control.live' = 'control.live';
+  if (activeTab === ControlPages.MatchPlan) pageHelpTopic = 'control.match-plan';
+  else if (activeTab === ControlPages.Rooms) pageHelpTopic = 'control.rooms';
+  else if (activeTab === ControlPages.Display) pageHelpTopic = 'control.display';
 
   return (
     <TournamentServerContext.Provider value={service}>
@@ -501,6 +609,7 @@ export default function RoomsPage({
         <YfPageHeader
           title="Control"
           description="Tournament-day operations: what needs to happen now, where, and why."
+          helpTopic={pageHelpTopic}
           status={
             <Chip
               size="small"
@@ -536,11 +645,20 @@ export default function RoomsPage({
                 const response = await fetch(`${serverAddress}/connect`, { cache: 'no-store' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 manager.makeToast('Connection check succeeded');
-              } catch (err: any) {
+              } catch {
                 manager.makeToast('Could not reach this network address', 'error');
               }
             }}
             onOpenSettings={() => setServerSettingsOpen(true)}
+            onOpenRoomSetup={() => {
+              setSetupPrintRoomId(null);
+              setSetupOpen(true);
+            }}
+            onPrintReleased={() => printAssignments('released')}
+            onPrintUpcoming={() => printAssignments('upcoming')}
+            canPrintRoomSetup={rooms.length > 0}
+            holdNewStarts={tournament.holdNewRoomStarts}
+            onToggleHold={toggleRoomStartHold}
           />
         ) : (
           <div className="rooms-server-compact" aria-label="Tournament Server status">
@@ -561,6 +679,8 @@ export default function RoomsPage({
             {' · '}
             {rooms.length === 0 ? 'No rooms configured' : `${onlineRooms}/${rooms.length} rooms online`}
             {service.inbox.length > 0 && <> · {service.inbox.length} result pending</>}
+            {tournament.holdNewRoomStarts && <> · New room starts on hold</>}
+            {tournament.holdNewRoomStarts && tournament.holdMessage && <> · {tournament.holdMessage}</>}
           </div>
         )}
 
@@ -574,6 +694,7 @@ export default function RoomsPage({
                 setServerSettingsOpen,
                 setRebracketOpen,
                 releaseRound,
+                (roundNumber) => service.canReleaseRound(roundNumber).canRelease,
                 onNavigateTarget,
               )
             }
@@ -589,6 +710,7 @@ export default function RoomsPage({
             <div className="rooms-panel-header">
               <div>
                 <h2 id="rooms-list-heading">Physical rooms</h2>
+                <YfHelpPopover topic="control.rooms" label="Help for physical rooms" />
                 <p>
                   {rooms.length === 0
                     ? 'Add the physical rooms being used for matches.'
@@ -599,7 +721,10 @@ export default function RoomsPage({
                 <Button
                   size="small"
                   startIcon={<Print />}
-                  onClick={() => setSetupOpen(true)}
+                  onClick={() => {
+                    setSetupPrintRoomId(null);
+                    setSetupOpen(true);
+                  }}
                   disabled={rooms.length === 0}
                 >
                   Setup sheet
@@ -748,13 +873,12 @@ export default function RoomsPage({
               setRoomMenu(null);
             }}
           >
-            Regenerate token
+            Reset access
           </MenuItem>
           <MenuItem
             onClick={() => {
               if (!roomMenu) return;
-              roomMenu.room.enabled = !roomMenu.room.enabled;
-              manager.markTournamentDataChanged();
+              setRoomEnabled(roomMenu.room, !roomMenu.room.enabled);
               setRoomMenu(null);
             }}
           >
@@ -771,30 +895,34 @@ export default function RoomsPage({
           </MenuItem>
         </Menu>
 
-        {activeTab === ControlPages.Live && readiness.roomOperationsEnabled && readiness.activeIssues.length > 0 && (
-          <section className="rooms-panel" aria-labelledby="attention-heading">
-            <div className="rooms-panel-header">
-              <div>
-                <h2 id="attention-heading">Needs attention</h2>
-                <p>Issues that can block the next operational step.</p>
+        {activeTab === ControlPages.Live &&
+          readiness.roomOperationsEnabled &&
+          (readiness.activeIssues.length > 0 || service.helpRequests.some((request) => request.status === 'open')) && (
+            <section className="rooms-panel" aria-labelledby="attention-heading">
+              <div className="rooms-panel-header">
+                <div>
+                  <h2 id="attention-heading">Needs attention</h2>
+                  <p>Issues that can block the next operational step.</p>
+                </div>
               </div>
-            </div>
-            <AttentionList
-              service={service}
-              rooms={rooms}
-              scheduleIssues={scheduleIssues}
-              nextRelease={nextRelease}
-              releaseBlocked={releaseBlocked}
-              disabledRoomAssignments={disabledRoomAssignments}
-            />
-          </section>
-        )}
+              <AttentionList
+                service={service}
+                rooms={rooms}
+                scheduleIssues={scheduleIssues}
+                nextRelease={nextRelease}
+                releaseBlocked={releaseBlocked}
+                disabledRoomAssignments={disabledRoomAssignments}
+                helpRequests={service.helpRequests}
+              />
+            </section>
+          )}
 
         {activeTab === ControlPages.MatchPlan && (
           <section className="rooms-panel" aria-labelledby="schedule-heading">
             <div className="rooms-panel-header">
               <div>
                 <h2 id="schedule-heading">Match Plan</h2>
+                <YfHelpPopover topic="control.match-plan" label="Help for Match Plan" />
                 <p>
                   Plan concrete team-versus-team matches and their rooms. Accepted history is never regenerated away.
                 </p>
@@ -841,6 +969,67 @@ export default function RoomsPage({
           <MatchInboxCard navigation={navigation} onNavigationHandled={onNavigationHandled} />
         )}
 
+        {assignmentPrint && (
+          <section className="rooms-print-only rooms-assignment-print" aria-hidden="true">
+            <h1>{tournament.name || 'Untitled tournament'}</h1>
+            {assignmentPrint === 'released' ? (
+              <>
+                <h2>{releasedPrintRound === null ? 'No released round' : `Round ${releasedPrintRound}`}</h2>
+                {releasedPrintMatches.length === 0 ? (
+                  <p>No assigned games are available for the current/released round.</p>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Room</th>
+                        <th>Match</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {releasedPrintMatches.map((match) => (
+                        <tr key={match.id}>
+                          <td>{rooms.find((room) => room.id === match.roomId)?.name ?? 'Unassigned'}</td>
+                          <td>
+                            {match.leftTeamName} vs {match.rightTeamName}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            ) : (
+              <>
+                <h2>Upcoming Match Plan assignments</h2>
+                {upcomingPrintMatches.length === 0 ? (
+                  <p>No upcoming assigned games.</p>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Round</th>
+                        <th>Room</th>
+                        <th>Match</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {upcomingPrintMatches.map((match) => (
+                        <tr key={match.id}>
+                          <td>{match.roundNumber}</td>
+                          <td>{rooms.find((room) => room.id === match.roomId)?.name ?? 'Unassigned'}</td>
+                          <td>
+                            {match.leftTeamName} vs {match.rightTeamName}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </section>
+        )}
+
         <RoomEditorDialog
           open={roomEditor !== undefined}
           room={roomEditor ?? null}
@@ -848,6 +1037,33 @@ export default function RoomsPage({
           manager={manager}
           onClose={() => setRoomEditor(undefined)}
         />
+        <Dialog open={holdDialogOpen} onClose={() => setHoldDialogOpen(false)} fullWidth maxWidth="sm">
+          <DialogTitle>Hold new room starts</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Games already in progress will continue to save snapshots and submit finals. Only new room starts are
+              blocked.
+            </Typography>
+            <TextField
+              label="Message for room browsers"
+              value={holdDraft}
+              onChange={(event) => setHoldDraft(event.target.value)}
+              placeholder="Waiting for a disputed result"
+              helperText="Optional; keep it short."
+              slotProps={{ htmlInput: { maxLength: 200 } }}
+              fullWidth
+              multiline
+              minRows={2}
+              autoFocus
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setHoldDialogOpen(false)}>Cancel</Button>
+            <Button variant="contained" color="warning" onClick={confirmRoomStartHold}>
+              Hold new starts
+            </Button>
+          </DialogActions>
+        </Dialog>
         <RoomDetailDialog
           open={roomDetail !== null}
           room={roomDetail}
@@ -856,14 +1072,25 @@ export default function RoomsPage({
           serverAddress={serverAddress}
           sessions={service.sessions}
           presence={roomDetail ? roomPresenceFor(roomDetail, service) : undefined}
+          helpRequest={
+            roomDetail
+              ? service.helpRequests.find((request) => request.roomId === roomDetail.id && request.status === 'open')
+              : undefined
+          }
           onClose={() => setRoomDetail(null)}
           onEdit={(room) => {
             setRoomDetail(null);
             setRoomEditor(room);
           }}
           onCopyUrl={(room) => copyText(room.url(serverAddress))}
+          onCopyPairingCode={(room) => copyText(formatPairingCode(room.pairingCode))}
+          onPrintRoom={(room) => {
+            setSetupPrintRoomId(room.id);
+            setSetupOpen(true);
+          }}
           onShowQr={(room) => setQrRoom(room)}
           onRegenerate={requestRegenerateToken}
+          onRegeneratePairingCode={requestRegeneratePairingCode}
         />
         <RoomQrDialog
           open={qrRoom !== null}
@@ -874,8 +1101,13 @@ export default function RoomsPage({
         <RoomSetupDialog
           open={setupOpen}
           rooms={rooms}
+          tournamentName={tournament.name || 'Untitled tournament'}
           serverAddress={serverAddress}
-          onClose={() => setSetupOpen(false)}
+          autoPrintRoomId={setupPrintRoomId}
+          onClose={() => {
+            setSetupOpen(false);
+            setSetupPrintRoomId(null);
+          }}
         />
         <MatchEditorDialog
           open={matchEditor !== undefined}
@@ -940,6 +1172,12 @@ function ServerToolbar({
   onSelectAddress,
   onTestConnection,
   onOpenSettings,
+  onOpenRoomSetup,
+  onPrintReleased,
+  onPrintUpcoming,
+  canPrintRoomSetup,
+  holdNewStarts,
+  onToggleHold,
 }: {
   service: TournamentServerContextValue;
   serverAddress: string;
@@ -947,6 +1185,12 @@ function ServerToolbar({
   onSelectAddress: (value: string) => void;
   onTestConnection: () => void;
   onOpenSettings: () => void;
+  onOpenRoomSetup: () => void;
+  onPrintReleased: () => void;
+  onPrintUpcoming: () => void;
+  canPrintRoomSetup: boolean;
+  holdNewStarts: boolean;
+  onToggleHold: () => void;
 }) {
   const { networkAddresses } = service;
   let addressContent: JSX.Element;
@@ -975,6 +1219,7 @@ function ServerToolbar({
   }
   return (
     <div className="rooms-server-toolbar">
+      <YfHelpPopover topic="control.server" label="Help for Tournament Server" />
       <div className="rooms-server-address">{addressContent}</div>
       {service.status.running && serverAddress !== '' && (
         <>
@@ -989,12 +1234,61 @@ function ServerToolbar({
       <Button size="small" startIcon={<Settings />} onClick={onOpenSettings}>
         {service.status.running ? 'Network & server' : 'Set up room scoring'}
       </Button>
+      <ControlPrintMenu
+        onOpenRoomSetup={onOpenRoomSetup}
+        onPrintReleased={onPrintReleased}
+        onPrintUpcoming={onPrintUpcoming}
+        canPrintRoomSetup={canPrintRoomSetup}
+      />
+      {service.status.running && (
+        <Button
+          size="small"
+          color={holdNewStarts ? 'warning' : 'inherit'}
+          startIcon={holdNewStarts ? <PlayArrow /> : <Pause />}
+          onClick={onToggleHold}
+        >
+          {holdNewStarts ? 'Resume new starts' : 'Hold new starts'}
+        </Button>
+      )}
       {!service.status.running && (
         <Button size="small" variant="contained" startIcon={<PlayArrow />} onClick={onOpenSettings}>
           Start server
         </Button>
       )}
     </div>
+  );
+}
+
+function ControlPrintMenu({
+  onOpenRoomSetup,
+  onPrintReleased,
+  onPrintUpcoming,
+  canPrintRoomSetup,
+}: {
+  onOpenRoomSetup: () => void;
+  onPrintReleased: () => void;
+  onPrintUpcoming: () => void;
+  canPrintRoomSetup: boolean;
+}) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const close = () => setAnchorEl(null);
+  const choose = (action: () => void) => {
+    close();
+    action();
+  };
+  return (
+    <>
+      <Button size="small" startIcon={<Print />} onClick={(event) => setAnchorEl(event.currentTarget)}>
+        Print…
+      </Button>
+      <Menu anchorEl={anchorEl} open={anchorEl !== null} onClose={close}>
+        <MenuItem disabled={!canPrintRoomSetup} onClick={() => choose(onOpenRoomSetup)}>
+          Room setup sheets
+        </MenuItem>
+        <MenuItem onClick={() => choose(onPrintReleased)}>Current/released round assignments</MenuItem>
+        <MenuItem onClick={() => choose(onPrintUpcoming)}>Upcoming Match Plan assignments</MenuItem>
+      </Menu>
+    </>
   );
 }
 
@@ -1069,6 +1363,7 @@ function runPrimaryAction(
   setServerSettingsOpen: (open: boolean) => void,
   setRebracketOpen: (open: boolean) => void,
   releaseRound: () => void,
+  canReleaseRound: (roundNumber: number) => boolean,
   onNavigateTarget?: (intent: INavigationIntent) => void,
 ) {
   const action = primaryOperationAction(readiness);
@@ -1089,16 +1384,16 @@ function runPrimaryAction(
       break;
     }
     case 'start-server':
-      setServerSettingsOpen(true);
-      break;
     case 'open-rebracket':
-      setRebracketOpen(true);
-      break;
     case 'release-round':
-      releaseRound();
-      break;
     case 'review-results':
-      setActiveTab(ControlPages.Live);
+      dispatchReadinessAction(action, readiness, {
+        onStartServer: () => setServerSettingsOpen(true),
+        onOpenRebracket: () => setRebracketOpen(true),
+        onReleaseRound: () => releaseRound(),
+        onReviewResults: () => setActiveTab(ControlPages.Live),
+        canReleaseRound,
+      });
       break;
     default:
       break;
@@ -1262,6 +1557,7 @@ function AttentionList({
   nextRelease,
   releaseBlocked,
   disabledRoomAssignments,
+  helpRequests,
 }: {
   service: TournamentServerContextValue;
   rooms: TournamentRoom[];
@@ -1269,6 +1565,7 @@ function AttentionList({
   nextRelease: number | null;
   releaseBlocked: boolean;
   disabledRoomAssignments: number;
+  helpRequests: IHelpRequest[];
 }) {
   const items: JSX.Element[] = [];
   if (!service.status.running) {
@@ -1302,6 +1599,35 @@ function AttentionList({
       </li>,
     );
   }
+  helpRequests
+    .filter((request) => request.status === 'open')
+    .forEach((request) => {
+      items.push(
+        <li key={`help-${request.id}`}>
+          <strong>
+            {request.roomName} · {helpRequestCategoryLabels[request.category]}
+          </strong>
+          {request.message ? ` ${request.message}` : ''}
+          {request.operatorName ? ` — ${request.operatorName}` : ''}
+          {request.currentMatchup && (
+            <span>
+              {' '}
+              · Round {request.currentMatchup.roundName}: {request.currentMatchup.leftTeam} vs{' '}
+              {request.currentMatchup.rightTeam}
+            </span>
+          )}
+          <Button
+            size="small"
+            sx={{ ml: 1 }}
+            onClick={() => {
+              service.updateHelpRequest(request.id, 'resolved').catch(() => undefined);
+            }}
+          >
+            Resolve
+          </Button>
+        </li>,
+      );
+    });
   scheduleIssues
     .filter((issue) => issue.severity === ScheduleIssueSeverity.Error)
     .slice(0, 3)
@@ -1352,7 +1678,7 @@ function AllocationPreviewDialog({
   const matchById = new Map(tournament.scheduledMatches.map((match) => [match.id, match]));
   const roomName = (roomId?: string) =>
     roomId ? rooms.find((room) => room.id === roomId)?.name ?? roomId : 'Unassigned';
-  const blocking = plan.issues.some((issue) => issue.severity === ScheduleIssueSeverity.Error);
+  const blocking = rebalancePlanHasBlockingIssues(plan);
   const previewChanges = [...plan.moved, ...plan.newlyAssigned].slice(0, 12);
 
   return (

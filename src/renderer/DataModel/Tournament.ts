@@ -20,6 +20,7 @@ import { IQbjTournamentSite, TournamentSite } from './TournamentSite';
 import { IYftFileScheduledMatch, ScheduledMatch } from './ScheduledMatch';
 import { IYftFileRoom, TournamentRoom } from './TournamentRoom';
 import { ILiveDisplaySettings, makeDefaultLiveDisplaySettings } from '../../shared/LiveTypes';
+import { randomId } from '../Utils/RandomIds';
 
 /**
  * Represents the data for a tournament.
@@ -67,6 +68,8 @@ export interface IYftFileTournament extends IQbjTournament, IYftFileObject {
 interface ITournamentExtraData {
   /** Version of this software used to write the file */
   YfVersion: string;
+  /** Stable identity for transient server recovery and event scoping. */
+  tournamentId?: string;
   standardRuleSet?: CommonRuleSets;
   seeds: IQbjRefPointer[];
   trackPlayerYear: boolean;
@@ -86,6 +89,10 @@ interface ITournamentExtraData {
   releasedRoundNumber?: number;
   /** Whether control should release the next round after the current one is complete */
   autoReleaseNextRound?: boolean;
+  /** Pause new browser-room starts without interrupting games already in progress. */
+  holdNewRoomStarts?: boolean;
+  /** Optional operator-facing explanation for the room-start hold. */
+  holdMessage?: string;
   /** Full phases whose advancement checkpoint has already been confirmed */
   rebracketedPhaseCodes?: string[];
   /** Public audience/display settings. Browser slideshow position is intentionally not persisted. */
@@ -97,6 +104,9 @@ export type TournamentRoomScoringMode = 'traditional' | 'browser';
 
 /** YellowFruit implementation of the Tournament object */
 class Tournament implements IQbjTournament, IYftDataModelObject {
+  /** Stable identity that survives saves and is deliberately omitted from QBJ exports. */
+  operationalId: string = randomId('tournament');
+
   name: string = '';
 
   /** QB schema requires a name, so use this when needed */
@@ -143,6 +153,12 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
 
   stats: PhaseStandings[] = [];
 
+  /** Monotonic authoritative-data revision used to detect stale derived statistics. */
+  dataRevision: number = 0;
+
+  /** Revision for which `stats` was last compiled. */
+  statsRevision: number = -1;
+
   /** ungrouped dump of all teams with all the games they've played  */
   cumulativeStats?: AggregateStandings;
 
@@ -174,6 +190,11 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
 
   /** Optional convenience for continuous prelims; rebracket boundaries still require confirmation. */
   autoReleaseNextRound: boolean = false;
+
+  /** Tournament-day safety hold: current games continue, new room starts are blocked. */
+  holdNewRoomStarts: boolean = false;
+
+  holdMessage: string = '';
 
   /** Explicit confirmation history for phase boundaries; never inferred from generated schedules. */
   rebracketedPhaseCodes: string[] = [];
@@ -218,6 +239,7 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
 
     const metadata: ITournamentExtraData = {
       YfVersion: this.appVersion,
+      tournamentId: this.operationalId,
       standardRuleSet: this.standardRuleSet,
       seeds: this.seeds.map((team) => team.toRefPointer()),
       trackPlayerYear: this.trackPlayerYear,
@@ -235,6 +257,8 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
         this.scheduledMatches.length > 0 ? this.scheduledMatches.map((match) => match.toYftFileObject()) : undefined,
       releasedRoundNumber: this.releasedRoundNumber ?? undefined,
       autoReleaseNextRound: this.autoReleaseNextRound || undefined,
+      holdNewRoomStarts: this.holdNewRoomStarts || undefined,
+      holdMessage: this.holdMessage || undefined,
       rebracketedPhaseCodes: this.rebracketedPhaseCodes.length > 0 ? this.rebracketedPhaseCodes : undefined,
       liveDisplay: this.liveDisplaySettings,
     };
@@ -246,7 +270,10 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
   compileStats(fullReport: boolean = false, sortByFinalRank: boolean = false) {
     this.stats = [];
     const lastPhase = this.getLastFullPhase();
-    if (!lastPhase) return;
+    if (!lastPhase) {
+      this.statsRevision = this.dataRevision;
+      return;
+    }
     this.phases.forEach((p) => {
       if (p.isFullPhase()) {
         this.stats.push(new PhaseStandings(p, this.getCarryoverMatches(p), this.scoringRules));
@@ -262,6 +289,7 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
     if (fullReport) {
       this.compileAddlStatsForFullReport();
     }
+    this.statsRevision = this.dataRevision;
   }
 
   /** Do additional work needed for the full stat report- cumulative stats, individual stats, etc. */
@@ -565,8 +593,8 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
     if (!this.canMovePhaseDown(phase)) return;
 
     const idx = this.phases.indexOf(phase);
-    const phaseToSwitchWith = this.phases[idx - 1];
-    this.phases[idx - 1] = phase;
+    const phaseToSwitchWith = this.phases[idx + 1];
+    this.phases[idx + 1] = phase;
     this.phases[idx] = phaseToSwitchWith;
   }
 

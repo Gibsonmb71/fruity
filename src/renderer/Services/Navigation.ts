@@ -18,8 +18,7 @@ export interface INavigationIntent {
   /** Ephemeral executable command metadata used by the command palette and destination handlers. */
   actionId?: string;
   gamesReviewFilter?: GamesReviewFilter;
-  controlFocus?: 'inbox' | 'current-round' | 'match-plan';
-  /** Legacy focus vocabulary kept as a wire-compatible alias while callers migrate. */
+  /** The single focus vocabulary used by all destinations. */
   focus?: 'result-inbox' | 'scheduled-match' | 'room' | 'round';
 }
 
@@ -29,5 +28,30 @@ export type GamesReviewFilter = 'all' | 'needs-review' | 'errors' | 'warnings';
 export type INavigationPayload = Omit<INavigationIntent, 'target'>;
 
 export function createNavigationIntent(target: ReadinessTarget, payload: INavigationPayload = {}): INavigationIntent {
-  return { target, ...payload };
+  const allowedByTarget: Record<ReadinessTarget, Array<keyof INavigationPayload>> = {
+    'setup:tournament': ['actionId'],
+    'setup:rules': ['actionId'],
+    'setup:teams': ['actionId'],
+    'setup:format': ['actionId'],
+    games: ['actionId', 'roundNumber', 'matchId', 'matchIds', 'teamName', 'gamesReviewFilter', 'focus'],
+    'control:live': [
+      'actionId',
+      'roundNumber',
+      'scheduledMatchId',
+      'scheduledMatchIds',
+      'phaseCode',
+      'gamesReviewFilter',
+      'focus',
+    ],
+    'control:match-plan': ['actionId', 'roundNumber', 'scheduledMatchId', 'scheduledMatchIds', 'phaseCode', 'focus'],
+    'control:rooms': ['actionId', 'roomId', 'focus'],
+    'control:display': ['actionId'],
+    reports: ['actionId'],
+  };
+  const allowed = new Set(allowedByTarget[target]);
+  const normalized: INavigationIntent = { target };
+  for (const key of Object.keys(payload) as Array<keyof INavigationPayload>) {
+    if (allowed.has(key) && payload[key] !== undefined) normalized[key] = payload[key] as never;
+  }
+  return normalized;
 }

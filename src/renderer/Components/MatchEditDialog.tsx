@@ -2,6 +2,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import {
+  Alert,
   Box,
   Button,
   Dialog,
@@ -48,15 +49,21 @@ function MatchEditDialogCore() {
   const [isOpen] = useSubscription(modalManager.modalIsOpen);
   const [revealHiddenErrors, setRevealHiddenErrors] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [correctionConfirmOpen, setCorrectionConfirmOpen] = useState(false);
+  const [correctionConfirmed, setCorrectionConfirmed] = useState(false);
+  const [pendingSaveStayOpen, setPendingSaveStayOpen] = useState(false);
   const totalTuhInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setRevealHiddenErrors(false);
     setFocusRequest(0);
+    setCorrectionConfirmOpen(false);
+    setCorrectionConfirmed(false);
+    setPendingSaveStayOpen(false);
   }, [isOpen, modalManager.tempMatch]);
 
-  const handleSave = (stayOpen: boolean = false) => {
+  const performSave = (stayOpen: boolean = false) => {
     // Alt+A/Alt+S can fire while a numeric or text field still owns focus. Blur first so the
     // field's existing commit handler runs before the authoritative manager validation.
     (document.activeElement as HTMLElement | null)?.blur();
@@ -77,6 +84,23 @@ function MatchEditDialogCore() {
         (nextInput as HTMLElement | null)?.focus();
       }, 0);
     }
+  };
+
+  const blurActiveEditorField = () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  };
+
+  const handleSave = (stayOpen: boolean = false) => {
+    // An accepted-result correction opens a confirmation dialog first. Commit the field before
+    // opening that dialog too; otherwise Alt+A from a focused numeric/text input could validate
+    // the previous controlled value while the confirmation step has focus.
+    blurActiveEditorField();
+    if (modalManager.scheduledMatchContext?.isAccepted() && !correctionConfirmed) {
+      setPendingSaveStayOpen(stayOpen);
+      setCorrectionConfirmOpen(true);
+      return;
+    }
+    performSave(stayOpen);
   };
 
   const handleCancel = () => {
@@ -145,6 +169,12 @@ function MatchEditDialogCore() {
             )}
           </Stack>
         </DialogTitle>
+        {editingExisting && scheduledContext?.isAccepted() && (
+          <Alert severity="warning" sx={{ mx: 2, mt: 1 }}>
+            This is an official result correction. Save will update the existing result in place and recompute
+            standings; it will not create a second game or reopen the schedule.
+          </Alert>
+        )}
         <DialogContent
           sx={{ minHeight: 0, overflowY: 'auto', px: { xs: 1.25, sm: 2 }, py: { xs: 1.25, sm: 1.5 } }}
           onChangeCapture={() => modalManager.markEditorInteracted()}
@@ -194,6 +224,29 @@ function MatchEditDialogCore() {
               Save Game
             </Button>
           </Stack>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={correctionConfirmOpen} onClose={() => setCorrectionConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Confirm official result correction</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            This accepted result is already official. Confirming will replace its recorded scoring details and recompute
+            tournament statistics for the existing game.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCorrectionConfirmOpen(false)}>Go back</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => {
+              setCorrectionConfirmOpen(false);
+              setCorrectionConfirmed(true);
+              performSave(pendingSaveStayOpen);
+            }}
+          >
+            Confirm correction
+          </Button>
         </DialogActions>
       </Dialog>
       <ErrorDialog />

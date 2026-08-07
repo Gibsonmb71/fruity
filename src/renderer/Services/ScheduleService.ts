@@ -508,6 +508,37 @@ export interface IRoundReleaseCheck {
   reason?: string;
 }
 
+/** Release authority for a complete tournament, including persisted control checkpoints. */
+export function checkTournamentRoundRelease(tournament: Tournament, roundNumber: number): IRoundReleaseCheck {
+  if (tournament.roomScoringMode !== 'browser') {
+    return { canRelease: false, reason: 'Browser room scoring is not enabled for this tournament.' };
+  }
+  const round = tournament.getRoundObjByNumber(roundNumber);
+  if (!round) return { canRelease: false, reason: 'That round does not exist in this tournament.' };
+
+  const released = tournament.releasedRoundNumber;
+  if (released !== null && roundNumber < released) {
+    return {
+      canRelease: false,
+      reason: `Round ${roundNumber} is earlier than the already released round ${released}.`,
+    };
+  }
+  if (released === roundNumber) return checkRoundRelease(tournament.scheduledMatches, tournament.rooms, roundNumber);
+
+  const phase = tournament.whichPhaseIsRoundIn(round);
+  const previousPhase = phase ? tournament.getPrevFullPhase(phase) : undefined;
+  if (previousPhase && previousPhase !== phase && !tournament.rebracketedPhaseCodes.includes(previousPhase.code)) {
+    return {
+      canRelease: false,
+      reason: `Confirm the rebracketing checkpoint for ${previousPhase.name} before releasing ${
+        phase?.name ?? 'this phase'
+      }.`,
+    };
+  }
+
+  return checkRoundRelease(tournament.scheduledMatches, tournament.rooms, roundNumber);
+}
+
 /**
  * The single release gate used by Control and executable commands. Keeping this beside the
  * schedule rules prevents a command-palette action from opening a round that the normal control
@@ -520,6 +551,17 @@ export function checkRoundRelease(
 ): IRoundReleaseCheck {
   const summary = summarizeRound(scheduled, roundNumber);
   if (summary.expected === 0) return { canRelease: false, reason: 'This round has no games to release.' };
+  if (summary.needsAttention > 0) {
+    return { canRelease: false, reason: 'Resolve every game needing attention before releasing this round.' };
+  }
+  if (
+    scheduled.some(
+      (match) =>
+        match.roundNumber === roundNumber && match.status !== ScheduledMatchStatus.Cancelled && match.quarantined,
+    )
+  ) {
+    return { canRelease: false, reason: 'A quarantined game needs tournament-control review before release.' };
+  }
   if (summary.roomsAssigned < summary.expected) {
     return { canRelease: false, reason: 'Assign every game in the round to an enabled room first.' };
   }

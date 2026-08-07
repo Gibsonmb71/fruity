@@ -51,8 +51,14 @@ export function resolvePublicationReadiness(
     },
     {
       id: 'statistics',
-      status: statusForProblem(false, tournament.stats.length === 0 || matches.length === 0),
-      text: tournament.stats.length > 0 ? 'Statistics compiled' : 'Statistics not compiled yet',
+      status: statusForProblem(
+        false,
+        tournament.stats.length === 0 || matches.length === 0 || tournament.statsRevision !== tournament.dataRevision,
+      ),
+      text:
+        tournament.stats.length > 0 && tournament.statsRevision === tournament.dataRevision
+          ? 'Statistics compiled'
+          : 'Statistics not compiled for the current tournament data',
     },
   ];
 

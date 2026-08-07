@@ -1,23 +1,29 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { AddressInfo } from 'net';
 import { networkInterfaces } from 'os';
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import path from 'path';
+import { writeFileAtomically } from '../AtomicFile';
 import Router, { IRouterHost } from './Router';
 import SessionStore from './SessionStore';
+import PresenceStore from './PresenceStore';
+import HelpRequestStore from './HelpRequestStore';
 import {
+  ICreateHelpRequest,
+  IHelpRequest,
   IMatchSubmission,
   INetworkAddress,
   IRoomPresence,
   IServerStatus,
   ISessionSummary,
+  ISubmissionVerdict,
   ITournamentServerRecovery,
   ITournamentSnapshot,
   defaultServerPort,
   emptyTournamentSnapshot,
   staleRoomThresholdMs,
 } from './ServerTypes';
-import { IPublicLiveSnapshot } from '../../shared/LiveTypes';
+import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
 
 /** Content types for the handful of file types the room bundle is made of */
 const contentTypes: Record<string, string> = {
@@ -35,6 +41,14 @@ const contentTypes: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
+function isValidTimestamp(value: string): boolean {
+  return Number.isFinite(new Date(value).getTime());
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'unknown error';
+}
+
 export interface ITournamentServerOptions {
   /** Directory holding the built browser room bundle */
   roomBundleDirectory: string;
@@ -48,10 +62,14 @@ export interface ITournamentServerOptions {
    * Called when a room starts its assigned game, so the desktop can move that scheduled match to
    * playing.
    */
-  onSessionStarted?: (sessionId: string, scheduledMatchId: string) => void;
+  onSessionStarted?: (sessionId: string, scheduledMatchId: string, tournamentKey?: string) => void;
+  /** Called when a room creates or closes an operational help request. */
+  onHelpRequestsChanged?: (requests: IHelpRequest[]) => void;
   /** Small versioned JSON file in app-data used to restore active room sessions after a restart. */
   recoveryFilePath?: string;
 }
+
+type TournamentServerLifecycle = 'stopped' | 'starting' | 'running' | 'stopping';
 
 /**
  * The optional local HTTP server that serves the browser room application and accepts QBJ match
@@ -63,6 +81,12 @@ export interface ITournamentServerOptions {
 export default class TournamentServer {
   private server: Server | null = null;
 
+  private lifecycle: TournamentServerLifecycle = 'stopped';
+
+  private startPromise: Promise<IServerStatus> | null = null;
+
+  private stopPromise: Promise<IServerStatus> | null = null;
+
   private port: number = defaultServerPort;
 
   private lastErrorMessage: string | undefined;
@@ -71,6 +95,9 @@ export default class TournamentServer {
 
   /** Public projection supplied by the renderer; null means the tournament has disabled Live Display. */
   private publicLiveSnapshot: IPublicLiveSnapshot | null = null;
+
+  /** Separate public released-pairings projection; it is not implied by Live Display. */
+  private publicPairingsSnapshot: IPublicPairingsSnapshot | null = null;
 
   readonly sessions = new SessionStore();
 
@@ -82,6 +109,15 @@ export default class TournamentServer {
 
   private roomLastSeenAt = new Map<string, string>();
 
+  private presence = new PresenceStore();
+
+  private helpRequests = new HelpRequestStore();
+
+  private recoveryWritePromise: Promise<void> = Promise.resolve();
+
+  /** A deliberate stop clears in-memory sessions; the next start may restore the durable copy. */
+  private restoreAfterStop = false;
+
   constructor(options: ITournamentServerOptions) {
     this.options = options;
     this.restoreRecovery();
@@ -90,17 +126,23 @@ export default class TournamentServer {
       sessions: this.sessions,
       getSnapshot: () => this.snapshot,
       getPublicLiveSnapshot: () => this.publicLiveSnapshot,
+      getPublicPairingsSnapshot: () => this.publicPairingsSnapshot,
       onFinalSubmission: (sessionId) => this.handleFinalSubmission(sessionId),
       onSnapshot: () => this.notifySessionsChanged(),
-      onRoomCheckIn: (roomId) => this.markRoomCheckIn(roomId),
+      onRoomCheckIn: (roomId, deviceId, operatorName, ready) =>
+        this.markRoomCheckIn(roomId, deviceId, operatorName, ready),
       onSessionChanged: () => this.notifySessionsChanged(),
       onSessionStarted: (sessionId) => {
         const session = this.sessions.get(sessionId);
         if (session?.scheduledMatchId) {
-          this.options.onSessionStarted?.(sessionId, session.scheduledMatchId);
+          this.options.onSessionStarted?.(sessionId, session.scheduledMatchId, session.tournamentKey);
         }
         this.notifySessionsChanged();
       },
+      getRoomPresence: () => this.getRoomPresence(),
+      getHelpRequests: () => this.getHelpRequests(),
+      createHelpRequest: (roomId, request) => this.createHelpRequest(roomId, request),
+      updateHelpRequest: (id, status, note) => this.updateHelpRequest(id, status, note),
       serveStatic: (req, res, pathname) => this.serveStatic(req, res, pathname),
     };
     this.router = new Router(host);
@@ -113,16 +155,28 @@ export default class TournamentServer {
       // results. The renderer sends this stable key before the server can serve a request.
       this.sessions.clear();
       this.roomLastSeenAt.clear();
+      this.presence.clear();
+      this.helpRequests.clear();
       this.publicLiveSnapshot = null;
+      this.publicPairingsSnapshot = null;
     }
     if (snapshot.recoveryKey) this.recoveryKey = snapshot.recoveryKey;
     this.snapshot = snapshot;
+    this.discardRecoveredSessionsMissingFromSnapshot();
     this.persistRecovery();
   }
 
   /** Replace the separate public projection. It never shares the room snapshot's credentials or session state. */
   setPublicLiveSnapshot(snapshot: IPublicLiveSnapshot | null) {
     this.publicLiveSnapshot = snapshot;
+  }
+
+  setPublicPairingsSnapshot(snapshot: IPublicPairingsSnapshot | null) {
+    this.publicPairingsSnapshot = snapshot;
+  }
+
+  getPublicPairingsSnapshot(): IPublicPairingsSnapshot | null {
+    return this.publicPairingsSnapshot;
   }
 
   getPublicLiveSnapshot(): IPublicLiveSnapshot | null {
@@ -134,7 +188,7 @@ export default class TournamentServer {
   }
 
   isRunning(): boolean {
-    return this.server !== null && this.server.listening;
+    return this.lifecycle === 'running' && this.server !== null && this.server.listening;
   }
 
   getPort(): number {
@@ -148,14 +202,22 @@ export default class TournamentServer {
   start(port: number = defaultServerPort): Promise<IServerStatus> {
     if (this.isRunning()) return Promise.resolve(this.getStatus());
 
+    if (this.startPromise) return this.startPromise;
+    if (this.stopPromise) return this.stopPromise.then(() => this.start(port));
+
     // `stop()` keeps the recovery file but clears memory, so a deliberate stop/start cycle has the
-    // same safe resume behavior as an application restart.
-    this.restoreRecovery();
+    // same safe resume behavior as an application restart. The constructor already restores once;
+    // avoid rereading a stale file over live state on the initial start.
+    if (this.restoreAfterStop) {
+      this.restoreAfterStop = false;
+      this.restoreRecovery();
+    }
 
     this.port = port;
     this.lastErrorMessage = undefined;
 
-    return new Promise((resolve) => {
+    this.lifecycle = 'starting';
+    const startPromise = new Promise<IServerStatus>((resolve) => {
       const server = createServer((req: IncomingMessage, res: ServerResponse) => {
         this.router.handle(req, res);
       });
@@ -172,8 +234,9 @@ export default class TournamentServer {
             ? `Port ${port} is already being used by another program. Try a different port.`
             : `Couldn't start the tournament server: ${err.message}`;
         this.server = null;
+        this.lifecycle = 'stopped';
         server.removeAllListeners();
-        server.close();
+        if (server.listening) server.close();
         resolve(this.getStatus());
       };
 
@@ -186,28 +249,94 @@ export default class TournamentServer {
           this.lastErrorMessage = err.message;
         });
         this.server = server;
+        this.lifecycle = 'running';
         const address = server.address();
         if (address && typeof address !== 'string') this.port = (address as AddressInfo).port;
         resolve(this.getStatus());
       });
+
+      // A post-bind error must not become an unhandled rejection or leave the desktop claiming a
+      // running server whose socket has already disappeared.
+      server.on('error', (err: Error & { code?: string }) => {
+        this.lastErrorMessage = err.message;
+        if (!server.listening && this.server === server) {
+          this.server = null;
+          this.lifecycle = 'stopped';
+        }
+      });
     });
+
+    const settledStart = startPromise.finally(() => {
+      if (this.startPromise === settledStart) this.startPromise = null;
+    });
+    this.startPromise = settledStart;
+    return settledStart;
   }
 
   /** Stop listening. Existing sessions are discarded, since they only mean anything while up. */
   stop(): Promise<IServerStatus> {
-    const { server } = this;
-    if (!server) return Promise.resolve(this.getStatus());
+    if (this.stopPromise) return this.stopPromise;
+    const operation = this.startPromise ? this.startPromise.then(() => this.stopListening()) : this.stopListening();
+    const settledStop = operation.finally(() => {
+      if (this.stopPromise === settledStop) this.stopPromise = null;
+    });
+    this.stopPromise = settledStop;
+    return settledStop;
+  }
 
+  /** Stop after any start race has been resolved; callers use `stop()` for coalescing. */
+  private stopListening(): Promise<IServerStatus> {
+    const { server } = this;
+    if (!server) {
+      this.restoreAfterStop = true;
+      this.lifecycle = 'stopped';
+      // A renderer can create a recovery-backed session before the listener is bound (for example
+      // while a previous start is being replaced). Flush that state before clearing memory just as
+      // the listening-server path does.
+      this.persistRecovery();
+      const clearPromise = this.recoveryWritePromise.then(() => {
+        this.sessions.clear();
+        this.roomLastSeenAt.clear();
+        this.presence.clear();
+        this.helpRequests.clear();
+        return this.getStatus();
+      });
+      return clearPromise;
+    }
+
+    this.lifecycle = 'stopping';
+    this.restoreAfterStop = true;
     this.persistRecovery();
     this.server = null;
-    return new Promise((resolve) => {
-      server.close(() => {
-        this.sessions.clear();
-        resolve(this.getStatus());
-      });
-      // Don't wait on keep-alive connections from rooms that have gone away.
-      server.closeAllConnections?.();
-    });
+    const stopPromise = this.recoveryWritePromise.then(
+      () =>
+        new Promise<IServerStatus>((resolve) => {
+          let finished = false;
+          const finish = () => {
+            if (finished) return;
+            finished = true;
+            this.sessions.clear();
+            this.presence.clear();
+            this.helpRequests.clear();
+            this.lifecycle = 'stopped';
+            resolve(this.getStatus());
+          };
+          const timeout = setTimeout(finish, 3000);
+          timeout.unref?.();
+          if (!server.listening) {
+            clearTimeout(timeout);
+            finish();
+            return;
+          }
+          server.close(() => {
+            clearTimeout(timeout);
+            finish();
+          });
+          // Don't wait on keep-alive connections from rooms that have gone away.
+          server.closeAllConnections?.();
+        }),
+    );
+    return stopPromise;
   }
 
   getStatus(): IServerStatus {
@@ -218,6 +347,7 @@ export default class TournamentServer {
       addresses: networkAddresses.map((entry) => entry.url),
       networkAddresses,
       errorMessage: this.lastErrorMessage,
+      tournamentKey: this.recoveryKey,
     };
   }
 
@@ -227,9 +357,33 @@ export default class TournamentServer {
 
   /** Finals that survived an application restart and still need a renderer-side decision. */
   getPendingSubmissions(): IMatchSubmission[] {
-    return this.sessions
+    let changed = false;
+    const pending = this.sessions
       .getAll()
-      .filter((session) => session.status === 'submitted' && session.finalReceived && session.latestQbj !== null)
+      .flatMap((session) => {
+        if (
+          session.status === 'submitted' &&
+          session.finalReceived &&
+          session.latestQbj !== null &&
+          this.hasDurableAcceptedLink(session)
+        ) {
+          // Case C: the .yft commit won the crash race. The durable assignment is authoritative;
+          // reconcile the transient session without handing the final back to the renderer.
+          changed = this.sessions.markAccepted(session.id) !== undefined || changed;
+          return [];
+        }
+        if (
+          session.status === 'accepted' &&
+          session.finalReceived &&
+          session.latestQbj !== null &&
+          !this.hasDurableAcceptedLink(session)
+        ) {
+          // Case B: the transient server verdict raced a crash before the .yft replacement. Keep
+          // the final and re-offer it rather than letting an Accepted-in-memory session disappear.
+          changed = this.sessions.demoteAcceptedForRecovery(session.id) !== undefined || changed;
+        }
+        return session.status === 'submitted' && session.finalReceived && session.latestQbj !== null ? [session] : [];
+      })
       .map((session) => ({
         sessionId: session.id,
         roundNumber: session.roundNumber,
@@ -239,22 +393,55 @@ export default class TournamentServer {
         scheduledMatchId: session.scheduledMatchId,
         qbj: session.latestQbj as object,
         submittedAt: session.lastSeenAt,
+        tournamentKey: session.tournamentKey,
+        sessionStatus: session.status,
+        finalRevision: session.finalRevision,
+        finalFingerprint: session.finalFingerprint,
       }));
+    if (changed) this.notifySessionsChanged();
+    return pending;
   }
 
   /** Presence is separate from sessions so an idle room can still appear connected. */
   getRoomPresence(): IRoomPresence[] {
     const now = Date.now();
     return this.snapshot.rooms.map((room) => {
+      const devicePresence = this.presence.getRoom(room, now);
       const lastSeenAt = this.roomLastSeenAt.get(room.id) ?? null;
-      const msSinceLastSeen = lastSeenAt === null ? null : Math.max(0, now - new Date(lastSeenAt).getTime());
+      const deviceLastSeenAt = devicePresence.lastSeenAt;
+      const effectiveLastSeenAt =
+        lastSeenAt && (!deviceLastSeenAt || new Date(lastSeenAt).getTime() > new Date(deviceLastSeenAt).getTime())
+          ? lastSeenAt
+          : deviceLastSeenAt;
+      const msSinceLastSeen =
+        effectiveLastSeenAt === null ? null : Math.max(0, now - new Date(effectiveLastSeenAt).getTime());
       return {
         roomId: room.id,
-        lastSeenAt,
+        lastSeenAt: effectiveLastSeenAt,
         msSinceLastSeen,
-        connected: msSinceLastSeen !== null && msSinceLastSeen <= staleRoomThresholdMs,
+        connected: devicePresence.connected || (msSinceLastSeen !== null && msSinceLastSeen <= staleRoomThresholdMs),
+        devices: devicePresence.devices,
+        readyDeviceCount: devicePresence.readyDeviceCount,
       };
     });
+  }
+
+  getHelpRequests(): IHelpRequest[] {
+    return this.helpRequests.list();
+  }
+
+  private createHelpRequest(roomId: string, request: ICreateHelpRequest): IHelpRequest | null {
+    const room = this.snapshot.rooms.find((candidate) => candidate.id === roomId && candidate.enabled);
+    if (!room) return null;
+    const created = this.helpRequests.create(room, request);
+    if (created) this.notifyHelpRequestsChanged();
+    return created;
+  }
+
+  updateHelpRequest(id: string, status: 'resolved' | 'cancelled', note?: string): IHelpRequest | null {
+    const updated = this.helpRequests.updateState(id, status, note);
+    if (updated) this.notifyHelpRequestsChanged();
+    return updated;
   }
 
   /**
@@ -288,15 +475,17 @@ export default class TournamentServer {
   }
 
   /** Mark a session accepted, after the statskeeper approved the match in the Match Inbox */
-  acceptSession(sessionId: string) {
-    this.sessions.markAccepted(sessionId);
-    this.notifySessionsChanged();
+  acceptSession(sessionId: string, expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>) {
+    if (this.sessions.markAccepted(sessionId, expectedFinal)) this.notifySessionsChanged();
   }
 
   /** Mark a session rejected */
-  rejectSession(sessionId: string, reason?: string) {
-    this.sessions.markRejected(sessionId, reason);
-    this.notifySessionsChanged();
+  rejectSession(
+    sessionId: string,
+    reason?: string,
+    expectedFinal?: Pick<ISubmissionVerdict, 'finalRevision' | 'finalFingerprint'>,
+  ) {
+    if (this.sessions.markRejected(sessionId, reason, expectedFinal)) this.notifySessionsChanged();
   }
 
   private notifySessionsChanged() {
@@ -304,9 +493,45 @@ export default class TournamentServer {
     this.options.onSessionsChanged?.(this.getSessionSummaries());
   }
 
-  private markRoomCheckIn(roomId: string) {
+  /** A server Accepted verdict is durable only when the current tournament projection proves its link. */
+  private hasDurableAcceptedLink(session: { scheduledMatchId?: string }): boolean {
+    if (!session.scheduledMatchId) return false;
+    const assignment = this.snapshot.assignments.find(
+      (candidate) => candidate.scheduledMatchId === session.scheduledMatchId,
+    );
+    return (
+      assignment?.status === 'accepted' &&
+      typeof assignment.resultMatchId === 'string' &&
+      assignment.resultMatchId !== ''
+    );
+  }
+
+  /** Recovery entries for a closed/deleted schedule must never become resumable room credentials. */
+  private discardRecoveredSessionsMissingFromSnapshot() {
+    let discarded = false;
+    for (const session of this.sessions.getAll()) {
+      if (
+        session.scheduledMatchId &&
+        !this.snapshot.assignments.some((assignment) => assignment.scheduledMatchId === session.scheduledMatchId) &&
+        !(session.finalReceived && session.latestQbj !== null)
+      ) {
+        this.sessions.remove(session.id);
+        discarded = true;
+        // eslint-disable-next-line no-console
+        console.error(`Tournament recovery session ${session.id} was discarded because its scheduled game is absent.`);
+      }
+    }
+    if (discarded) this.persistRecovery();
+  }
+
+  private markRoomCheckIn(roomId: string, deviceId?: string, operatorName?: string, ready?: boolean) {
     this.roomLastSeenAt.set(roomId, new Date().toISOString());
+    this.presence.checkIn(roomId, deviceId ?? 'unidentified', operatorName, ready);
     this.persistRecovery();
+  }
+
+  private notifyHelpRequestsChanged() {
+    this.options.onHelpRequestsChanged?.(this.getHelpRequests());
   }
 
   /** Load a corrupt or missing recovery file as an empty store rather than failing startup. */
@@ -315,16 +540,46 @@ export default class TournamentServer {
     if (!filePath || !existsSync(filePath)) return;
     try {
       const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as Partial<ITournamentServerRecovery>;
-      if (parsed.version !== 1 || typeof parsed.recoveryKey !== 'string') return;
+      if (
+        (parsed.version !== 1 && parsed.version !== 2) ||
+        typeof parsed.recoveryKey !== 'string' ||
+        typeof parsed.savedAt !== 'string' ||
+        !isValidTimestamp(parsed.savedAt)
+      ) {
+        // eslint-disable-next-line no-console
+        console.error('Tournament recovery file invalid; starting with no recoverable sessions.');
+        return;
+      }
+
+      if (this.recoveryKey && parsed.recoveryKey !== this.recoveryKey) {
+        // A file from an earlier tournament may still be present while the renderer is switching
+        // documents. Never let it repopulate sessions for the newly open tournament.
+        this.sessions.clear();
+        this.roomLastSeenAt.clear();
+        // eslint-disable-next-line no-console
+        console.error('Tournament recovery file belongs to a different tournament; ignoring its sessions.');
+        return;
+      }
+
       this.recoveryKey = parsed.recoveryKey;
-      this.sessions.restore(parsed.sessions);
+      const diagnostics = this.sessions.restore(parsed.sessions);
+      diagnostics.forEach((diagnostic) => {
+        // eslint-disable-next-line no-console
+        console.error(`Tournament recovery session skipped: ${diagnostic}`);
+      });
       if (parsed.roomLastSeenAt && typeof parsed.roomLastSeenAt === 'object') {
         for (const [roomId, timestamp] of Object.entries(parsed.roomLastSeenAt)) {
-          if (typeof timestamp === 'string') this.roomLastSeenAt.set(roomId, timestamp);
+          if (typeof timestamp === 'string' && Number.isFinite(new Date(timestamp).getTime())) {
+            this.roomLastSeenAt.set(roomId, timestamp);
+          }
         }
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
       // Recovery is best effort. MODAQ and the browser queue remain the last-resort copy of a game.
+      // eslint-disable-next-line no-console
+      console.error(
+        `Tournament recovery file could not be read: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
     }
   }
 
@@ -332,21 +587,34 @@ export default class TournamentServer {
   private persistRecovery() {
     const filePath = this.options.recoveryFilePath;
     if (!filePath || !this.recoveryKey) return;
-    const directory = path.dirname(filePath);
     try {
+      const directory = path.dirname(filePath);
       mkdirSync(directory, { recursive: true });
       const payload: ITournamentServerRecovery = {
-        version: 1,
+        version: 2,
         recoveryKey: this.recoveryKey,
         savedAt: new Date().toISOString(),
         sessions: this.sessions.toRecoverySessions(),
         roomLastSeenAt: Object.fromEntries(this.roomLastSeenAt.entries()),
       };
-      const temporaryPath = `${filePath}.tmp`;
-      writeFileSync(temporaryPath, JSON.stringify(payload), 'utf8');
-      renameSync(temporaryPath, filePath);
-    } catch (err: any) {
-      // A recovery write failure must not bring down live scoring; the browser keeps its own queue.
+      const serialized = JSON.stringify(payload);
+      this.recoveryWritePromise = this.recoveryWritePromise
+        .catch(() => undefined)
+        .then(() => writeFileAtomically(filePath, serialized))
+        .catch((error: unknown) => {
+          // A recovery write failure must not bring down live scoring; the browser keeps its own queue.
+          // eslint-disable-next-line no-console
+          console.error(
+            `Tournament recovery write failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          );
+        });
+    } catch (error: unknown) {
+      // Directory creation/serialization can fail before the asynchronous write chain exists. Keep
+      // the server alive and make the failure diagnosable without exposing session tokens.
+      // eslint-disable-next-line no-console
+      console.error(
+        `Tournament recovery preparation failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
     }
   }
 
@@ -366,8 +634,20 @@ export default class TournamentServer {
       scheduledMatchId: session.scheduledMatchId,
       qbj: session.latestQbj,
       submittedAt: session.lastSeenAt,
+      tournamentKey: session.tournamentKey,
+      sessionStatus: session.status,
+      finalRevision: session.finalRevision,
+      finalFingerprint: session.finalFingerprint,
     };
-    this.options.onFinalSubmission(submission);
+    try {
+      this.options.onFinalSubmission(submission);
+    } catch (error: unknown) {
+      // The final is already durably retained in the recovery store. A renderer callback failure
+      // must not turn the HTTP server into an uncaught exception or discard the room's retryable
+      // submission.
+      // eslint-disable-next-line no-console
+      console.error(`Tournament final handoff failed: ${errorMessage(error)}`);
+    }
     this.notifySessionsChanged();
   }
 

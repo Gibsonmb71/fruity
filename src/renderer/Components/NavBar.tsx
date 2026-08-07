@@ -30,7 +30,7 @@ import {
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ApplicationPages } from '../Enums';
 import { hotkeyFormat } from '../Utils/GeneralReactUtils';
-import getAppPageHelpText from './PageLevelHelpText';
+import { getContextualAppPageHelpText, HelpTopicId } from './PageLevelHelpText';
 import { headerHeight, macTrafficLightWidth } from '../Theme/tokens';
 import { TournamentContext } from '../TournamentManager';
 import { ITournamentReadiness } from '../Services/TournamentReadiness';
@@ -83,10 +83,12 @@ interface INavBarProps {
   readiness: ITournamentReadiness;
   onNavigateTarget: (intent: INavigationIntent) => void;
   onOpenQuickFind: () => void;
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 function NavBar(props: INavBarProps) {
-  const { activePage, setActivePage, readiness, onNavigateTarget, onOpenQuickFind } = props;
+  const { activePage, setActivePage, readiness, onNavigateTarget, onOpenQuickFind, helpTopic } = props;
   const tournManager = React.useContext(TournamentContext);
   const [tipsDialogOpen, setTipsDialogOpen] = React.useState(false);
   const [issuesAnchor, setIssuesAnchor] = React.useState<HTMLElement | null>(null);
@@ -408,7 +410,12 @@ function NavBar(props: INavBarProps) {
           </MenuItem>
         ))}
       </Menu>
-      <HelpTipsDialog page={activePage} isOpen={tipsDialogOpen} onClose={() => setTipsDialogOpen(false)} />
+      <HelpTipsDialog
+        page={activePage}
+        topic={helpTopic}
+        isOpen={tipsDialogOpen}
+        onClose={() => setTipsDialogOpen(false)}
+      />
     </>
   );
 }
@@ -505,12 +512,14 @@ function ColorModeButton() {
 
 interface IHelpTipsDialogProps {
   page: ApplicationPages;
+  // eslint-disable-next-line react/require-default-props
+  topic?: HelpTopicId;
   isOpen: boolean;
   onClose: () => void;
 }
 
 function HelpTipsDialog(props: IHelpTipsDialogProps) {
-  const { page, isOpen, onClose } = props;
+  const { page, topic, isOpen, onClose } = props;
 
   useHotkeys('alt+c', onClose, { enabled: isOpen });
 
@@ -518,7 +527,7 @@ function HelpTipsDialog(props: IHelpTipsDialogProps) {
     <Dialog fullWidth maxWidth="sm" open={isOpen} onClose={onClose}>
       <DialogTitle>Help &mdash; {pageNames[page]}</DialogTitle>
       <DialogContent>
-        <HelpTextDialogContent page={page} />
+        <HelpTextDialogContent page={page} topic={topic} />
       </DialogContent>
       <DialogActions>
         <Button onClick={() => onClose()}>{hotkeyFormat('&Close')}</Button>
@@ -529,12 +538,14 @@ function HelpTipsDialog(props: IHelpTipsDialogProps) {
 
 interface IHelpTextDialogContentProps {
   page: ApplicationPages;
+  // eslint-disable-next-line react/require-default-props
+  topic?: HelpTopicId;
 }
 
 function HelpTextDialogContent(props: IHelpTextDialogContentProps) {
-  const { page } = props;
-  const contents = getAppPageHelpText(page);
-  if (!contents) return 'No help text';
+  const { page, topic } = props;
+  const contents = getContextualAppPageHelpText(page, topic);
+  if (contents.length === 0) return 'No help text';
 
   return contents.map((sec, idx) => (
     // eslint-disable-next-line react/no-array-index-key

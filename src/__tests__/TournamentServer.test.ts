@@ -47,9 +47,11 @@ function makeSnapshot(): ITournamentSnapshot {
     gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
     gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
     timedRounds: false,
+    roomScoringMode: 'browser',
     rooms: [],
     assignments: [],
-    currentRoundNumber: null,
+    currentRoundNumber: 1,
+    releasedRoundNumber: 1,
   };
 }
 
@@ -143,6 +145,33 @@ describe('start and stop', () => {
     const status = await server.start(0);
 
     expect(status.running).toBe(true);
+  });
+
+  test('concurrent starts coalesce and stop waits for the listener', async () => {
+    const candidate = new TournamentServer({ roomBundleDirectory: bundleDir, onFinalSubmission: () => {} });
+    candidate.setTournamentSnapshot(makeSnapshot());
+
+    const firstStart = candidate.start(0);
+    const secondStart = candidate.start(0);
+
+    expect(secondStart).toBe(firstStart);
+    expect((await firstStart).running).toBe(true);
+    expect((await candidate.stop()).running).toBe(false);
+  });
+
+  test('stop during start and repeated stop calls leave no listener behind', async () => {
+    const candidate = new TournamentServer({ roomBundleDirectory: bundleDir, onFinalSubmission: () => {} });
+    candidate.setTournamentSnapshot(makeSnapshot());
+
+    const starting = candidate.start(0);
+    const stopping = candidate.stop();
+    const repeatedStop = candidate.stop();
+    const [started, stopped] = await Promise.all([starting, stopping]);
+
+    expect(started.running).toBe(true);
+    expect(repeatedStop).toBe(stopping);
+    expect(stopped.running).toBe(false);
+    expect(candidate.getStatus().running).toBe(false);
   });
 
   test('failing to bind is reported instead of thrown', async () => {
@@ -295,6 +324,24 @@ describe('session creation', () => {
     expect(body.sessionId).toBeTruthy();
     expect(body.token).toBeTruthy();
     expect(body.status).toBe(SessionStatus.Created);
+  });
+
+  test('the generic session path refuses an explicitly traditional tournament', async () => {
+    server.setTournamentSnapshot({ ...makeSnapshot(), roomScoringMode: 'traditional' });
+
+    const { res, body } = await createSession();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('disabled for traditional');
+  });
+
+  test('the generic session path refuses an unreleased round', async () => {
+    server.setTournamentSnapshot({ ...makeSnapshot(), releasedRoundNumber: null });
+
+    const { res, body } = await createSession();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('not been released');
   });
 
   test('ids and tokens are unguessable and unique', async () => {
