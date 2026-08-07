@@ -21,11 +21,7 @@ export default function SchedulePage({ showPageHeader = true }: ISchedulePagePro
   return (
     <>
       {showPageHeader && (
-        <YfPageHeader
-          title="Format"
-          description="Phases, pools and rounds. Start from a template or build your own."
-          helpTopic="setup.format"
-        />
+        <YfPageHeader title="Format" description="Phases, pools and rounds. Start from a template or build your own." />
       )}
       {phases.length === 0 ? (
         <SchedulePickerCard />

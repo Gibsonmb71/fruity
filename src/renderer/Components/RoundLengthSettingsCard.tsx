@@ -56,10 +56,14 @@ function RoundLengthSettingsCard() {
   return (
     <YfCard title="Match" description="How long a game of regulation runs." variant="rows" fullHeight>
       <SettingsList>
-        <SettingRow label="Timed rounds" description="Rounds end on the clock rather than after a fixed count.">
+        <SettingRow
+          label="Timed rounds"
+          description="Rounds end on the clock rather than after a fixed count."
+          helpTopic="rules.timed"
+        >
           <Switch disabled={readOnly} checked={timedRoundsChecked} onChange={handleTimedRoundsChange} />
         </SettingRow>
-        <SettingRow label={numTusLabel} description={numTusHelpText}>
+        <SettingRow label={numTusLabel} description={numTusHelpText} helpTopic="rules.regulation-tossups">
           <YfNumericField
             hiddenLabel
             sx={{ width: '9ch' }}

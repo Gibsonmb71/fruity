@@ -129,6 +129,18 @@ export interface IRoomJoinDescriptor {
   description?: string;
 }
 
+/**
+ * What the browser landing page needs in order to choose its own default.
+ *
+ * A tournament running browser room scoring with rooms configured should land on pairing; a
+ * traditional tournament should land on manual scoring. Both remain reachable either way, so this
+ * only decides which one the scorekeeper sees first.
+ */
+export interface IRoomJoinListResponse {
+  rooms: IRoomJoinDescriptor[];
+  roomScoringMode: 'browser' | 'traditional';
+}
+
 /** The one-time result of successfully exchanging a human pairing code for a room identity. */
 export interface IRoomJoinResponse {
   roomId: string;
@@ -354,10 +366,20 @@ export interface IRoomAssignmentResponse {
   /** Open request for this room, if any. */
   helpRequest?: IHelpRequest | null;
   /** Most recent terminal outcome for the current assignment, if one was reviewed. */
-  lastOutcome?: {
-    status: SessionStatus.Accepted | SessionStatus.Rejected;
-    rejectionReason?: string;
-  };
+  lastOutcome?: IRoomLifecycleOutcome;
+}
+
+/**
+ * A terminal review verdict, tied to the game it belongs to.
+ *
+ * The scheduled match id is the whole point: a room shows "accepted" or "needs correction" about a
+ * specific game, and without an identity those notices outlive the game they describe and end up
+ * being read as a statement about the round the room is now playing.
+ */
+export interface IRoomLifecycleOutcome {
+  scheduledMatchId: string;
+  status: SessionStatus.Accepted | SessionStatus.Rejected;
+  rejectionReason?: string;
 }
 
 /** Enough to pick up an in-progress session after a reload */

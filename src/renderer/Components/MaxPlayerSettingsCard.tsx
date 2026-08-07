@@ -33,7 +33,7 @@ function MaxPlayersSettingsCard() {
   return (
     <YfCard title="Players" variant="rows" fullHeight>
       <SettingsList>
-        <SettingRow label="Max active per team" description={maxPlayersFieldHelpText}>
+        <SettingRow label="Max active per team" description={maxPlayersFieldHelpText} helpTopic="rules.maximum-players">
           <YfNumericField
             hiddenLabel
             sx={{ width: '9ch' }}

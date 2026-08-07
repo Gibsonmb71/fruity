@@ -37,11 +37,7 @@ function GeneralPage({ showPageHeader = true }: IGeneralPageProps) {
   return (
     <>
       {showPageHeader && (
-        <YfPageHeader
-          title="Tournament"
-          description="What, where and when this tournament is, and what you track."
-          helpTopic="setup.tournament"
-        />
+        <YfPageHeader title="Tournament" description="What, where and when this tournament is, and what you track." />
       )}
       <BackupRecoveryNotice />
       {/*
@@ -79,7 +75,11 @@ function GameEntryPanel() {
   };
 
   return (
-    <YfCard title="Game entry" description="Choose how this tournament's results will be scored.">
+    <YfCard
+      title="Game entry"
+      helpTopic="control.browser-scoring"
+      description="Choose how this tournament's results will be scored."
+    >
       <FormControl component="fieldset" fullWidth>
         <RadioGroup
           value={mode}
@@ -167,7 +167,7 @@ function TournamentPanel() {
   return (
     <YfCard title="Tournament" fullHeight>
       <YfFieldGrid>
-        <YfFieldRow label="Name" helpTopic="setup.tournament">
+        <YfFieldRow label="Name">
           <TextField
             hiddenLabel
             placeholder="Ninety Six Invitational"

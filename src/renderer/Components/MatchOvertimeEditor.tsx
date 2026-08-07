@@ -18,7 +18,7 @@ import { LeftOrRight } from '../Utils/UtilTypes';
 import useSubscription from '../Utils/CustomHooks';
 import { ValidationStatuses } from '../DataModel/Interfaces';
 import { PlayerAnswerCount } from '../DataModel/PlayerAnswerCount';
-import { YfNumericField } from '../Utils/GeneralReactUtils';
+import { YfHelpPopover, YfNumericField } from '../Utils/GeneralReactUtils';
 import { shouldExpandOvertime, shouldShowTiePrompt } from '../Services/MatchEditorPresentation';
 
 export default function MatchOvertimeEditor() {
@@ -58,6 +58,7 @@ export default function MatchOvertimeEditor() {
         <Box sx={{ minWidth: 0 }}>
           <Typography id="match-overtime-heading" component="h2" variant="subtitle1">
             Overtime
+            <YfHelpPopover topic="games.overtime" label="Help for overtime" />
           </Typography>
           {!expanded && (
             <Typography variant="caption" color="text.secondary" noWrap>

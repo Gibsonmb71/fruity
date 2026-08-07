@@ -29,6 +29,7 @@ function LightningRoundSettingsCard() {
         <SettingRow
           label="Lightning round"
           description="Each team gets its own timed round, entered as a single point total."
+          helpTopic="rules.lightning"
         >
           <Switch checked={useLightning} disabled={readOnly} onChange={handleUseLightningChange} />
         </SettingRow>
@@ -57,6 +58,7 @@ function LightningAdvancedSection() {
     <SettingsList>
       <AdvancedNumericRuleField
         label="Divisor"
+        helpTopic="rules.lightning-divisor"
         required
         disabled={tournManager.tournament.hasMatchData}
         value={divisor}

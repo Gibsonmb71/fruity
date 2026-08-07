@@ -56,7 +56,6 @@ export default function LiveDisplaySettingsCard() {
         <div className="rooms-panel-header">
           <div>
             <h2 id="live-display-heading">Live audience and display</h2>
-            <YfHelpPopover topic="control.display" label="Help for public display and pairings" />
             <p>Publish a read-only tournament view for spectators, a hallway screen, or a Smart Board.</p>
           </div>
           <FormControlLabel
@@ -70,7 +69,11 @@ export default function LiveDisplaySettingsCard() {
                 }
               />
             }
-            label="Live display enabled"
+            label={
+              <span>
+                Live display enabled <YfHelpPopover topic="control.live-display" label="Help for the live display" />
+              </span>
+            }
           />
           <FormControlLabel
             control={

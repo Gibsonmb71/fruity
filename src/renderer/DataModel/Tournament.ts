@@ -393,6 +393,17 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
     return sumReduce(poolSizes);
   }
 
+  /**
+   * The accepted scheduled game this `Match` is the official result of, if it is one.
+   *
+   * An accepted `ScheduledMatch` and the `Match` it points at are two halves of one official
+   * tournament result. Anything that would remove the `Match` on its own has to consult this first,
+   * or the schedule is left claiming a result that no longer exists.
+   */
+  acceptedScheduledMatchForResult(matchId: string): ScheduledMatch | undefined {
+    return this.scheduledMatches.find((scheduled) => scheduled.resultMatchId === matchId && scheduled.isAccepted());
+  }
+
   /** Should we let the user start entering matches? */
   readyToAddMatches() {
     if (this.getNumberOfTeams() < 2) return false;

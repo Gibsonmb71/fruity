@@ -124,6 +124,15 @@ export interface IStartBlock {
 }
 
 /**
+ * What a room is told while a final is with tournament control.
+ *
+ * Shared so the polled assignment response and the authoritative start refusal say the same thing.
+ * Awaiting review is a normal state of a working room, not an error, and the wording has to read
+ * that way to a scorekeeper who is standing there watching the screen.
+ */
+export const submittedBlockMessage = 'This game has a final awaiting tournament-control review.';
+
+/**
  * May this room start this assignment right now?
  *
  * Returns the reason it may not, or null if it may. The future-round rule is the important one: a
@@ -178,10 +187,7 @@ export function checkCanStart(
   // always quarantined and remains blocked above.
 
   if (assignment.status === ScheduledMatchStatus.Submitted) {
-    return {
-      reason: RoomBlockedReason.Submitted,
-      message: 'This game has a final awaiting tournament-control review.',
-    };
+    return { reason: RoomBlockedReason.Submitted, message: submittedBlockMessage };
   }
 
   // A derived current round tells us what is next; the explicit release is the gate that prevents

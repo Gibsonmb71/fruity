@@ -1439,16 +1439,50 @@ export class TournamentManager {
     this.onDataChanged();
   }
 
+  /**
+   * Why the ordinary Delete action can't be used on this game, or null if it can.
+   *
+   * Only an accepted official result is protected. A manually entered game, an imported game, and a
+   * scheduled game that hasn't been accepted are all ordinary games and delete normally.
+   */
+  static officialResultDeleteRefusal(tournament: Tournament, match: Match): string | null {
+    if (!tournament.acceptedScheduledMatchForResult(match.id)) return null;
+    return 'This is an accepted official result and cannot be deleted normally. Use "Correct official result…" to fix scoring details.';
+  }
+
   tryDeleteMatch(match: Match, round: Round) {
+    const refusal = TournamentManager.officialResultDeleteRefusal(this.tournament, match);
+    if (refusal) {
+      this.makeToast(refusal, 'error');
+      return;
+    }
     this.genericModalManager.open('Delete Game', 'Are you sure you want to delete this game?', 'N&o', '&Yes', () =>
       this.deleteMatch(match, round),
     );
   }
 
-  deleteMatch(match: Match, round: Round) {
+  /**
+   * Remove a game from the tournament.
+   *
+   * The accepted-result check lives here rather than only in the confirmation dialog, because the
+   * damage it prevents is structural: deleting the `Match` an accepted `ScheduledMatch` points at
+   * would leave the Match Plan asserting an official result that no longer exists, and nothing
+   * downstream — standings, the stat report, QBJ export — has any way to notice. Correcting an
+   * accepted result is a real workflow and goes through the match editor, which updates the
+   * existing `Match` in place instead of replacing it.
+   *
+   * @returns false when the deletion was refused.
+   */
+  deleteMatch(match: Match, round: Round): boolean {
+    const refusal = TournamentManager.officialResultDeleteRefusal(this.tournament, match);
+    if (refusal) {
+      this.makeToast(refusal, 'error');
+      return false;
+    }
     round.deleteMatch(match);
     this.tournament.calcHasMatchData();
     this.onDataChanged();
+    return true;
   }
 
   addTeamtoPlayoffPool(team: Team, pool: Pool, nextPhase: Phase) {

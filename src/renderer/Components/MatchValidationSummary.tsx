@@ -7,6 +7,7 @@ import MatchValidationMessage, { MatchValidationType } from '../DataModel/MatchV
 import { ValidationStatuses } from '../DataModel/Interfaces';
 import { LeftOrRight } from '../Utils/UtilTypes';
 import { isPristineNewMatch } from '../Services/MatchEditorPresentation';
+import { YfHelpPopover } from '../Utils/GeneralReactUtils';
 
 export interface IMatchValidationIssue {
   key: string;
@@ -88,6 +89,7 @@ export default function MatchValidationSummary(props: IMatchValidationSummaryPro
             pristine,
           )}
         </Typography>
+        {suppressedCount > 0 && <YfHelpPopover topic="games.ignored-warning" label="Help for ignored warnings" />}
         {suppressedCount > 0 && (
           <Button
             size="small"

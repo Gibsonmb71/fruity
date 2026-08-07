@@ -1,6 +1,6 @@
 /* eslint-disable react/require-default-props */
 import { useContext } from 'react';
-import type { Ref } from 'react';
+import type { PropsWithChildren, Ref } from 'react';
 import {
   Box,
   Checkbox,
@@ -16,7 +16,8 @@ import {
 import { MatchEditModalContext } from '../Modal Managers/TempMatchManager';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
-import { YfNumericField } from '../Utils/GeneralReactUtils';
+import { YfHelpPopover, YfNumericField } from '../Utils/GeneralReactUtils';
+import type { HelpTopicId } from './PageLevelHelpText';
 import { ValidationStatuses } from '../DataModel/Interfaces';
 
 interface IMatchDetailsBarProps {
@@ -57,8 +58,10 @@ export default function MatchDetailsBar(props: IMatchDetailsBarProps) {
         </Box>
         <StageDisplay />
         <CarryoverPhaseSelect />
-        <Box sx={{ width: { xs: '100%', sm: 130 }, ml: { sm: 'auto' } }}>
-          <TuhTotalField inputRef={totalTuhInputRef} />
+        <Box sx={{ width: { xs: '100%', sm: 160 }, ml: { sm: 'auto' } }}>
+          <FieldWithHelp topic="games.tuh" label="Help for toss-ups read">
+            <TuhTotalField inputRef={totalTuhInputRef} />
+          </FieldWithHelp>
         </Box>
       </Stack>
     </Box>
@@ -131,6 +134,22 @@ function StageDisplay() {
   );
 }
 
+/**
+ * A field with its own `?` beside it, aligned to the top of the control rather than its middle so
+ * the icon lines up with the label rather than floating in the middle of the input.
+ */
+function FieldWithHelp(props: PropsWithChildren<{ topic: HelpTopicId; label: string }>) {
+  const { topic, label, children } = props;
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.25, width: '100%' }}>
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>{children}</Box>
+      <Box sx={{ pt: 1.25, flexShrink: 0 }}>
+        <YfHelpPopover topic={topic} label={label} />
+      </Box>
+    </Box>
+  );
+}
+
 function CarryoverPhaseSelect() {
   const modalManager = useContext(MatchEditModalContext);
   const [selectedPhases] = useSubscription(modalManager.tempMatch.carryoverPhases);
@@ -145,25 +164,27 @@ function CarryoverPhaseSelect() {
   };
 
   return (
-    <FormControl sx={{ minWidth: { xs: '100%', sm: 220 } }}>
-      <InputLabel id="match-carryover-label">Carryover</InputLabel>
-      <Select
-        labelId="match-carryover-label"
-        id="match-carryover"
-        multiple
-        label="Carryover"
-        value={selectedNames}
-        onChange={(event) => handleChange(event.target.value as string[])}
-        renderValue={(selected) => (selected.length === 0 ? 'None' : selected.join(', '))}
-      >
-        {availablePhases.map((phase) => (
-          <MenuItem key={phase.name} value={phase.name}>
-            <Checkbox checked={selectedNames.includes(phase.name)} />
-            <ListItemText primary={phase.name} />
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
+    <FieldWithHelp topic="games.carryover" label="Help for carryover">
+      <FormControl sx={{ minWidth: { xs: '100%', sm: 220 }, width: '100%' }}>
+        <InputLabel id="match-carryover-label">Carryover</InputLabel>
+        <Select
+          labelId="match-carryover-label"
+          id="match-carryover"
+          multiple
+          label="Carryover"
+          value={selectedNames}
+          onChange={(event) => handleChange(event.target.value as string[])}
+          renderValue={(selected) => (selected.length === 0 ? 'None' : selected.join(', '))}
+        >
+          {availablePhases.map((phase) => (
+            <MenuItem key={phase.name} value={phase.name}>
+              <Checkbox checked={selectedNames.includes(phase.name)} />
+              <ListItemText primary={phase.name} />
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+    </FieldWithHelp>
   );
 }
 

@@ -3,6 +3,8 @@ import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import React from 'react';
+import { YfHelpPopover } from '../Utils/GeneralReactUtils';
+import { HelpTopicId } from './PageLevelHelpText';
 
 /** How a panel pads its body. */
 export type YfCardVariant =
@@ -32,6 +34,9 @@ interface IYfCardProps {
   /** Fill the height of its grid/flex track, so panels sitting side by side line up. */
   // eslint-disable-next-line react/require-default-props
   fullHeight?: boolean;
+  /** Targeted help for what this whole panel configures. Omit unless the panel is genuinely unobvious. */
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 /**
@@ -40,7 +45,7 @@ interface IYfCardProps {
  * comes from the border, not from a shadow.
  */
 function YfCard(props: React.PropsWithChildren<IYfCardProps>) {
-  const { title, children, actions, description, variant = 'default', fullHeight } = props;
+  const { title, children, actions, description, variant = 'default', fullHeight, helpTopic } = props;
   return (
     <Paper
       variant="outlined"
@@ -60,7 +65,15 @@ function YfCard(props: React.PropsWithChildren<IYfCardProps>) {
       >
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="h4" component="h2" sx={{ fontSize: '0.875rem' }}>
-            {title}
+            <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+              {title}
+              {helpTopic && (
+                <YfHelpPopover
+                  topic={helpTopic}
+                  label={typeof title === 'string' ? `Help for ${title}` : 'Show help'}
+                />
+              )}
+            </Box>
           </Typography>
           {description && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>

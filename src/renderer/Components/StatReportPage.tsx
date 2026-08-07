@@ -13,7 +13,7 @@ import {
   Typography,
 } from '@mui/material';
 import { FileDownload, Launch, MoreHoriz } from '@mui/icons-material';
-import { YfCssClasses, YfPageHeader } from '../Utils/GeneralReactUtils';
+import { YfCssClasses, YfHelpPopover, YfPageHeader } from '../Utils/GeneralReactUtils';
 import { statReportProtocol } from '../../SharedUtils';
 import { StatReportFileNames, StatReportPages } from '../Enums';
 import useSubscription from '../Utils/CustomHooks';
@@ -139,6 +139,7 @@ export default function StatReportPage() {
           >
             Scope: {scopeButtonLabel}
           </Button>
+          <YfHelpPopover topic="reports.scope" label="Help for report scope" />
           <Button
             size="small"
             variant="outlined"
@@ -204,6 +205,7 @@ export default function StatReportPage() {
           <MenuItem onClick={() => setIncludeCarryover((included) => !included)}>
             <Checkbox checked={includeCarryover} size="small" />
             <ListItemText primary="Include carried-over games" />
+            <YfHelpPopover topic="reports.include-carryover" label="Help for carried-over games" />
           </MenuItem>
         )}
       </Menu>
@@ -294,6 +296,7 @@ function PublicationReadiness({
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ alignItems: { sm: 'center' }, gap: 1.25 }}>
         <Typography variant="subtitle2" sx={{ mr: { sm: 0.5 } }}>
           Publication readiness
+          <YfHelpPopover topic="reports.readiness" label="Help for publication readiness" />
         </Typography>
         {summaryChecks.map((check) => (
           <VerificationItem key={check.id} status={check.status} text={check.text} />

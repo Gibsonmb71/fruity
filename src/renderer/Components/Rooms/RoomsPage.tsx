@@ -201,6 +201,7 @@ export default function RoomsPage({
   );
   const [scheduleError, setScheduleError] = useState('');
   const [roomMenu, setRoomMenu] = useState<{ room: TournamentRoom; anchor: HTMLElement } | null>(null);
+  const [resolvingHelpId, setResolvingHelpId] = useState<string | null>(null);
   const [uncontrolledTab, setUncontrolledTab] = useState(ControlPages.Live);
   const activeTab = controlledTab ?? uncontrolledTab;
   const setActiveTab = (tab: ControlPages) => {
@@ -394,6 +395,26 @@ export default function RoomsPage({
         setConfirmState(null);
       },
     });
+  };
+
+  /**
+   * Mark a room's help request handled.
+   *
+   * A director-initiated tournament-day action, so a failure has to be visible: the room is still
+   * standing there with its hand up. The request is only removed from the attention list once the
+   * server confirms the change, and a failure re-reads the queue so what is on screen is what the
+   * server actually holds rather than an optimistic guess.
+   */
+  const resolveHelpRequest = async (request: IHelpRequest) => {
+    setResolvingHelpId(request.id);
+    const updated = await service.updateHelpRequest(request.id, 'resolved');
+    setResolvingHelpId(null);
+    if (updated?.status === 'resolved') return;
+    manager.makeToast(
+      service.lastError || `${request.roomName}'s help request could not be resolved. It is still open.`,
+      'error',
+    );
+    service.refreshHelpRequests();
   };
 
   const toggleRoomStartHold = () => {
@@ -598,18 +619,12 @@ export default function RoomsPage({
     if (!released) manager.makeToast(service.lastError || 'That round could not be released.', 'error');
     return released;
   };
-  let pageHelpTopic: 'control.match-plan' | 'control.rooms' | 'control.display' | 'control.live' = 'control.live';
-  if (activeTab === ControlPages.MatchPlan) pageHelpTopic = 'control.match-plan';
-  else if (activeTab === ControlPages.Rooms) pageHelpTopic = 'control.rooms';
-  else if (activeTab === ControlPages.Display) pageHelpTopic = 'control.display';
-
   return (
     <TournamentServerContext.Provider value={service}>
       <main className="rooms-operations">
         <YfPageHeader
           title="Control"
           description="Tournament-day operations: what needs to happen now, where, and why."
-          helpTopic={pageHelpTopic}
           status={
             <Chip
               size="small"
@@ -710,7 +725,7 @@ export default function RoomsPage({
             <div className="rooms-panel-header">
               <div>
                 <h2 id="rooms-list-heading">Physical rooms</h2>
-                <YfHelpPopover topic="control.rooms" label="Help for physical rooms" />
+                <YfHelpPopover topic="control.room-inheritance" label="Help for how a game ends up in a room" />
                 <p>
                   {rooms.length === 0
                     ? 'Add the physical rooms being used for matches.'
@@ -913,6 +928,8 @@ export default function RoomsPage({
                 releaseBlocked={releaseBlocked}
                 disabledRoomAssignments={disabledRoomAssignments}
                 helpRequests={service.helpRequests}
+                resolvingHelpId={resolvingHelpId}
+                onResolveHelp={resolveHelpRequest}
               />
             </section>
           )}
@@ -922,7 +939,6 @@ export default function RoomsPage({
             <div className="rooms-panel-header">
               <div>
                 <h2 id="schedule-heading">Match Plan</h2>
-                <YfHelpPopover topic="control.match-plan" label="Help for Match Plan" />
                 <p>
                   Plan concrete team-versus-team matches and their rooms. Accepted history is never regenerated away.
                 </p>
@@ -931,9 +947,11 @@ export default function RoomsPage({
                 <Button size="small" onClick={() => openBulkPlan('auto')} disabled={rooms.length === 0}>
                   Auto-assign unassigned
                 </Button>
+                <YfHelpPopover topic="control.auto-assign" label="Help for auto-assigning rooms" />
                 <Button size="small" onClick={() => openBulkPlan('rebalance')} disabled={rooms.length === 0}>
                   Rebalance upcoming
                 </Button>
+                <YfHelpPopover topic="control.rebalance" label="Help for rebalancing rooms" />
                 <Button size="small" startIcon={<Add />} onClick={() => setMatchEditor(null)}>
                   Add match
                 </Button>
@@ -1217,10 +1235,12 @@ function ServerToolbar({
   } else {
     addressContent = <strong>{serverAddress || 'No LAN address found'}</strong>;
   }
+  const showAddressHelp = service.status.running && networkAddresses.length > 1;
   return (
     <div className="rooms-server-toolbar">
       <YfHelpPopover topic="control.server" label="Help for Tournament Server" />
       <div className="rooms-server-address">{addressContent}</div>
+      {showAddressHelp && <YfHelpPopover topic="control.network-interface" label="Help for the network address" />}
       {service.status.running && serverAddress !== '' && (
         <>
           <Button size="small" startIcon={<ContentCopy />} onClick={() => onCopy(serverAddress)}>
@@ -1250,6 +1270,7 @@ function ServerToolbar({
           {holdNewStarts ? 'Resume new starts' : 'Hold new starts'}
         </Button>
       )}
+      {service.status.running && <YfHelpPopover topic="control.hold" label="Help for holding new room starts" />}
       {!service.status.running && (
         <Button size="small" variant="contained" startIcon={<PlayArrow />} onClick={onOpenSettings}>
           Start server
@@ -1423,9 +1444,15 @@ function PrimaryOperationPanel({
           <p>{operationMessage(readiness)}</p>
         </div>
         {action && (
-          <Button variant="contained" onClick={onAction}>
-            {action.label}
-          </Button>
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+            <Button variant="contained" onClick={onAction}>
+              {action.label}
+            </Button>
+            {/* Only the release action needs explaining; the rest say what they do. */}
+            {action.kind === 'release-round' && (
+              <YfHelpPopover topic="control.release-round" label="Help for releasing a round" />
+            )}
+          </Stack>
         )}
       </div>
       {readiness.currentRoundSummary && (
@@ -1558,6 +1585,8 @@ function AttentionList({
   releaseBlocked,
   disabledRoomAssignments,
   helpRequests,
+  resolvingHelpId,
+  onResolveHelp,
 }: {
   service: TournamentServerContextValue;
   rooms: TournamentRoom[];
@@ -1566,6 +1595,8 @@ function AttentionList({
   releaseBlocked: boolean;
   disabledRoomAssignments: number;
   helpRequests: IHelpRequest[];
+  resolvingHelpId: string | null;
+  onResolveHelp: (request: IHelpRequest) => void;
 }) {
   const items: JSX.Element[] = [];
   if (!service.status.running) {
@@ -1619,11 +1650,10 @@ function AttentionList({
           <Button
             size="small"
             sx={{ ml: 1 }}
-            onClick={() => {
-              service.updateHelpRequest(request.id, 'resolved').catch(() => undefined);
-            }}
+            disabled={resolvingHelpId === request.id}
+            onClick={() => onResolveHelp(request)}
           >
-            Resolve
+            {resolvingHelpId === request.id ? 'Resolving…' : 'Resolve'}
           </Button>
         </li>,
       );

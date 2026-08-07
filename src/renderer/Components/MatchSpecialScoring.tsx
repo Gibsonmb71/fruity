@@ -5,7 +5,7 @@ import { MatchEditModalContext } from '../Modal Managers/TempMatchManager';
 import { LeftOrRight } from '../Utils/UtilTypes';
 import useSubscription from '../Utils/CustomHooks';
 import { ValidationStatuses } from '../DataModel/Interfaces';
-import { YfNumericField } from '../Utils/GeneralReactUtils';
+import { YfHelpPopover, YfNumericField } from '../Utils/GeneralReactUtils';
 
 interface IMatchSpecialScoringProps {
   whichTeam: LeftOrRight;
@@ -38,6 +38,9 @@ export default function MatchSpecialScoring(props: IMatchSpecialScoringProps) {
             Special scoring is not entered for a forfeit.
           </Typography>
         )}
+        <Box sx={{ ml: { sm: 'auto' }, pt: 0.5 }}>
+          <YfHelpPopover topic="games.special-scoring" label="Help for bonus, bounceback and lightning scoring" />
+        </Box>
       </Stack>
     </Box>
   );

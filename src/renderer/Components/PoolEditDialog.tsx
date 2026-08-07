@@ -12,19 +12,15 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { Delete, HelpOutlined } from '@mui/icons-material';
+import { Delete } from '@mui/icons-material';
 import { TournamentContext } from '../TournamentManager';
 import useSubscription from '../Utils/CustomHooks';
-import { YfAcceptButton, YfCancelButton, YfNumericField } from '../Utils/GeneralReactUtils';
+import { YfAcceptButton, YfCancelButton, YfHelpPopover, YfNumericField } from '../Utils/GeneralReactUtils';
 import { PoolEditModalContext } from '../Modal Managers/TempPoolManager';
-
-const carryoverFieldTooltip =
-  "Include previous rounds' matches in the pool standings where both teams are in this pool? Usually this should only done when needed to complete a round robin.";
 
 export default function PoolEditDialog() {
   const tournManager = useContext(TournamentContext);
@@ -71,7 +67,10 @@ function PoolEditDialogCore() {
 
   return (
     <Dialog open={isOpen} fullWidth maxWidth="sm" onClose={handleCancel}>
-      <DialogTitle>Edit Pool</DialogTitle>
+      <DialogTitle>
+        Edit Pool
+        <YfHelpPopover topic="format.pool" label="Help for pools" />
+      </DialogTitle>
       <DialogContent>
         <Box sx={{ '& .MuiFormHelperText-root': { whiteSpace: 'nowrap' } }}>
           <PoolNameField />
@@ -218,9 +217,7 @@ function CarryoverField() {
         label={
           <>
             Carryover?
-            <Tooltip sx={{ mx: 1, verticalAlign: 'text-bottom' }} title={carryoverFieldTooltip} placement="right">
-              <HelpOutlined fontSize="small" />
-            </Tooltip>
+            <YfHelpPopover topic="format.carryover" label="Help for carryover" />
           </>
         }
       />

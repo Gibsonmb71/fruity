@@ -1,7 +1,13 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import SessionStore, { SessionWriteError, SessionWriteResult } from './SessionStore';
 import normalizeQbjMatch from '../../renderer/Services/QbjMatchNormalizer';
-import { authorizeRoom, buildAssignmentResponse, checkCanStart, findAssignmentForRoom } from './RoomDirectory';
+import {
+  authorizeRoom,
+  buildAssignmentResponse,
+  checkCanStart,
+  findAssignmentForRoom,
+  submittedBlockMessage,
+} from './RoomDirectory';
 import {
   findRoomForPairing,
   genericPairingFailureMessage,
@@ -15,6 +21,7 @@ import {
   IHelpMatchupContext,
   IHelpRequest,
   ISessionCreatedResponse,
+  IRoomJoinListResponse,
   IRoomPresence,
   IRoomPresenceUpdateRequest,
   ITournamentSnapshot,
@@ -376,11 +383,18 @@ export default class Router {
       return;
     }
 
-    // GET /api/v1/join/rooms — names only, for the optional room picker on the join screen.
+    // GET /api/v1/join/rooms — names only, for the optional room picker on the join screen. Also
+    // carries the scoring workflow, so the landing page can open on pairing or on manual scoring
+    // without the scorekeeper having to know which tournament this is.
     if (segments.length === 2 && segments[0] === 'join' && segments[1] === 'rooms') {
-      this.requireMethod(req, res, 'GET', () =>
-        sendJson(res, 200, { rooms: listEnabledRooms(this.host.getSnapshot()) }),
-      );
+      this.requireMethod(req, res, 'GET', () => {
+        const snapshot = this.host.getSnapshot();
+        const payload: IRoomJoinListResponse = {
+          rooms: listEnabledRooms(snapshot),
+          roomScoringMode: snapshot.roomScoringMode === 'browser' ? 'browser' : 'traditional',
+        };
+        sendJson(res, 200, payload);
+      });
       return;
     }
 
@@ -741,6 +755,12 @@ export default class Router {
    * The endpoint a Chromebook polls all day. It answers in one round trip so a room coming back from
    * a network drop recovers immediately, and it includes the token of any session already open for
    * the current game so a reload resumes rather than starting a second session.
+   *
+   * It always answers 200 for an authorized room, whatever the game's lifecycle state. A room whose
+   * final is waiting on tournament control is a working, connected room in a perfectly normal state;
+   * answering it with an HTTP error made the browser show a network failure and told the scorekeeper
+   * their Chromebook had fallen off the network. Refusing an actual start remains the start
+   * endpoint's job, where the authority belongs.
    */
   private getRoomAssignment(req: IncomingMessage, res: ServerResponse, roomId: string) {
     const room = this.authorizeRoomOrRefuse(req, res, roomId);
@@ -764,22 +784,27 @@ export default class Router {
       .map((id) => this.host.sessions.findLatestForScheduledMatch(id))
       .filter((session): session is NonNullable<typeof session> => session !== undefined)
       .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt) || b.createdAt.localeCompare(a.createdAt))[0];
-    if (existing?.status === SessionStatus.Submitted) {
-      sendJson(res, 409, {
-        error: 'This game has a final awaiting tournament-control review.',
-        blockedReason: 'submitted',
-      });
-      return;
-    }
+
+    // The snapshot's assignment status is the usual source of the Submitted block, but the live
+    // session flips first: there is a window between the room's final landing here and the renderer
+    // pushing back a snapshot that says so. Describe the state the server actually holds.
+    const awaitingReview = existing?.status === SessionStatus.Submitted;
 
     sendJson(res, 200, {
       ...response,
+      blockedReason: awaitingReview ? RoomBlockedReason.Submitted : response.blockedReason,
+      blockedMessage: awaitingReview ? submittedBlockMessage : response.blockedMessage,
       session: existing ? SessionStore.toResumeInfo(existing) : null,
       presence: this.roomPresenceValue(roomId),
       helpRequest: this.openHelpForDevice(roomId, headerToken(req, deviceIdHeader)) ?? null,
       lastOutcome:
-        latestOutcome?.status === SessionStatus.Accepted || latestOutcome?.status === SessionStatus.Rejected
-          ? { status: latestOutcome.status, rejectionReason: latestOutcome.rejectionReason }
+        latestOutcome?.scheduledMatchId !== undefined &&
+        (latestOutcome.status === SessionStatus.Accepted || latestOutcome.status === SessionStatus.Rejected)
+          ? {
+              scheduledMatchId: latestOutcome.scheduledMatchId,
+              status: latestOutcome.status,
+              rejectionReason: latestOutcome.rejectionReason,
+            }
           : undefined,
     });
   }
@@ -821,6 +846,16 @@ export default class Router {
     // A hold blocks new sessions, not a reload of a game already in progress. Find the existing
     // session before applying the start gate so an active room can recover during a hold.
     const existing = this.host.sessions.findResumableForScheduledMatch(scheduledMatchId);
+
+    // The session is the authority on whether this game has already been filed, and it flips before
+    // the renderer can push back a snapshot saying so. Without this, a room that submitted a final
+    // and then pressed Start again inside that window would be handed its own submitted session
+    // back and put straight into scoring on a game that is already with tournament control.
+    if (existing?.status === SessionStatus.Submitted) {
+      sendJson(res, 409, { error: submittedBlockMessage, blockedReason: RoomBlockedReason.Submitted });
+      return;
+    }
+
     const block = checkCanStart(snapshot, room, assignment);
     const canResumeDuringHold =
       existing !== undefined &&

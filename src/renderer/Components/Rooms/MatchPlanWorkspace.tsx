@@ -30,6 +30,7 @@ import { roundsWithGames } from '../../Services/ScheduleService';
 import { INavigationIntent } from '../../Services/Navigation';
 import { planRoomDrop } from '../../Services/RoomAllocationService';
 import { matchPlanStageOptions, matchesForRoomCell } from '../../Services/MatchPlanPresentation';
+import { YfHelpPopover } from '../../Utils/GeneralReactUtils';
 
 type MatchPlanView = 'round' | 'board';
 type MatchPlanRange = 'current' | 'next' | 'all';
@@ -235,9 +236,15 @@ function RoundMatchPlan({ matches, rooms, onMove, onEdit, onCancel, onToggleLock
               <TableHead>
                 <TableRow>
                   <TableCell>Teams</TableCell>
-                  <TableCell sx={{ width: 180 }}>Room</TableCell>
+                  <TableCell sx={{ width: 180 }}>
+                    Room
+                    <YfHelpPopover topic="control.room-inheritance" label="Help for how a game ends up in a room" />
+                  </TableCell>
                   <TableCell sx={{ width: 115 }}>State</TableCell>
-                  <TableCell sx={{ width: 105 }}>Keep room</TableCell>
+                  <TableCell sx={{ width: 105 }}>
+                    Keep room
+                    <YfHelpPopover topic="control.keep-room" label="Help for keeping a room assignment" />
+                  </TableCell>
                   <TableCell align="right" sx={{ width: 54 }} aria-label="Actions" />
                 </TableRow>
               </TableHead>

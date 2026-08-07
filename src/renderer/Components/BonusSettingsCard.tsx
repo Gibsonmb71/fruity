@@ -34,6 +34,7 @@ function BonusSettingsCard() {
         <SettingRow
           label="Bouncebacks"
           description={useBonuses ? 'Unanswered parts go to the other team.' : 'Requires bonuses to be turned on.'}
+          helpTopic="rules.bouncebacks"
         >
           <Switch disabled={readOnly || !useBonuses} checked={bonusesBounce} onChange={handleBonusesBounceChange} />
         </SettingRow>
@@ -164,6 +165,7 @@ function AdvancedBonusSection() {
       />
       <AdvancedNumericRuleField
         label="Divisor"
+        helpTopic="rules.bonus-divisor"
         required
         value={divisor}
         disabled={readOnly || ptsPerPart !== ''}

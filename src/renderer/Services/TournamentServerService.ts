@@ -698,18 +698,35 @@ export default class TournamentServerService {
     }
   }
 
+  /**
+   * Resolve or cancel a room's help request.
+   *
+   * Nothing is changed locally until the server confirms it. A help request that quietly vanished
+   * from the director's attention list without actually being resolved is worse than one that is
+   * still showing: the room keeps waiting and nobody knows to go and see them. `lastError` is set
+   * on every failure path so the caller has something specific to show.
+   *
+   * @returns the updated request, or null if the update did not happen.
+   */
   async updateHelpRequest(id: string, status: 'resolved' | 'cancelled', note?: string) {
-    if (typeof window === 'undefined' || !window.electron) return null;
+    if (typeof window === 'undefined' || !window.electron) {
+      this.lastError = 'The Tournament Server is not available in this window.';
+      return null;
+    }
     try {
       const updated = (await window.electron.ipcRenderer.invoke(IpcBidirectional.TournamentServerUpdateHelpRequest, {
         id,
         status,
         note,
       })) as IHelpRequest | null;
-      if (updated) {
-        this.helpRequests = this.helpRequests.map((request) => (request.id === updated.id ? updated : request));
+      if (!updated) {
+        this.lastError = 'The Tournament Server did not accept that help request update.';
         this.dataChangedReactCallback();
+        return null;
       }
+      this.helpRequests = this.helpRequests.map((request) => (request.id === updated.id ? updated : request));
+      this.lastError = '';
+      this.dataChangedReactCallback();
       return updated;
     } catch (error: unknown) {
       this.lastError = errorMessage(error);

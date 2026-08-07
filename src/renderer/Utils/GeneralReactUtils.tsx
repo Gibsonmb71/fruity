@@ -134,31 +134,47 @@ export function YfCancelButton(props: ButtonProps) {
   );
 }
 
-/** Compact accessible help affordance. It opens on click/focus rather than relying on hover alone. */
+/**
+ * The one help affordance in the application. Every `?` in the UI is this component.
+ *
+ * Deliberately a button and not a hover tooltip: help that only appears on hover is unreachable by
+ * keyboard and on a touch screen, and it vanishes the moment you move the pointer toward the text
+ * you were trying to read. As a popover it is focusable and activatable from the keyboard, Escape
+ * and an outside click both close it, and MUI returns focus to the `?` that opened it.
+ *
+ * Forms should never grow their own version of this. `YfFieldRow`, `YfToggleRow`, `SettingRow`,
+ * `YfCard` and `YfPageHeader` all take a `helpTopic` and render this, which is what keeps the icon,
+ * the interaction and the accessible name identical everywhere.
+ */
 // eslint-disable-next-line react/require-default-props
 export function YfHelpPopover({ topic, label = 'Show help' }: { topic: HelpTopicId; label?: string }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const contents = getHelpText(topic);
+  const open = anchor !== null;
   return (
     <>
       <IconButton
         size="small"
         aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={(event) => {
+          // Help sits inside clickable rows, accordion summaries and menu items; opening it must
+          // never also trigger whatever it is sitting on.
           event.stopPropagation();
-          setAnchor(anchor ? null : event.currentTarget);
+          setAnchor(open ? null : event.currentTarget);
         }}
         sx={{ p: 0.25, color: 'text.secondary' }}
       >
         <HelpOutlined sx={{ fontSize: 16 }} />
       </IconButton>
       <Popover
-        open={anchor !== null}
+        open={open}
         anchorEl={anchor}
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
         transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-        slotProps={{ paper: { sx: { p: 1.5, maxWidth: 360 } } }}
+        slotProps={{ paper: { sx: { p: 1.5, maxWidth: 360 }, 'aria-label': label } }}
       >
         {contents.map((section) => (
           <Box key={section.header ?? section.content.join('\u0000')} sx={{ '& + &': { mt: 1.25 } }}>
@@ -177,6 +193,16 @@ export function YfHelpPopover({ topic, label = 'Show help' }: { topic: HelpTopic
       </Popover>
     </>
   );
+}
+
+/**
+ * An accessible name for a help button, from whatever the row uses as its label.
+ *
+ * A label is often an element rather than a string, and `String(element)` produces
+ * "[object Object]", which is what a screen reader would then read out.
+ */
+function helpLabelFor(label: React.ReactNode): string {
+  return typeof label === 'string' ? `Help for ${label}` : 'Show help';
 }
 
 interface IYfPageHeaderProps {
@@ -283,7 +309,7 @@ export function YfFieldRow(props: React.PropsWithChildren<IYfFieldRowProps>) {
       >
         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
           {label}
-          {helpTopic && <YfHelpPopover topic={helpTopic} label={`Help for ${String(label)}`} />}
+          {helpTopic && <YfHelpPopover topic={helpTopic} label={helpLabelFor(label)} />}
         </Box>
       </Typography>
       <Box sx={{ minWidth: 0 }}>{children}</Box>
@@ -339,7 +365,7 @@ export function YfToggleRow(props: React.PropsWithChildren<IYfToggleRowProps>) {
         <Typography component="div" variant="body1" sx={{ lineHeight: 1.3 }}>
           <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
             {label}
-            {helpTopic && <YfHelpPopover topic={helpTopic} label={`Help for ${String(label)}`} />}
+            {helpTopic && <YfHelpPopover topic={helpTopic} label={helpLabelFor(label)} />}
           </Box>
         </Typography>
         {hint && (
@@ -533,11 +559,14 @@ interface IAdvancedNumericRuleFieldProps {
   disabled: boolean;
   minValue: number;
   maxValue: number;
+  /** Targeted help for this rule. Divisors in particular are worth explaining in place. */
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 /** A small numeric setting row used for advanced scoring rules like divisors. */
 export function AdvancedNumericRuleField(props: IAdvancedNumericRuleFieldProps) {
-  const { label, required, value, onChange, onBlur, disabled, minValue, maxValue } = props;
+  const { label, required, value, onChange, onBlur, disabled, minValue, maxValue, helpTopic } = props;
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -556,7 +585,7 @@ export function AdvancedNumericRuleField(props: IAdvancedNumericRuleFieldProps) 
   };
 
   return (
-    <SettingRow label={label}>
+    <SettingRow label={label} helpTopic={helpTopic}>
       <YfNumericField
         hiddenLabel
         sx={{ width: '9ch' }}
@@ -590,6 +619,9 @@ interface ISettingRowProps {
   /** Stack the control under the label instead of beside it (for wide fields). */
   // eslint-disable-next-line react/require-default-props
   stacked?: boolean;
+  /** Targeted help for this one setting. Not a place for page-level help. */
+  // eslint-disable-next-line react/require-default-props
+  helpTopic?: HelpTopicId;
 }
 
 /**
@@ -597,7 +629,7 @@ interface ISettingRowProps {
  * right. Wrap a run of them in `SettingsList` to get hairlines between rows.
  */
 export function SettingRow(props: React.PropsWithChildren<ISettingRowProps>) {
-  const { label, description, control, stacked, children } = props;
+  const { label, description, control, stacked, helpTopic, children } = props;
   const theControl = control ?? children;
 
   return (
@@ -613,7 +645,10 @@ export function SettingRow(props: React.PropsWithChildren<ISettingRowProps>) {
     >
       <Box sx={{ minWidth: 0 }}>
         <Typography component="div" variant="body1" sx={{ lineHeight: 1.4 }}>
-          {label}
+          <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+            {label}
+            {helpTopic && <YfHelpPopover topic={helpTopic} label={helpLabelFor(label)} />}
+          </Box>
         </Typography>
         {description && (
           <Typography component="div" variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
