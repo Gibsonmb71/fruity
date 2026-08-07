@@ -16,6 +16,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import SecondaryBackupManager, { writeSecondaryBackup } from '../main/SecondaryBackup';
 import {
+  ISecondaryBackupHealth,
   currentBackupFileName,
   isRotatableBackupFileName,
   selectBackupsToRemove,
@@ -218,5 +219,84 @@ describe('health, and staying out of the primary save’s way', () => {
     await manager.backup(tournamentJson, at('2026-08-07T10:42:00'));
 
     expect(seen).toEqual([null, null]);
+  });
+});
+
+describe('changing the backup folder while a write is in flight', () => {
+  test('a write that finishes after a folder change does not report health for the new folder', async () => {
+    const oldFolder = path.join(folder, 'old-usb');
+    const newFolder = path.join(folder, 'new-usb');
+    // The old drive has been pulled: a file where the folder should be makes the write fail.
+    writeFileSync(oldFolder, 'the old drive is gone');
+
+    const announced: ISecondaryBackupHealth[] = [];
+    const manager = new SecondaryBackupManager((health) => announced.push(health));
+    manager.setFolder(oldFolder);
+
+    // Start the write, then switch folders before letting it settle.
+    const pending = manager.backup(tournamentJson, at('2026-08-07T10:42:00'));
+    manager.setFolder(newFolder);
+    await pending;
+
+    const health = manager.getHealth();
+    // The failure belonged to a drive the director has already moved on from. Reporting it against
+    // the new folder would send them looking for a problem with a drive that is working.
+    expect(health.folder).toBe(newFolder);
+    expect(health.lastError).toBeNull();
+    expect(health.lastAttemptAt).toBeNull();
+    expect(health.lastSuccessAt).toBeNull();
+    // Nothing was announced after the switch, because the only outcome available was a stale one.
+    expect(announced.at(-1)).toEqual({
+      folder: newFolder,
+      lastSuccessAt: null,
+      lastAttemptAt: null,
+      lastError: null,
+    });
+  });
+
+  test('a successful write to the old folder does not claim the new folder is backed up', async () => {
+    const oldFolder = path.join(folder, 'old-usb');
+    const newFolder = path.join(folder, 'new-usb');
+
+    const manager = new SecondaryBackupManager();
+    manager.setFolder(oldFolder);
+    const pending = manager.backup(tournamentJson, at('2026-08-07T10:42:00'));
+    manager.setFolder(newFolder);
+    await pending;
+
+    // The old folder really was written — the write was already under way.
+    expect(existsSync(path.join(oldFolder, currentBackupFileName))).toBe(true);
+    // But the new folder has had nothing written to it, and its health says so.
+    expect(existsSync(path.join(newFolder, currentBackupFileName))).toBe(false);
+    expect(manager.getHealth()).toEqual({
+      folder: newFolder,
+      lastSuccessAt: null,
+      lastAttemptAt: null,
+      lastError: null,
+    });
+  });
+
+  test('a stale failure cannot consume the new folder’s retry', async () => {
+    const oldFolder = path.join(folder, 'old-usb');
+    const newFolder = path.join(folder, 'new-usb');
+    writeFileSync(oldFolder, 'the old drive is gone');
+    writeFileSync(newFolder, 'the new drive is not mounted yet either');
+
+    const manager = new SecondaryBackupManager();
+    manager.setFolder(oldFolder);
+    const stale = manager.backup(tournamentJson, at('2026-08-07T10:42:00'));
+    manager.setFolder(newFolder);
+    await stale;
+
+    // A save against the new folder fails and is retryable on its own terms.
+    await manager.backup(tournamentJson, at('2026-08-07T10:45:00'));
+    expect(manager.getHealth().lastError).not.toBeNull();
+    expect(manager.canRetry()).toBe(true);
+
+    rmSync(newFolder);
+    await manager.retry(at('2026-08-07T10:50:00'));
+
+    expect(manager.getHealth().lastError).toBeNull();
+    expect(readFileSync(path.join(newFolder, currentBackupFileName), 'utf8')).toBe(tournamentJson);
   });
 });

@@ -6,18 +6,21 @@
  * the two teams are recorded in the file, the Match Plan knows which scheduled games are still
  * unresolved, and most of the time exactly one of them fits.
  *
- * "Most of the time" is why the rules below are conservative rather than clever. A tournament can
- * legitimately schedule the same two teams twice in one round in a tiebreaker bracket, a director
- * can be holding two files for the same pairing after a room was re-scored, and a file can arrive
- * for a game that has already been accepted. In each of those cases the safe answer is to offer
- * nothing and let the game be imported as an ordinary result — an unlinked Match is a nuisance a
- * director can fix, whereas a result silently attached to the wrong scheduled game is a wrong
- * standings table nobody goes looking for.
+ * "Most of the time" is why the rules below are conservative rather than clever. A director can be
+ * holding two files for the same pairing after a room was re-scored, and a file can arrive for a
+ * game that has already been accepted. When the software cannot tell which scheduled game a file
+ * belongs to, the safe answer is to offer nothing and let it be imported as an ordinary result — an
+ * unlinked Match is a nuisance a director can fix, whereas a result silently attached to the wrong
+ * scheduled game is a wrong standings table nobody goes looking for.
  *
- * So: exactly one candidate is offered. Zero or several are not, and an accepted result is never
- * offered at all.
+ * What that does *not* license is refusing a pairing merely because it has occurred before. Two
+ * teams can legitimately meet twice in one round — a tiebreaker, a rematch after a protest — and the
+ * Match Plan is the authority on how many times. So the question asked throughout is "is there an
+ * unresolved scheduled game for this, and can exactly one of them be identified?", never "has this
+ * pairing already happened somewhere in this round?".
  */
 import MatchImportResult, { ImportResultStatus } from '../DataModel/MatchImportResult';
+import { getFileNameFromPath } from '../Utils/GeneralUtils';
 import { StatsValidity } from '../DataModel/Match';
 import { ScheduledMatch, ScheduledMatchStatus, transitionScheduledMatch } from '../DataModel/ScheduledMatch';
 import Tournament from '../DataModel/Tournament';
@@ -92,12 +95,61 @@ function scheduledForPairing(tournament: Tournament, identity: IImportedResultId
   );
 }
 
+function describeCandidate(tournament: Tournament, scheduled: ScheduledMatch): IScheduledLinkSuggestion {
+  const round = tournament.getRoundObjByNumber(scheduled.roundNumber);
+  return {
+    scheduledMatchId: scheduled.id,
+    roundNumber: scheduled.roundNumber,
+    roundName: round?.displayName() ?? String(scheduled.roundNumber),
+    leftTeam: scheduled.leftTeamName,
+    rightTeam: scheduled.rightTeamName,
+    roomName: scheduled.roomId
+      ? tournament.rooms.find((room) => room.id === scheduled.roomId)?.name
+      : scheduled.roomNameAtPlay,
+    interrupted:
+      scheduled.status === ScheduledMatchStatus.Playing ||
+      scheduled.status === ScheduledMatchStatus.Submitted ||
+      scheduled.status === ScheduledMatchStatus.NeedsAttention,
+  };
+}
+
+/**
+ * Decide an outcome from one set of unresolved candidates and the accepted games beside them.
+ *
+ * Split out so the room-narrowed and un-narrowed passes cannot drift apart. The rule that matters is
+ * the middle one: a lone unresolved candidate is only unambiguous when no *accepted* game for the
+ * same pairing sits next to it. With one of each, the file is equally likely to be a re-export of
+ * the game already recorded or the result of the second meeting, and there is nothing in the payload
+ * that distinguishes them.
+ */
+function resolveCandidates(
+  tournament: Tournament,
+  candidates: ScheduledMatch[],
+  accepted: ScheduledMatch[],
+): ScheduledLinkOutcome {
+  if (candidates.length === 0) {
+    // Nothing left to fill. If the pairing was played and accepted, say so — that is more useful
+    // than silently offering an ordinary import of a game the tournament already has.
+    return accepted.length > 0 ? { kind: 'accepted', scheduledMatchId: accepted[0].id } : { kind: 'none' };
+  }
+  if (candidates.length === 1 && accepted.length === 0) {
+    return { kind: 'candidate', suggestion: describeCandidate(tournament, candidates[0]) };
+  }
+  return { kind: 'ambiguous', count: candidates.length + accepted.length };
+}
+
 /**
  * Which unresolved scheduled game, if any, this result belongs to.
  *
- * The room is used only to narrow an otherwise ambiguous set, and only when the caller genuinely
- * knows it. It is never used to *widen* a match or to override the round and teams, because a room
- * is where a game happened and the round and teams are what the game was.
+ * Two teams can legitimately meet twice in one round — a tiebreaker, a rematch after a protest — and
+ * the Match Plan is what says so. So "this pairing already happened somewhere in this round" is not
+ * a reason to refuse: what matters is whether there is still an unresolved scheduled game for it,
+ * and whether exactly one of them can be identified without guessing.
+ *
+ * The room narrows an otherwise ambiguous set, and only when the caller genuinely knows it. It is
+ * never used to *widen* a match or to override the round and teams, because a room is where a game
+ * happened and the round and teams are what the game was. It also has to distinguish the unresolved
+ * game from the accepted one to help: two meetings in the same room stay ambiguous.
  */
 export function suggestScheduledMatch(
   tournament: Tournament,
@@ -106,43 +158,20 @@ export function suggestScheduledMatch(
   if (!identity) return { kind: 'none' };
 
   const forPairing = scheduledForPairing(tournament, identity);
-
-  // An accepted result is the tournament's answer about this game. A file cannot overrule it, and
-  // saying so is more useful than silently offering the director an ordinary import.
-  const accepted = forPairing.find((scheduled) => scheduled.status === ScheduledMatchStatus.Accepted);
-  if (accepted) return { kind: 'accepted', scheduledMatchId: accepted.id };
-
-  let candidates = forPairing.filter(
+  const candidates = forPairing.filter(
     (scheduled) => resolvableStatuses.includes(scheduled.status) && !scheduled.quarantined,
   );
+  const accepted = forPairing.filter((scheduled) => scheduled.status === ScheduledMatchStatus.Accepted);
 
-  if (candidates.length > 1 && identity.roomId !== undefined) {
-    const inRoom = candidates.filter((scheduled) => scheduled.roomId === identity.roomId);
-    if (inRoom.length === 1) candidates = inRoom;
-  }
+  const outcome = resolveCandidates(tournament, candidates, accepted);
+  if (outcome.kind !== 'ambiguous' || identity.roomId === undefined) return outcome;
 
-  if (candidates.length === 0) return { kind: 'none' };
-  if (candidates.length > 1) return { kind: 'ambiguous', count: candidates.length };
-
-  const [scheduled] = candidates;
-  const round = tournament.getRoundObjByNumber(scheduled.roundNumber);
-  return {
-    kind: 'candidate',
-    suggestion: {
-      scheduledMatchId: scheduled.id,
-      roundNumber: scheduled.roundNumber,
-      roundName: round?.displayName() ?? String(scheduled.roundNumber),
-      leftTeam: scheduled.leftTeamName,
-      rightTeam: scheduled.rightTeamName,
-      roomName: scheduled.roomId
-        ? tournament.rooms.find((room) => room.id === scheduled.roomId)?.name
-        : scheduled.roomNameAtPlay,
-      interrupted:
-        scheduled.status === ScheduledMatchStatus.Playing ||
-        scheduled.status === ScheduledMatchStatus.Submitted ||
-        scheduled.status === ScheduledMatchStatus.NeedsAttention,
-    },
-  };
+  // The room was genuinely recorded, so try again with only the games played in it. Both sides are
+  // narrowed: a room that contains the unresolved game *and* the accepted one has not disambiguated
+  // anything.
+  const inRoom = (scheduled: ScheduledMatch) => scheduled.roomId === identity.roomId;
+  const narrowed = resolveCandidates(tournament, candidates.filter(inRoom), accepted.filter(inRoom));
+  return narrowed.kind === 'candidate' ? narrowed : outcome;
 }
 
 /** Convenience wrapper for the ordinary import workflow, which is always holding a result object. */
@@ -220,15 +249,30 @@ export function commitScheduledResult(
   if (tournament.scheduledMatches.some((candidate) => candidate.resultMatchId === match.id)) {
     return { ok: false, reason: 'This game is already linked to another scheduled game.' };
   }
-  if (
-    round.matches.some(
-      (existing) =>
-        existing.leftTeam.team &&
-        existing.rightTeam.team &&
-        scheduled.matchesTeams(existing.leftTeam.team.name, existing.rightTeam.team.name),
-    )
-  ) {
-    return { ok: false, reason: 'This round already has a game between these two teams.' };
+  // How many times these two teams are *meant* to meet in this round, according to the Match Plan.
+  // A blanket "this round already has a game between these teams" refusal would make a legitimate
+  // tiebreaker or post-protest rematch impossible to recover from a file, so the schedule's own
+  // count is the authority instead: one result per scheduled meeting, and no more.
+  const plannedMeetings = tournament.scheduledMatches.filter(
+    (candidate) =>
+      candidate.roundNumber === scheduled.roundNumber &&
+      candidate.matchesTeams(identity.leftTeam, identity.rightTeam) &&
+      candidate.status !== ScheduledMatchStatus.Cancelled,
+  ).length;
+  const recordedMeetings = round.matches.filter(
+    (existing) =>
+      existing.leftTeam.team &&
+      existing.rightTeam.team &&
+      scheduled.matchesTeams(existing.leftTeam.team.name, existing.rightTeam.team.name),
+  ).length;
+  if (recordedMeetings >= plannedMeetings) {
+    return {
+      ok: false,
+      reason:
+        plannedMeetings === 1
+          ? 'This round already has a game between these two teams.'
+          : `This round already has ${recordedMeetings} of ${plannedMeetings} scheduled games between these two teams.`,
+    };
   }
 
   // Prepare and commit as one transaction, exactly as accepting a room submission does. Validation
@@ -245,7 +289,9 @@ export function commitScheduledResult(
   let matchAdded = false;
   try {
     if (status === ImportResultStatus.ErrNonFatal) match.statsValidity = StatsValidity.omit;
-    match.importedFile = result.filePath;
+    // The bare filename, matching what an ordinary import stores, so a recovered game is
+    // indistinguishable from a manually imported one everywhere downstream.
+    match.importedFile = getFileNameFromPath(result.filePath);
     Tournament.validateHaveTeamsPlayedInRound(match, round, phase, false);
 
     // The ordinary transitions, walked in order. A game that was never started still has to pass

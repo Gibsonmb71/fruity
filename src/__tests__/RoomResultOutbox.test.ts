@@ -12,6 +12,7 @@ import { createMemoryDriver, IOutboxDriver } from '../room/OutboxStorage';
 import {
   acceptedRetentionLimit,
   baseRetryDelayMs,
+  blocksNewStart,
   classifyDeliveryFailure,
   isDueForRetry,
   IRoomResultOutboxEntry,
@@ -446,5 +447,246 @@ describe('what happens after tournament control decides', () => {
 
     expect(outbox.list()).toHaveLength(0);
     expect(await driver.readAll()).toHaveLength(0);
+  });
+});
+
+describe('what "saved on this Chromebook" is allowed to mean', () => {
+  /** A driver that is durable in principle but fails a chosen number of writes. */
+  function flakyDriver(failuresBeforeSuccess: number): IOutboxDriver & { writes: number } {
+    const records = new Map<string, { id: string }>();
+    return {
+      durable: true,
+      writes: 0,
+      readAll: async () => Array.from(records.values()).map((record) => ({ ...record })),
+      // eslint-disable-next-line func-names
+      write: async function write(this: { writes: number }, record) {
+        this.writes += 1;
+        if (this.writes <= failuresBeforeSuccess) throw new Error('This browser is out of storage.');
+        records.set(record.id, { ...record });
+      },
+      remove: async (id) => {
+        records.delete(id);
+      },
+      clear: async () => {
+        records.clear();
+      },
+    };
+  }
+
+  test('a durable store that failed this write does not report the result as saved', async () => {
+    // The bug this pins: `driver.durable` is true for IndexedDB even when the write that just
+    // happened threw, so reporting it would tell a scorekeeper their game is safe on the device when
+    // it exists only in this page's memory.
+    const driver = flakyDriver(1);
+    const outbox = new RoomResultOutbox(driver, { legacyStorage: null, newId: idFactory() });
+
+    const first = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+
+    expect(first.persisted).toBe(false);
+    expect(outbox.isPersisted(first.entry.id)).toBe(false);
+  });
+
+  test('re-enqueueing the same result does not upgrade a failed write to saved', async () => {
+    // Both writes fail, so the dedupe path must keep saying false however many times it is asked.
+    const driver = flakyDriver(2);
+    const outbox = new RoomResultOutbox(driver, { legacyStorage: null, newId: idFactory() });
+
+    const first = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+    const second = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+
+    expect(first.persisted).toBe(false);
+    expect(second.deduplicated).toBe(true);
+    expect(second.entry.id).toBe(first.entry.id);
+    expect(second.persisted).toBe(false);
+    expect(second.error).toBeDefined();
+    expect(outbox.list()).toHaveLength(1);
+  });
+
+  test('re-enqueueing retries the write, and reports saved only once one lands', async () => {
+    const driver = flakyDriver(1);
+    const outbox = new RoomResultOutbox(driver, { legacyStorage: null, newId: idFactory() });
+
+    const first = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+    const second = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+
+    expect(first.persisted).toBe(false);
+    expect(second.persisted).toBe(true);
+    expect(outbox.isPersisted(first.entry.id)).toBe(true);
+    expect(await driver.readAll()).toHaveLength(1);
+  });
+
+  test('an in-memory store never claims a result is saved, even after a successful write', async () => {
+    const outbox = new RoomResultOutbox(createMemoryDriver(false), { legacyStorage: null, newId: idFactory() });
+
+    const enqueued = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+
+    expect(enqueued.persisted).toBe(false);
+  });
+});
+
+describe('correcting a result tournament control sent back', () => {
+  async function rejectedEntry() {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.deliverOne(enqueued.entry.id, async () => ({ ok: true, newSubmission: true }));
+    await outbox.markNeedsCorrection(enqueued.entry.id, 'Bonus points do not add up.');
+    return { outbox, id: enqueued.entry.id };
+  }
+
+  test('an unchanged corrected payload is resubmitted rather than silently doing nothing', async () => {
+    // The failure this pins: the corrected export deduped onto the needs-correction entry, and
+    // deliverOne only touches `queued`, so pressing submit did nothing at all.
+    const { outbox, id } = await rejectedEntry();
+
+    const corrected = await outbox.enqueue({
+      ...draft('Ninety Six A', 'Greenwood', 4),
+      scheduledMatchId: 'sched-a',
+    });
+
+    expect(corrected.entry.id).toBe(id);
+    expect(corrected.supersededCorrection).toBe(true);
+    expect(outbox.find(id)?.deliveryState).toBe('queued');
+
+    let sent = 0;
+    await outbox.deliverOne(id, async () => {
+      sent += 1;
+      return { ok: true, newSubmission: true };
+    });
+
+    expect(sent).toBe(1);
+    expect(outbox.find(id)?.deliveryState).toBe('submitted');
+  });
+
+  test('a changed corrected payload replaces the rejected result instead of adding a second', async () => {
+    const { outbox, id } = await rejectedEntry();
+    const correctedQbj = { ...qbjFor('Ninety Six A', 'Greenwood'), tossups_read: 21 };
+
+    const corrected = await outbox.enqueue({
+      ...draft('Ninety Six A', 'Greenwood', 4),
+      scheduledMatchId: 'sched-a',
+      qbj: correctedQbj,
+    });
+
+    expect(corrected.entry.id).toBe(id);
+    expect(outbox.list()).toHaveLength(1);
+    const entry = outbox.find(id);
+    expect(entry?.deliveryState).toBe('queued');
+    expect((entry?.qbj as { tossups_read: number }).tossups_read).toBe(21);
+  });
+
+  test('a correction starts its backoff over rather than inheriting the rejected attempt', async () => {
+    const { outbox, id } = await rejectedEntry();
+
+    await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+
+    const entry = outbox.find(id);
+    expect(entry?.attempts).toBe(0);
+    expect(entry?.lastAttemptAt).toBeUndefined();
+    expect(entry?.retryBlocked).toBeUndefined();
+    expect(entry?.lastError).toBeUndefined();
+  });
+
+  test('a different game is not swallowed by an outstanding correction', async () => {
+    const { outbox } = await rejectedEntry();
+
+    const other = await outbox.enqueue({
+      ...draft('Ninety Six A', 'Emerald', 5, 'session-5'),
+      scheduledMatchId: 'sched-b',
+    });
+
+    expect(other.supersededCorrection).toBeUndefined();
+    expect(outbox.list()).toHaveLength(2);
+  });
+
+  test('an emergency backup never supersedes a rejected assigned result', async () => {
+    const { outbox } = await rejectedEntry();
+
+    await outbox.enqueue({
+      roundNumber: 4,
+      roundName: '4',
+      leftTeam: 'Ninety Six A',
+      rightTeam: 'Greenwood',
+      qbj: qbjFor('Ninety Six A', 'Greenwood'),
+      deliveryState: 'manual-backup',
+      scheduledMatchId: 'sched-a',
+    });
+
+    expect(outbox.list()).toHaveLength(2);
+    expect(outbox.list().some((entry) => entry.deliveryState === 'needs-correction')).toBe(true);
+  });
+});
+
+describe('a result nothing will ever manage to send', () => {
+  test('a stranded result stops blocking once the scorekeeper says it was handed over', async () => {
+    // After a server replacement the session is gone, so this result is permanently undeliverable.
+    // The director recovers it by importing the file — which creates no session, so nothing will
+    // ever come back to mark it accepted. Without this, the room could not start another game.
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.deliverOne(enqueued.entry.id, async () => ({
+      ok: false,
+      status: 404,
+      error: 'No such session.',
+    }));
+
+    expect(blocksNewStart(outbox.find(enqueued.entry.id) as IRoomResultOutboxEntry, 'sched-a')).toBe(true);
+
+    await outbox.markHandedOver(enqueued.entry.id);
+
+    const entry = outbox.find(enqueued.entry.id) as IRoomResultOutboxEntry;
+    expect(entry.handedOver).toBe(true);
+    expect(blocksNewStart(entry, 'sched-a')).toBe(false);
+    // The result and its file are still there.
+    expect(outbox.list()).toHaveLength(1);
+    expect(entry.qbj).toBeDefined();
+  });
+
+  test('an undelivered result for an earlier game does not gate the game in front of the room', async () => {
+    const { outbox } = makeOutbox();
+    const stale = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-r4' });
+
+    // The room has moved on to round 5.
+    expect(blocksNewStart(stale.entry, 'sched-r5')).toBe(false);
+    expect(blocksNewStart(stale.entry, 'sched-r4')).toBe(true);
+  });
+
+  test('an accepted result and an emergency copy never gate a start', async () => {
+    const { outbox } = makeOutbox();
+    const accepted = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.markAccepted(accepted.entry.id);
+    const emergency = await outbox.enqueue({
+      roundNumber: 5,
+      roundName: '5',
+      leftTeam: 'Ninety Six A',
+      rightTeam: 'Emerald',
+      qbj: qbjFor('Ninety Six A', 'Emerald'),
+      deliveryState: 'manual-backup',
+      scheduledMatchId: 'sched-a',
+    });
+
+    expect(blocksNewStart(outbox.find(accepted.entry.id) as IRoomResultOutboxEntry, 'sched-a')).toBe(false);
+    expect(blocksNewStart(emergency.entry, 'sched-a')).toBe(false);
+  });
+
+  test('the handed-over state survives a reload', async () => {
+    const driver = createMemoryDriver(true);
+    const { outbox } = makeOutbox(driver);
+    const enqueued = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.markHandedOver(enqueued.entry.id);
+
+    const reloaded = new RoomResultOutbox(driver, { legacyStorage: null });
+    const loaded = await reloaded.load();
+
+    expect(loaded.entries[0].handedOver).toBe(true);
+  });
+
+  test('an accepted result cannot be marked handed over', async () => {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+    await outbox.markAccepted(enqueued.entry.id);
+
+    await outbox.markHandedOver(enqueued.entry.id);
+
+    expect(outbox.find(enqueued.entry.id)?.handedOver).toBeUndefined();
   });
 });

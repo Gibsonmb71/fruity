@@ -110,6 +110,17 @@ export default class SecondaryBackupManager {
   /** Serialize writes so a fast Save-Save cannot interleave two rotations. */
   private writeChain: Promise<void> = Promise.resolve();
 
+  /**
+   * Bumped every time the folder changes.
+   *
+   * A backup captures its folder and then queues behind whatever is already writing, so a director
+   * who switches drives mid-save leaves an in-flight write belonging to the old folder. Without a
+   * generation to compare against, that write's outcome would land on the *new* folder's health —
+   * reporting a success or a failure for a folder it never touched, and clearing the new folder's
+   * pending contents so a genuine failure could no longer be retried.
+   */
+  private folderGeneration = 0;
+
   private onHealthChanged: (health: ISecondaryBackupHealth) => void;
 
   constructor(onHealthChanged: (health: ISecondaryBackupHealth) => void = () => {}) {
@@ -127,6 +138,7 @@ export default class SecondaryBackupManager {
   /** Point backups at a folder, or turn them off with null. */
   setFolder(folder: string | null) {
     this.folder = folder && folder !== '' ? folder : null;
+    this.folderGeneration += 1;
     this.health = { ...emptyBackupHealth(), folder: this.folder };
     this.pendingContents = null;
     this.onHealthChanged(this.getHealth());
@@ -147,11 +159,17 @@ export default class SecondaryBackupManager {
   backup(contents: string, when: Date = new Date()): Promise<void> {
     if (this.folder === null) return Promise.resolve();
     const { folder } = this;
+    const generation = this.folderGeneration;
     this.pendingContents = contents;
     this.writeChain = this.writeChain
       .catch(() => undefined)
       .then(async () => {
         const outcome = await writeSecondaryBackup(folder, contents, when);
+        // The folder changed while this was queued or in flight, so this outcome is about a folder
+        // the director has already moved on from. Applying it would overwrite the new folder's
+        // health with a verdict that has nothing to do with it, and could clear pending contents
+        // the new folder still needs to retry.
+        if (generation !== this.folderGeneration) return undefined;
         this.health = {
           folder,
           lastAttemptAt: when.toISOString(),

@@ -115,7 +115,7 @@ describe('finding the game a file belongs to', () => {
     expect(outcome.kind).toBe('candidate');
   });
 
-  test('an accepted result is reported rather than offered', () => {
+  test('an accepted result with nothing left unresolved is reported rather than offered', () => {
     const tournament = tournamentWithSchedule();
     const [scheduled] = tournament.scheduledMatches;
     scheduled.status = ScheduledMatchStatus.Accepted;
@@ -124,6 +124,67 @@ describe('finding the game a file belongs to', () => {
     const outcome = suggestScheduledMatchForImport(tournament, importOneFile(tournament, teamA, teamB));
 
     expect(outcome).toEqual({ kind: 'accepted', scheduledMatchId: 'sched-a' });
+  });
+
+  test('an accepted first meeting alongside an unresolved rematch is ambiguous, not accepted', () => {
+    // Two teams can legitimately meet twice in a round. With one meeting recorded and one still to
+    // play, this file could be either — a re-export of the recorded game or the rematch's result —
+    // and nothing in the payload distinguishes them.
+    const tournament = tournamentWithSchedule();
+    const [first] = tournament.scheduledMatches;
+    first.status = ScheduledMatchStatus.Accepted;
+    first.resultMatchId = 'match-1';
+    const rematch = new ScheduledMatch(2, teamA, teamB, 'sched-tb');
+    rematch.status = ScheduledMatchStatus.Ready;
+    tournament.scheduledMatches.push(rematch);
+
+    const outcome = suggestScheduledMatchForImport(tournament, importOneFile(tournament, teamA, teamB));
+
+    expect(outcome).toEqual({ kind: 'ambiguous', count: 2 });
+  });
+
+  test('a room that identifies only the unresolved rematch resolves the ambiguity', () => {
+    const tournament = tournamentWithSchedule();
+    const [first] = tournament.scheduledMatches;
+    first.status = ScheduledMatchStatus.Accepted;
+    first.resultMatchId = 'match-1';
+    const tiebreakerRoom = new TournamentRoom('Room 118', 1);
+    tournament.rooms.push(tiebreakerRoom);
+    const rematch = new ScheduledMatch(2, teamA, teamB, 'sched-tb');
+    rematch.status = ScheduledMatchStatus.Ready;
+    rematch.roomId = tiebreakerRoom.id;
+    tournament.scheduledMatches.push(rematch);
+
+    const outcome = suggestScheduledMatch(tournament, {
+      roundNumber: 2,
+      leftTeam: teamA,
+      rightTeam: teamB,
+      roomId: tiebreakerRoom.id,
+    });
+
+    expect(outcome.kind).toBe('candidate');
+    expect(outcome.kind === 'candidate' && outcome.suggestion.scheduledMatchId).toBe('sched-tb');
+  });
+
+  test('a room holding both meetings stays ambiguous', () => {
+    // The rematch happened in the same room as the first game, so the room narrows nothing.
+    const tournament = tournamentWithSchedule();
+    const [first] = tournament.scheduledMatches;
+    first.status = ScheduledMatchStatus.Accepted;
+    first.resultMatchId = 'match-1';
+    const rematch = new ScheduledMatch(2, teamA, teamB, 'sched-tb');
+    rematch.status = ScheduledMatchStatus.Ready;
+    rematch.roomId = first.roomId;
+    tournament.scheduledMatches.push(rematch);
+
+    const outcome = suggestScheduledMatch(tournament, {
+      roundNumber: 2,
+      leftTeam: teamA,
+      rightTeam: teamB,
+      roomId: first.roomId,
+    });
+
+    expect(outcome.kind).toBe('ambiguous');
   });
 
   test('a cancelled game is not a candidate', () => {
@@ -242,19 +303,71 @@ describe('recording a file as the scheduled result', () => {
     expect(officialMatches(tournament)).toHaveLength(0);
   });
 
-  test('refuses a second result for a round that already has this pairing', () => {
+  test('a scheduled rematch between the same teams can be recovered from a file', () => {
+    // The Match Plan says these teams meet twice this round — a tiebreaker. Refusing the second
+    // result because "this round already has a game between these teams" would make the rematch
+    // impossible to recover, which is the whole point of having the file.
     const tournament = tournamentWithSchedule();
     const first = importOneFile(tournament, teamA, teamB);
     commitScheduledResult(tournament, first, 'sched-a');
-    const duplicateSchedule = new ScheduledMatch(2, teamA, teamB, 'sched-b');
-    duplicateSchedule.status = ScheduledMatchStatus.Ready;
-    tournament.scheduledMatches.push(duplicateSchedule);
+    const rematch = new ScheduledMatch(2, teamA, teamB, 'sched-tb');
+    rematch.status = ScheduledMatchStatus.Ready;
+    tournament.scheduledMatches.push(rematch);
 
     const second = importOneFile(tournament, teamA, teamB);
-    const committed = commitScheduledResult(tournament, second, 'sched-b');
+    const committed = commitScheduledResult(tournament, second, 'sched-tb');
+
+    expect(committed.ok).toBe(true);
+    expect(officialMatches(tournament)).toHaveLength(2);
+    expect(rematch.status).toBe(ScheduledMatchStatus.Accepted);
+    expect(rematch.resultMatchId).not.toBe(tournament.scheduledMatches[0].resultMatchId);
+  });
+
+  test('refuses one more result than the schedule says these teams play', () => {
+    // One scheduled meeting, one recorded result: a further file is a duplicate import, and the
+    // Match Plan's own count is what says so.
+    const tournament = tournamentWithSchedule();
+    const first = importOneFile(tournament, teamA, teamB);
+    commitScheduledResult(tournament, first, 'sched-a');
+    const extra = new ScheduledMatch(2, teamA, teamB, 'sched-extra');
+    extra.status = ScheduledMatchStatus.Ready;
+    // Cancelled meetings do not entitle the round to another result.
+    const cancelled = new ScheduledMatch(2, teamA, teamB, 'sched-cancelled');
+    cancelled.status = ScheduledMatchStatus.Cancelled;
+    tournament.scheduledMatches.push(cancelled);
+
+    const second = importOneFile(tournament, teamA, teamB);
+    const committed = commitScheduledResult(tournament, second, 'sched-a');
 
     expect(committed.ok).toBe(false);
     expect(officialMatches(tournament)).toHaveLength(1);
+    expect(extra.status).toBe(ScheduledMatchStatus.Ready);
+  });
+
+  test('refuses a third result when only two meetings are scheduled', () => {
+    const tournament = tournamentWithSchedule();
+    const rematch = new ScheduledMatch(2, teamA, teamB, 'sched-tb');
+    rematch.status = ScheduledMatchStatus.Ready;
+    tournament.scheduledMatches.push(rematch);
+    commitScheduledResult(tournament, importOneFile(tournament, teamA, teamB), 'sched-a');
+    commitScheduledResult(tournament, importOneFile(tournament, teamA, teamB), 'sched-tb');
+    const third = new ScheduledMatch(2, teamA, teamB, 'sched-third');
+    third.status = ScheduledMatchStatus.Ready;
+
+    const committed = commitScheduledResult(tournament, importOneFile(tournament, teamA, teamB), 'sched-tb');
+
+    expect(committed.ok).toBe(false);
+    expect(officialMatches(tournament)).toHaveLength(2);
+    expect(third.status).toBe(ScheduledMatchStatus.Ready);
+  });
+
+  test('a recovered game records only the filename, like an ordinary import', () => {
+    const tournament = tournamentWithSchedule();
+    const result = importOneFile(tournament, teamA, teamB);
+
+    commitScheduledResult(tournament, result, 'sched-a');
+
+    expect(officialMatches(tournament)[0].importedFile).toBe('R02_Room-204.qbj');
   });
 
   test('a refused import leaves the scheduled game exactly as it was', () => {
