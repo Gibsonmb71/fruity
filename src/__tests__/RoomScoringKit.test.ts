@@ -130,6 +130,14 @@ describe('when the kit may be used', () => {
     expect(describeUnusableKit(stale, now)).toContain('too old');
   });
 
+  test('a future-dated kit is refused', () => {
+    const now = new Date('2026-08-07T09:00:00.000Z');
+    const future = buildScoringKit(source(), new Date(now.getTime() + 60_000));
+
+    expect(isScoringKitUsable(future, now)).toBe(false);
+    expect(describeUnusableKit(future, now)).toContain('too old');
+  });
+
   test('a kit written by another version is not guessed at', () => {
     const kit = { ...buildScoringKit(source()), version: scoringKitVersion + 1 };
 
