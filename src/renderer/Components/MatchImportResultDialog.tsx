@@ -74,6 +74,14 @@ function ScheduledLinkOffer({ result }: { result: MatchImportResult }) {
       </Alert>
     );
   }
+  if (outcome?.kind === 'ambiguous') {
+    return (
+      <Alert severity="info" sx={{ mt: 1 }}>
+        {outcome.count} unresolved scheduled games match this round and pairing. YellowFruit cannot choose safely; manual
+        linking is required.
+      </Alert>
+    );
+  }
   if (!suggestion) return null;
 
   return (
