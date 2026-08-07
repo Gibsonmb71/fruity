@@ -1612,6 +1612,11 @@ export class TournamentManager {
     const oldTeamName = this.teamBeingModified?.name;
     const nextTeamName = this.teamBeingModified ? this.teamModalManager.tempTeam.name : undefined;
     const isRename = !!oldTeamName && !!nextTeamName && oldTeamName !== nextTeamName;
+    const resultLinkCheck = validateAcceptedResultLinks(this.tournament);
+    if (!resultLinkCheck.ok) {
+      this.makeToast(resultLinkCheck.reason ?? 'Accepted result links could not be validated.', 'error');
+      return;
+    }
     if (isRename) {
       const renameCheck = canRenameTeam(this.tournament, oldTeamName, nextTeamName);
       if (!renameCheck.ok) {

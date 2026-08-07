@@ -5,7 +5,7 @@
  * and which of tournament control's verdicts is still worth showing. They are pure functions over
  * the response precisely so they can be pinned down here rather than only in a browser.
  */
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
   classifyPollResult,
   describeConnection,
@@ -17,7 +17,7 @@ import {
 } from '../room/RoomLifecycle';
 import { IRoomAssignmentResponse, RoomBlockedReason, SessionStatus } from '../main/server/ServerTypes';
 import { ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
-import { ApiResult } from '../room/api';
+import { ApiResult, getRoomAssignment } from '../room/api';
 
 function assignment(overrides: Partial<IRoomAssignmentResponse> = {}): IRoomAssignmentResponse {
   return {
@@ -74,6 +74,30 @@ describe('connection state', () => {
     const state = classifyPollResult({ ok: false, status: 500, error: 'Unexpected error.' });
 
     expect(state.online).toBe(true);
+  });
+
+  test('a non-JSON HTTP error is degraded rather than offline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => '<!doctype html><title>Server Error</title>',
+      }),
+    );
+
+    try {
+      const result = await getRoomAssignment({ roomId: 'room-101', token: 'room-token' });
+
+      expect(result).toEqual({
+        ok: false,
+        status: 500,
+        error: 'The server sent a response the room app could not read.',
+      });
+      expect(classifyPollResult(result).connection).toBe(RoomConnectionState.Degraded);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test('bad credentials mean pair again, not offline', () => {
