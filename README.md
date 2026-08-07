@@ -7,8 +7,7 @@
 </p>
 
 <p align="center">
-  A modern tournament-day fork of YellowFruit with scheduling, browser scoring, room control, and live displays.
-</p>
+A YellowFruit fork built for tournament-day scheduling, browser scoring, room management, and live displays.</p>
 
 <p align="center">
   <a href="https://github.com/Gibsonmb71/fruity/releases">Releases</a>
