@@ -439,8 +439,9 @@ export function RoomSetupDialog({
 }: IRoomSetupDialogProps) {
   const [printRoomId, setPrintRoomId] = useState<string | null>(null);
   const joinUrl = serverAddress === '' ? '/join' : `${serverAddress.replace(/\/$/, '')}/join`;
-  const fallbackJoinUrl =
+  const fallbackCandidate =
     fallbackAddress === undefined || fallbackAddress === '' ? '' : `${fallbackAddress.replace(/\/$/, '')}/join`;
+  const fallbackJoinUrl = fallbackCandidate === joinUrl ? '' : fallbackCandidate;
 
   useEffect(() => {
     const clearPrintSelection = () => setPrintRoomId(null);
