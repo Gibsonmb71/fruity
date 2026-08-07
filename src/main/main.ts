@@ -251,11 +251,11 @@ app
       event.reply(IpcBidirectional.GetAppVersion, app.getVersion()),
     );
     ipcMain.handle(IpcBidirectional.GetSecondaryBackupHealth, () => getSecondaryBackupHealth());
-    ipcMain.handle(IpcBidirectional.ChooseSecondaryBackupFolder, (event) =>
+    ipcMain.handle(IpcBidirectional.ChooseSecondaryBackupFolder, async (event) =>
       chooseSecondaryBackupFolder(BrowserWindow.fromWebContents(event.sender)),
     );
-    ipcMain.handle(IpcBidirectional.ClearSecondaryBackupFolder, () => clearSecondaryBackupFolder());
-    ipcMain.handle(IpcBidirectional.RetrySecondaryBackup, () => retrySecondaryBackup());
+    ipcMain.handle(IpcBidirectional.ClearSecondaryBackupFolder, async () => clearSecondaryBackupFolder());
+    ipcMain.handle(IpcBidirectional.RetrySecondaryBackup, async () => retrySecondaryBackup());
     // Registers handlers only. The tournament server binds a port only when the user starts it.
     registerTournamentServerIpc(() => mainWindow);
 
