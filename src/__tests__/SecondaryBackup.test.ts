@@ -222,6 +222,47 @@ describe('health, and staying out of the primary save’s way', () => {
   });
 });
 
+describe('two saves in quick succession', () => {
+  test('an older save succeeding does not consume a newer save’s retry', async () => {
+    const target = path.join(folder, 'usb');
+    const manager = new SecondaryBackupManager();
+    manager.setFolder(target);
+
+    // The first save lands. Before it settles, a second save queues behind it — and the drive is
+    // pulled in between, so the second one is the save that fails.
+    const first = manager.backup(tournamentJson, at('2026-08-07T10:42:00'));
+    const second = manager.backup('{"objects":[{"name":"round 5"}]}', at('2026-08-07T10:43:00'));
+    await first;
+    rmSync(target, { recursive: true, force: true });
+    writeFileSync(target, 'the drive was pulled between the two saves');
+    await second;
+
+    // The failure the director is being shown is the second save's, and Retry has its bytes — the
+    // first save clearing them on its way out would leave the button with nothing to write.
+    expect(manager.getHealth().lastError).not.toBeNull();
+    expect(manager.canRetry()).toBe(true);
+
+    rmSync(target);
+    await manager.retry(at('2026-08-07T10:45:00'));
+
+    expect(manager.getHealth().lastError).toBeNull();
+    expect(readFileSync(path.join(target, currentBackupFileName), 'utf8')).toBe('{"objects":[{"name":"round 5"}]}');
+  });
+
+  test('the newest save succeeding leaves nothing to retry', async () => {
+    const manager = new SecondaryBackupManager();
+    manager.setFolder(folder);
+
+    const first = manager.backup(tournamentJson, at('2026-08-07T10:42:00'));
+    const second = manager.backup('{"objects":[{"name":"round 5"}]}', at('2026-08-07T10:43:00'));
+    await Promise.all([first, second]);
+
+    expect(manager.getHealth().lastError).toBeNull();
+    expect(manager.canRetry()).toBe(false);
+    expect(readFileSync(path.join(folder, currentBackupFileName), 'utf8')).toBe('{"objects":[{"name":"round 5"}]}');
+  });
+});
+
 describe('changing the backup folder while a write is in flight', () => {
   test('a write that finishes after a folder change does not report health for the new folder', async () => {
     const oldFolder = path.join(folder, 'old-usb');

@@ -11,10 +11,13 @@ import RoomResultOutbox, { ILegacyStorage, legacyPendingFinalKey } from '../room
 import { createMemoryDriver, IOutboxDriver } from '../room/OutboxStorage';
 import {
   acceptedRetentionLimit,
+  awaitsAutomaticDelivery,
   baseRetryDelayMs,
   blocksNewStart,
   classifyDeliveryFailure,
+  describeDeliveryState,
   isDueForRetry,
+  needsAction,
   IRoomResultOutboxEntry,
   maxRetryDelayMs,
   outboxSchemaVersion,
@@ -678,6 +681,55 @@ describe('a result nothing will ever manage to send', () => {
     const loaded = await reloaded.load();
 
     expect(loaded.entries[0].handedOver).toBe(true);
+  });
+
+  test('nothing is left waiting on a handed-over result, but the file stays', async () => {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.deliverOne(enqueued.entry.id, async () => ({ ok: false, status: 404, error: 'No such session.' }));
+
+    await outbox.markHandedOver(enqueued.entry.id);
+    const entry = outbox.find(enqueued.entry.id) as IRoomResultOutboxEntry;
+
+    // The page must stop saying a finished game is waiting to be sent and stop warning on the way
+    // out, or it contradicts the confirmation the scorekeeper just gave.
+    expect(needsAction(entry)).toBe(false);
+    expect(awaitsAutomaticDelivery(entry)).toBe(false);
+    expect(isDueForRetry(entry, Date.parse('2026-08-07T23:00:00.000Z'))).toBe(false);
+    // But it is still here, and still downloadable.
+    expect(outbox.list()).toHaveLength(1);
+    expect(describeDeliveryState(entry)).toBe('Handed to tournament control');
+  });
+
+  test('a handed-over result that tournament control sends back still needs the room', async () => {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.markHandedOver(enqueued.entry.id);
+
+    await outbox.markNeedsCorrection(enqueued.entry.id, 'Bonus 12 was scored twice.');
+
+    // A correction request is a new instruction about this game; handing the file over earlier does
+    // not answer it.
+    expect(needsAction(outbox.find(enqueued.entry.id) as IRoomResultOutboxEntry)).toBe(true);
+  });
+
+  test('a result being retried automatically is still waiting on something', async () => {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+
+    expect(needsAction(enqueued.entry)).toBe(true);
+    expect(awaitsAutomaticDelivery(enqueued.entry)).toBe(true);
+  });
+
+  test('a permanently refused result is waiting on a person, not on the network', async () => {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
+    await outbox.deliverOne(enqueued.entry.id, async () => ({ ok: false, status: 404, error: 'No such session.' }));
+    const entry = outbox.find(enqueued.entry.id) as IRoomResultOutboxEntry;
+
+    expect(needsAction(entry)).toBe(true);
+    // Nothing will send it, so nothing may promise it will go automatically.
+    expect(awaitsAutomaticDelivery(entry)).toBe(false);
   });
 
   test('an accepted result cannot be marked handed over', async () => {

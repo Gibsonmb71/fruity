@@ -107,6 +107,20 @@ export default class SecondaryBackupManager {
    */
   private pendingContents: string | null = null;
 
+  /**
+   * Which queued request `pendingContents` belongs to.
+   *
+   * Two saves in quick succession both queue behind the write chain, and the newer one has already
+   * replaced `pendingContents` by the time the older one finishes. Without this, an older write
+   * succeeding would clear the newer write's retry payload — and if the newer write then failed, the
+   * director would be shown a failure with a Retry button that had nothing left to write. Only the
+   * request whose contents are actually being held is allowed to clear them.
+   */
+  private pendingRequest = 0;
+
+  /** Hands out the request ids above. Monotonic, so "newest" is a comparison rather than a guess. */
+  private requestCounter = 0;
+
   /** Serialize writes so a fast Save-Save cannot interleave two rotations. */
   private writeChain: Promise<void> = Promise.resolve();
 
@@ -141,6 +155,7 @@ export default class SecondaryBackupManager {
     this.folderGeneration += 1;
     this.health = { ...emptyBackupHealth(), folder: this.folder };
     this.pendingContents = null;
+    this.pendingRequest = 0;
     this.onHealthChanged(this.getHealth());
   }
 
@@ -160,7 +175,10 @@ export default class SecondaryBackupManager {
     if (this.folder === null) return Promise.resolve();
     const { folder } = this;
     const generation = this.folderGeneration;
+    this.requestCounter += 1;
+    const request = this.requestCounter;
     this.pendingContents = contents;
+    this.pendingRequest = request;
     this.writeChain = this.writeChain
       .catch(() => undefined)
       .then(async () => {
@@ -176,7 +194,13 @@ export default class SecondaryBackupManager {
           lastSuccessAt: outcome.ok ? when.toISOString() : this.health.lastSuccessAt,
           lastError: outcome.ok ? null : outcome.error,
         };
-        if (outcome.ok) this.pendingContents = null;
+        // Clearing the retry payload is only this request's business while it is still the one being
+        // held. A newer save queued behind this one owns it now, and its contents are the ones a
+        // Retry would have to write.
+        if (outcome.ok && request === this.pendingRequest) {
+          this.pendingContents = null;
+          this.pendingRequest = 0;
+        }
         this.onHealthChanged(this.getHealth());
         return undefined;
       });
