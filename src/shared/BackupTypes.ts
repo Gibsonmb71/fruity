@@ -70,6 +70,9 @@ export function isRotatableBackupFileName(name: string): boolean {
 export function selectBackupsToRemove(fileNames: string[], limit: number = backupRetentionLimit): string[] {
   return fileNames
     .filter(isRotatableBackupFileName)
-    .sort((left, right) => right.localeCompare(left))
+    .sort((left, right) => {
+      if (left === right) return 0;
+      return left > right ? -1 : 1;
+    })
     .slice(Math.max(0, limit));
 }
