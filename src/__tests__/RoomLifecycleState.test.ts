@@ -8,8 +8,11 @@
 import { describe, expect, test } from 'vitest';
 import {
   classifyPollResult,
+  describeConnection,
   isAwaitingReview,
+  reduceConnectionStatus,
   resolveLifecycleNotice,
+  RoomConnectionState,
   shouldOfferPairing,
 } from '../room/RoomLifecycle';
 import { IRoomAssignmentResponse, RoomBlockedReason, SessionStatus } from '../main/server/ServerTypes';
@@ -78,6 +81,152 @@ describe('connection state', () => {
 
     expect(state.online).toBe(true);
     expect(state.needsPairing).toBe(true);
+  });
+});
+
+/**
+ * A room with a matchup on screen has something to be wrong about that a room still connecting does
+ * not. These walk a page through a sequence of polls, because the property under test is not what one
+ * response means on its own — it is what the room is showing after it.
+ */
+describe('a room that already has an assignment', () => {
+  /** The state a room reaches by polling successfully once, which is what puts a matchup on screen. */
+  function connectedRoom() {
+    return reduceConnectionStatus({ ok: true, value: assignment() }, false);
+  }
+
+  test('a successful poll is Connected, with nothing to warn about', () => {
+    const status = connectedRoom();
+
+    expect(status.state).toBe(RoomConnectionState.Connected);
+    expect(status.degradedMessage).toBe('');
+    expect(status.loadError).toBe('');
+  });
+
+  test('a later server error degrades the room rather than taking it offline', () => {
+    expect(connectedRoom().state).toBe(RoomConnectionState.Connected);
+    const status = reduceConnectionStatus({ ok: false, status: 500, error: 'Unexpected error.' }, true);
+
+    expect(status.state).toBe(RoomConnectionState.Degraded);
+    expect(status.state).not.toBe(RoomConnectionState.Offline);
+  });
+
+  test('the degraded room says so where the scorekeeper can see it', () => {
+    // The bug this exists for: the error was recorded, but the retained matchup went on rendering as
+    // if it were current, so nothing about the failure ever reached the screen.
+    const status = reduceConnectionStatus({ ok: false, status: 500, error: 'Unexpected error.' }, true);
+
+    expect(status.degradedMessage).not.toBe('');
+    // The matchup keeps its own place: a degraded room is not an error page.
+    expect(status.loadError).toBe('');
+  });
+
+  test('the warning carries YellowFruit’s own explanation but never a status code', () => {
+    const status = reduceConnectionStatus(
+      { ok: false, status: 409, error: 'That round is on hold.', detail: 'That round is on hold.' },
+      true,
+    );
+
+    expect(status.degradedMessage).toContain('That round is on hold.');
+    expect(status.degradedMessage).not.toContain('409');
+  });
+
+  test('a refusal with no explanation of its own does not leak our fallback text', () => {
+    const status = reduceConnectionStatus(
+      { ok: false, status: 500, error: 'The server refused the request (500).' },
+      true,
+    );
+
+    expect(status.degradedMessage).not.toContain('500');
+  });
+
+  test.each([400, 404, 409, 500])('HTTP %i is degraded, not offline', (httpStatus) => {
+    const status = reduceConnectionStatus({ ok: false, status: httpStatus, error: 'Refused.' }, true);
+
+    expect(status.state).toBe(RoomConnectionState.Degraded);
+  });
+
+  test('a request that never got an answer is Offline, with the offline messaging left alone', () => {
+    const status = reduceConnectionStatus({ ok: false, error: 'Could not reach the YellowFruit computer.' }, true);
+
+    expect(status.state).toBe(RoomConnectionState.Offline);
+    // Offline already has its own retained-assignment banner; a second warning would just repeat it.
+    expect(status.degradedMessage).toBe('');
+  });
+
+  test('the next successful poll clears the degradation by itself', () => {
+    const degraded = reduceConnectionStatus({ ok: false, status: 500, error: 'Unexpected error.' }, true);
+    expect(degraded.state).toBe(RoomConnectionState.Degraded);
+
+    const recovered = reduceConnectionStatus({ ok: true, value: assignment() }, true);
+
+    expect(recovered.state).toBe(RoomConnectionState.Connected);
+    expect(recovered.degradedMessage).toBe('');
+    expect(recovered.loadError).toBe('');
+  });
+
+  test('bad credentials ask for pairing rather than reporting a connection problem', () => {
+    const status = reduceConnectionStatus({ ok: false, status: 403, error: 'This room link is not valid.' }, true);
+
+    expect(status.needsPairing).toBe(true);
+    expect(status.state).not.toBe(RoomConnectionState.Degraded);
+    expect(status.state).not.toBe(RoomConnectionState.Offline);
+  });
+});
+
+describe('a room with nothing on screen yet', () => {
+  test('a failure before the first success is a load error, not a stale-data warning', () => {
+    const status = reduceConnectionStatus({ ok: false, status: 500, error: 'Unexpected error.' }, false);
+
+    expect(status.loadError).toBe('Unexpected error.');
+    expect(status.degradedMessage).toBe('');
+  });
+
+  test('an unreachable server before the first success is still a load error', () => {
+    const status = reduceConnectionStatus({ ok: false, error: 'Could not reach the YellowFruit computer.' }, false);
+
+    expect(status.state).toBe(RoomConnectionState.Offline);
+    expect(status.loadError).toBe('Could not reach the YellowFruit computer.');
+  });
+});
+
+/**
+ * Waiting on tournament control is what a working room does between finishing a game and being
+ * handed the next one. It arrives as a perfectly ordinary 200, and must read as one.
+ */
+describe('tournament states are not connection states', () => {
+  test('a submitted result leaves the room Connected', () => {
+    const submitted = assignment({
+      session: { sessionId: 's1', token: 't', status: SessionStatus.Submitted, finalReceived: true },
+    });
+    const status = reduceConnectionStatus({ ok: true, value: submitted }, true);
+
+    expect(status.state).toBe(RoomConnectionState.Connected);
+    expect(status.state).not.toBe(RoomConnectionState.Degraded);
+    expect(status.state).not.toBe(RoomConnectionState.Offline);
+    expect(isAwaitingReview(submitted)).toBe(true);
+  });
+
+  test.each([
+    RoomBlockedReason.Submitted,
+    RoomBlockedReason.Hold,
+    RoomBlockedReason.FutureRound,
+    RoomBlockedReason.NeedsAttention,
+  ])('a room blocked for %s is still Connected', (reason) => {
+    const status = reduceConnectionStatus({ ok: true, value: assignment({ blockedReason: reason }) }, true);
+
+    expect(status.state).toBe(RoomConnectionState.Connected);
+  });
+});
+
+describe('what the scorekeeper is told the connection is', () => {
+  test('three plain states, and no status codes anywhere in them', () => {
+    const labels = [RoomConnectionState.Connected, RoomConnectionState.Degraded, RoomConnectionState.Offline].map(
+      describeConnection,
+    );
+
+    expect(labels).toEqual(['Connected', 'Connection issue', 'Offline']);
+    for (const label of labels) expect(label).not.toMatch(/\d/);
   });
 });
 

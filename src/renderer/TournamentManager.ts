@@ -49,12 +49,21 @@ import { checkBrowserRoomScoringDisable, shouldStopServerBeforeDisabling } from 
 import { repairOperationalIntegrity, IOperationalIntegrityResult } from './Services/OperationalIntegrity';
 import {
   canDeleteTeam,
+  canReconcileOfficialResultIdentities,
   canRenameTeam,
+  IOfficialResultAnchor,
+  IStructuralEditCheck,
+  ITeamNameAnchor,
+  captureOfficialResultIdentities,
   captureScheduledStructure,
+  captureTeamNames,
+  reconcileOfficialResultIdentities,
   reconcileScheduledStructure,
   reconcileScheduledStructureFromAnchors,
   reconcilePoolRename,
   reconcileTeamRename,
+  restoreTeamNames,
+  validateAcceptedResultLinks,
 } from './Services/TournamentOperationalReconciliation';
 
 export type TournamentLoadResult =
@@ -1586,16 +1595,44 @@ export class TournamentManager {
     }
   }
 
+  /**
+   * Commit the team form.
+   *
+   * A rename is a structural edit, not a text change. `Match.id` is computed partly from the names
+   * of the teams that played, so renaming a team moves the id of every official game it appears in —
+   * and an accepted `ScheduledMatch` stores that id in `resultMatchId` as a durable link to the one
+   * authoritative result. Left alone, the rename would silently break the correction workflow, the
+   * deletion guard, and the schedule's claim to have produced that result.
+   *
+   * So the rename runs as one edit: validate, capture the identities that can move, rename, rewrite
+   * the references that pointed at them, check the result links still hold, and only then commit. If
+   * the check fails, the names go back rather than leaving a half-renamed operational graph.
+   */
   private teamModalSave(stayOpen: boolean = false, startNextLetter: boolean = false) {
     const oldTeamName = this.teamBeingModified?.name;
     const nextTeamName = this.teamBeingModified ? this.teamModalManager.tempTeam.name : undefined;
-    if (oldTeamName && nextTeamName && oldTeamName !== nextTeamName) {
+    const isRename = !!oldTeamName && !!nextTeamName && oldTeamName !== nextTeamName;
+    if (isRename) {
       const renameCheck = canRenameTeam(this.tournament, oldTeamName, nextTeamName);
       if (!renameCheck.ok) {
         this.makeToast(renameCheck.reason ?? 'The team rename is unsafe while room scoring is active.', 'error');
         return;
       }
+      // Asked before anything is mutated: an ambiguous official-game id has no safe rewrite, and
+      // finding that out afterwards would mean unwinding a rename instead of never starting it.
+      const identityCheck = canReconcileOfficialResultIdentities(this.tournament);
+      if (!identityCheck.ok) {
+        this.makeToast(identityCheck.reason ?? 'Official results could not be relinked for this rename.', 'error');
+        return;
+      }
     }
+
+    // Captured before the commit, because afterwards the old names and old ids are simply gone.
+    // Every team is captured, not just the edited one: changing the organization name recompiles
+    // the name of every team on that registration.
+    const teamNamesBefore = isRename ? captureTeamNames(this.tournament) : [];
+    const resultIdentitiesBefore = isRename ? captureOfficialResultIdentities(this.tournament) : [];
+
     // changing the team name means we might need to save to a different registration than we opened
     const actualRegToModify = this.teamModalManager.getRegistrationToSaveTo(
       this.registrationBeingModified,
@@ -1621,8 +1658,13 @@ export class TournamentManager {
       // existing team being modified without changing the registration
       this.teamModalManager.saveTeam(actualRegToModify, this.teamBeingModified);
     }
-    if (oldTeamName && nextTeamName && oldTeamName !== nextTeamName) {
-      const reconcile = reconcileTeamRename(this.tournament, oldTeamName, nextTeamName);
+    if (isRename) {
+      const reconcile = this.reconcileRenamedTeamReferences(
+        oldTeamName,
+        nextTeamName,
+        teamNamesBefore,
+        resultIdentitiesBefore,
+      );
       if (!reconcile.ok) {
         this.makeToast(reconcile.reason ?? 'The scheduled team references could not be reconciled.', 'error');
         return;
@@ -1630,6 +1672,49 @@ export class TournamentManager {
     }
     this.teamEditModalReset(stayOpen, startNextLetter);
     this.onDataChanged();
+  }
+
+  /**
+   * Rewrite every durable reference the rename just moved, and refuse if they do not all land.
+   *
+   * Scheduled team names and accepted result links are two halves of the same edit: a schedule that
+   * still names the old team, or that points at an id no game has any more, is exactly the state
+   * this is here to prevent. On failure the team names are put back, so the tournament is left as it
+   * was rather than partly renamed.
+   */
+  private reconcileRenamedTeamReferences(
+    oldTeamName: string,
+    nextTeamName: string,
+    teamNamesBefore: ITeamNameAnchor[],
+    resultIdentitiesBefore: IOfficialResultAnchor[],
+  ): IStructuralEditCheck {
+    const scheduleBefore = this.tournament.scheduledMatches.map((scheduled) => ({
+      scheduled,
+      resultMatchId: scheduled.resultMatchId,
+      leftTeamName: scheduled.leftTeamName,
+      rightTeamName: scheduled.rightTeamName,
+    }));
+
+    const rollBack = (reason?: string): IStructuralEditCheck => {
+      restoreTeamNames(teamNamesBefore);
+      for (const entry of scheduleBefore) {
+        entry.scheduled.resultMatchId = entry.resultMatchId;
+        entry.scheduled.leftTeamName = entry.leftTeamName;
+        entry.scheduled.rightTeamName = entry.rightTeamName;
+      }
+      return { ok: false, reason };
+    };
+
+    const teamReferences = reconcileTeamRename(this.tournament, oldTeamName, nextTeamName, teamNamesBefore);
+    if (!teamReferences.ok) return rollBack(teamReferences.reason);
+
+    const resultLinks = reconcileOfficialResultIdentities(this.tournament, resultIdentitiesBefore);
+    if (!resultLinks.ok) return rollBack(resultLinks.reason);
+
+    const linkage = validateAcceptedResultLinks(this.tournament);
+    if (!linkage.ok) return rollBack(linkage.reason);
+
+    return { ok: true };
   }
 
   teamEditModalReset(stayOpen: boolean = false, startNextLetter: boolean = false) {
