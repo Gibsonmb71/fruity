@@ -84,6 +84,9 @@ export default class MatchImportResultsManager {
     const problems = [...this.importProblems];
     this.modalIsOpen = false;
     this.reset();
+    // Keep the captured problems available through the close operation for existing callers, while
+    // also returning them explicitly so callers do not have to depend on reset() leaving state behind.
+    this.importProblems = problems;
     this.dataChangedReactCallback();
     return problems;
   }
