@@ -57,6 +57,7 @@ export default class MatchImportResultsManager {
     delete this.round;
     delete this.resultsList;
     this.linkState = new Map();
+    this.importProblems = [];
   }
 
   openModal(resultsList: MatchImportResult[], round?: Round, tournament?: Tournament) {
@@ -76,13 +77,15 @@ export default class MatchImportResultsManager {
     this.dataChangedReactCallback();
   }
 
-  closeModal(shouldSave: boolean) {
+  closeModal(shouldSave: boolean): string[] {
     if (shouldSave) {
       this.finishImport();
     }
+    const problems = [...this.importProblems];
     this.modalIsOpen = false;
     this.reset();
     this.dataChangedReactCallback();
+    return problems;
   }
 
   /** The candidate offered for one result, if there is exactly one. */
