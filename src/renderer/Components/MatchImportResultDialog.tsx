@@ -49,6 +49,64 @@ enum ResultTableColumns {
   ImportOrSkip,
 }
 
+const linkOptions = {
+  scheduled: 'Import as scheduled result',
+  ordinary: 'Import as ordinary game',
+};
+
+/**
+ * The offer made when a file plainly belongs to a game the Match Plan is still waiting on.
+ *
+ * Shown only when exactly one unresolved scheduled game fits. The round, teams and room are printed
+ * rather than summarized so the director is confirming a specific game rather than agreeing with
+ * the software; if it is the wrong one, the ordinary import is right there and costs nothing.
+ */
+function ScheduledLinkOffer({ result }: { result: MatchImportResult }) {
+  const modalManager = useContext(MatchImportResultsModalContext);
+  const suggestion = modalManager.suggestionFor(result);
+  const outcome = modalManager.outcomeFor(result);
+  const [choice, setChoice] = useSubscription(modalManager.choiceFor(result));
+
+  if (outcome?.kind === 'accepted') {
+    return (
+      <Alert severity="warning" sx={{ mt: 1 }}>
+        This round already has an accepted result for these teams. Importing this file will add a second, unlinked game.
+      </Alert>
+    );
+  }
+  if (!suggestion) return null;
+
+  return (
+    <Alert severity="info" sx={{ mt: 1 }}>
+      <Typography variant="body2" sx={{ mb: 1 }}>
+        This appears to be the result for:
+      </Typography>
+      <Typography variant="body2">
+        <strong>Round {suggestion.roundName}</strong>
+      </Typography>
+      <Typography variant="body2">
+        {suggestion.leftTeam} vs {suggestion.rightTeam}
+      </Typography>
+      {suggestion.roomName !== undefined && <Typography variant="body2">{suggestion.roomName}</Typography>}
+      <ToggleButtonGroup
+        size="small"
+        color="primary"
+        exclusive
+        sx={{ mt: 1 }}
+        value={choice}
+        onChange={(e, newValue) => {
+          if (newValue === null) return;
+          setChoice(newValue);
+          modalManager.setLinkChoice(result, newValue);
+        }}
+      >
+        <ToggleButton value="scheduled">{linkOptions.scheduled}</ToggleButton>
+        <ToggleButton value="ordinary">{linkOptions.ordinary}</ToggleButton>
+      </ToggleButtonGroup>
+    </Alert>
+  );
+}
+
 const sectionHelpText = {
   [ImportResultStatus.Success]: 'These games can be imported with no issues',
   [ImportResultStatus.Warning]: 'These games are valid, but might be inaccurate',
@@ -199,7 +257,12 @@ function ResultTableRow(props: IResultTableRowProps) {
       {cols.includes(ResultTableColumns.FileName) && (
         <TableCell width="20%">{getFileNameFromPath(result.filePath)}</TableCell>
       )}
-      {cols.includes(ResultTableColumns.MatchTitle) && <TableCell>{result.match?.getScoreString()}</TableCell>}
+      {cols.includes(ResultTableColumns.MatchTitle) && (
+        <TableCell>
+          {result.match?.getScoreString()}
+          <ScheduledLinkOffer result={result} />
+        </TableCell>
+      )}
       {cols.includes(ResultTableColumns.Message) && (
         <TableCell>
           <MessageList messages={result.messages} />

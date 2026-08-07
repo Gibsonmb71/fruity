@@ -3,6 +3,8 @@ import { app, BrowserWindow, IpcMainEvent, dialog, IpcMainInvokeEvent, shell } f
 import fs from 'fs';
 import { IpcBidirectional, IpcMainToRend } from '../IPCChannels';
 import { writeFileAtomically } from './AtomicFile';
+import SecondaryBackupManager, { ISecondaryBackupHealth } from './SecondaryBackup';
+import { readAppPreferences, updateAppPreferences } from './AppPreferences';
 import {
   FileSwitchActions,
   IMatchImportFileRequest,
@@ -23,6 +25,70 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string') return error;
   return 'Unknown filesystem error.';
+}
+
+/**
+ * The optional redundant copy of the .yft, on a USB stick or a share.
+ *
+ * Owned here because this is where a successful primary save is observed. Nothing about the primary
+ * save waits on it or is affected by it; see SecondaryBackup for why that separation is absolute.
+ */
+const secondaryBackup = new SecondaryBackupManager((health) => broadcastBackupHealth(health));
+
+function broadcastBackupHealth(health: ISecondaryBackupHealth) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(IpcMainToRend.SecondaryBackupHealthChanged, health);
+  }
+}
+
+/**
+ * Kick off the redundant copy without joining it to the save's promise chain.
+ *
+ * A separate function rather than an inline `.catch`, because the two must not be chained: the
+ * primary save is already durable and already acknowledged by the time this runs, and anything
+ * that made Save wait on — or fail because of — a network share would be a worse bug than any this
+ * feature fixes.
+ */
+function startSecondaryBackup(fileContents: string) {
+  secondaryBackup.backup(fileContents).catch((error: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error(`Redundant backup could not be started: ${errorMessage(error)}`);
+  });
+}
+
+/** Adopt the folder this installation was last pointed at. */
+export function restoreSecondaryBackupFolder() {
+  const folder = readAppPreferences().secondaryBackupFolder;
+  if (folder) secondaryBackup.setFolder(folder);
+}
+
+export function getSecondaryBackupHealth(): ISecondaryBackupHealth {
+  return secondaryBackup.getHealth();
+}
+
+/** Ask the director where redundant copies should go. */
+export function chooseSecondaryBackupFolder(window: BrowserWindow | null): ISecondaryBackupHealth {
+  if (!window) return secondaryBackup.getHealth();
+  const chosen = dialog.showOpenDialogSync(window, {
+    title: 'Choose a backup folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (!chosen || chosen.length === 0) return secondaryBackup.getHealth();
+  secondaryBackup.setFolder(chosen[0]);
+  updateAppPreferences({ secondaryBackupFolder: chosen[0] });
+  return secondaryBackup.getHealth();
+}
+
+export function clearSecondaryBackupFolder(): ISecondaryBackupHealth {
+  secondaryBackup.setFolder(null);
+  updateAppPreferences({ secondaryBackupFolder: undefined });
+  return secondaryBackup.getHealth();
+}
+
+/** Try the last failed copy again, for the case where the drive has come back. */
+export async function retrySecondaryBackup(): Promise<ISecondaryBackupHealth> {
+  await secondaryBackup.retry();
+  return secondaryBackup.getHealth();
 }
 
 /** The path of the file being edited in the renderer process */
@@ -233,6 +299,10 @@ export function handleSaveFile(
       // The renderer adopts the path and clears its dirty flag only after this message. A failed
       // write never reaches this branch, including a failed Save As.
       window.webContents.send(IpcMainToRend.tournamentSavedSuccessfully, filePath);
+      // Deliberately not awaited. The primary save is already durable and already acknowledged; a
+      // slow or absent USB stick must not be able to make Save appear to hang or fail, and its
+      // failure is reported through the backup health rather than through this write's outcome.
+      startSecondaryBackup(fileContents);
       if (subsequentAction !== undefined) return doFileSwitchAction(subsequentAction, window);
       return undefined;
     })

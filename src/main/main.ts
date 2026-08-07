@@ -38,6 +38,11 @@ import {
   handleSetYftFilePath,
   handlelaunchStatReportInBrowserWindow,
   handleLaunchExternalWebPage,
+  restoreSecondaryBackupFolder,
+  getSecondaryBackupHealth,
+  chooseSecondaryBackupFolder,
+  clearSecondaryBackupFolder,
+  retrySecondaryBackup,
 } from './FileUtils';
 import { IpcBidirectional, IpcRendToMain } from '../IPCChannels';
 import { FileSwitchActions, statReportProtocol } from '../SharedUtils';
@@ -216,6 +221,7 @@ app
   .whenReady()
   .then(() => {
     createDirectories();
+    restoreSecondaryBackupFolder();
     createWindow();
     ipcMain.on(IpcRendToMain.setYftFilePath, handleSetYftFilePath);
     ipcMain.on(IpcRendToMain.saveFile, handleSaveFile);
@@ -244,6 +250,12 @@ app
     ipcMain.on(IpcBidirectional.GetAppVersion, (event) =>
       event.reply(IpcBidirectional.GetAppVersion, app.getVersion()),
     );
+    ipcMain.handle(IpcBidirectional.GetSecondaryBackupHealth, () => getSecondaryBackupHealth());
+    ipcMain.handle(IpcBidirectional.ChooseSecondaryBackupFolder, (event) =>
+      chooseSecondaryBackupFolder(BrowserWindow.fromWebContents(event.sender)),
+    );
+    ipcMain.handle(IpcBidirectional.ClearSecondaryBackupFolder, () => clearSecondaryBackupFolder());
+    ipcMain.handle(IpcBidirectional.RetrySecondaryBackup, () => retrySecondaryBackup());
     // Registers handlers only. The tournament server binds a port only when the user starts it.
     registerTournamentServerIpc(() => mainWindow);
 

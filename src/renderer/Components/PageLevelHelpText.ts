@@ -66,6 +66,12 @@ export type HelpTopicId =
   | 'control.network-interface'
   | 'control.live-display'
   | 'control.room-inheritance'
+  // Offline resilience and redundancy.
+  | 'control.offline-room'
+  | 'control.room-outbox'
+  | 'control.server-address-change'
+  | 'control.redundant-backup'
+  | 'control.failover'
   // Game entry.
   | 'games.tuh'
   | 'games.carryover'
@@ -436,6 +442,41 @@ const fieldHelp: Record<TargetedHelpTopicId, HelpTextSection> = {
     content: [
       'A read-only page anyone on the network can open, showing standings, individual statistics, recently accepted results, and the released round’s pairings.',
       'It publishes accepted results only — not live scores from games in progress, which stay on the Control page. It is separate from public pairings: turning one on does not turn on the other, and neither exposes room credentials or controls.',
+    ],
+  },
+  'control.offline-room': {
+    header: 'A room that has gone offline',
+    content: [
+      'A room browser that cannot reach this computer keeps scoring. It shows the last assignment YellowFruit gave it and does not change it, so nothing about the round or the matchup is invented while it is out of touch.',
+      'The scorekeeper finishes the game normally. The result is saved on that Chromebook and sent automatically when the connection returns. Nothing needs restarting, and the game must not be started again on another device.',
+    ],
+  },
+  'control.room-outbox': {
+    header: 'Results saved on a room device',
+    content: [
+      'Every finished game is written to the Chromebook before it is uploaded, and stays there until you accept it. A room can hold several: finishing round 5 does not overwrite round 4.',
+      'A scorekeeper can download any of them as a QBJ file from Saved results and hand it to you. Import it here with Import Games; if it matches one unresolved scheduled game, YellowFruit offers to record it against that game.',
+    ],
+  },
+  'control.server-address-change': {
+    header: 'The server address changed',
+    content: [
+      'The address this computer had when you started the server is no longer one of its addresses — usually a DHCP lease renewing. Room credentials are unchanged and games in progress are not interrupted.',
+      'Printed room sheets and QR codes now point at the old address. Rooms between games need the new one: reprint the sheets, or give them the pairing code, which still works. Setting a preferred room address avoids the problem next time.',
+    ],
+  },
+  'control.redundant-backup': {
+    header: 'Backup copy',
+    content: [
+      'After every successful save, YellowFruit writes a second copy of the tournament file to a folder you choose — a USB drive, a synced folder, or a share. Each copy is an ordinary .yft you can open anywhere.',
+      'It never affects your normal save: if the backup fails, the save still succeeded and your work is not unsaved. YellowFruit keeps the ten most recent copies plus Current.yft, and deletes only files it created.',
+    ],
+  },
+  'control.failover': {
+    header: 'Moving to a replacement computer',
+    content: [
+      'Rooms finish their current games locally. Open the most recent backup .yft on the replacement computer, start the Tournament Server there, and give the rooms its address; rooms between games pair again.',
+      'Games left playing or submitted by the old computer are not reset — they need your attention. Recover each one from the room’s downloaded QBJ, or restart it explicitly. An accepted result is never restarted.',
     ],
   },
   'control.room-inheritance': {
