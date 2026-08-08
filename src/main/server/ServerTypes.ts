@@ -8,6 +8,7 @@
  */
 import { ScheduledMatchStatus } from '../../renderer/DataModel/ScheduledMatch';
 import { IModaqGameFormat } from '../../renderer/Services/YellowFruitScoringRulesToModaq';
+import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 
 /** Default port for the local tournament server */
 export const defaultServerPort = 4732;
@@ -79,6 +80,16 @@ export interface ITournamentSnapshot {
   gameFormat: IModaqGameFormat | null;
   gameFormatErrors: string[];
   gameFormatWarnings: string[];
+  /**
+   * The tournament's scoring rules as structural data, for the first-party scorer.
+   *
+   * Sits alongside `gameFormat` rather than replacing it, because the two answer different
+   * questions. `gameFormat` being null means the rules cannot be handed to MODAQ at all; this is
+   * null only when no tournament has been loaded, since every rule set YellowFruit can hold can be
+   * described. A room that can score for itself is therefore not blocked by the MODAQ refusals in
+   * `gameFormatErrors`.
+   */
+  scoringFormat: IScorekeeperFormat | null;
   /**
    * True when a round can end before every regulation tossup is read, i.e. timed rounds. Rooms need
    * this to work out how many tossups were actually heard; see `QbjMatchNormalizer`.
@@ -179,6 +190,7 @@ export const emptyTournamentSnapshot: ITournamentSnapshot = {
   gameFormat: null,
   gameFormatErrors: ['YellowFruit has not sent tournament information to the server yet.'],
   gameFormatWarnings: [],
+  scoringFormat: null,
   timedRounds: false,
   roomScoringMode: 'traditional',
   rooms: [],
@@ -355,6 +367,8 @@ export interface IRoomAssignmentResponse {
   gameFormat: IModaqGameFormat | null;
   gameFormatErrors: string[];
   gameFormatWarnings: string[];
+  /** The scoring rules as structural data. See `ITournamentSnapshot.scoringFormat`. */
+  scoringFormat: IScorekeeperFormat | null;
   timedRounds: boolean;
   /** The highest round the director has released, if any. */
   releasedRoundNumber?: number | null;
@@ -458,6 +472,10 @@ export interface IRoomPresenceUpdateRequest {
 export type HelpRequestCategory =
   | 'wrong-matchup'
   | 'team-missing'
+  | 'protest'
+  | 'question-packet'
+  | 'roster-change'
+  | 'equipment-technical'
   | 'rules-question'
   | 'scoring-problem'
   | 'device-network'
@@ -468,6 +486,10 @@ export type HelpRequestState = 'open' | 'resolved' | 'cancelled';
 export const helpRequestCategoryLabels: Record<HelpRequestCategory, string> = {
   'wrong-matchup': 'Wrong matchup',
   'team-missing': "Team hasn't arrived",
+  protest: 'Protest / disputed ruling',
+  'question-packet': 'Question / packet issue',
+  'roster-change': 'Roster change',
+  'equipment-technical': 'Equipment / technical issue',
   'rules-question': 'Rules question',
   'scoring-problem': 'Scoring problem',
   'device-network': 'Device/network problem',

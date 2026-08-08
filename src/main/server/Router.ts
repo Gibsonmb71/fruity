@@ -424,6 +424,7 @@ export default class Router {
           gameFormat: snapshot.gameFormat,
           gameFormatErrors: snapshot.gameFormatErrors,
           gameFormatWarnings: snapshot.gameFormatWarnings,
+          scoringFormat: snapshot.scoringFormat,
           timedRounds: snapshot.timedRounds,
           roundCount: snapshot.rounds.length,
           teamCount: snapshot.teams.length,

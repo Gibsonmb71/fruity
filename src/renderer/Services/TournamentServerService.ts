@@ -5,6 +5,7 @@ import MatchImportResult, { ImportResultStatus } from '../DataModel/MatchImportR
 import { StatsValidity } from '../DataModel/Match';
 import MatchImportService from './MatchImportService';
 import scoringRulesToModaqGameFormat from './YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from './ScorekeeperFormat';
 import buildPublicLiveSnapshot, { buildPublicPairingsSnapshot } from './PublicLiveSnapshot';
 import { checkTournamentRoundRelease } from './ScheduleService';
 import {
@@ -389,6 +390,7 @@ export default class TournamentServerService {
       gameFormat: formatResult.ok ? formatResult.gameFormat : null,
       gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
       gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
+      scoringFormat: scoringRulesToScorekeeperFormat(this.tournament.scoringRules),
       timedRounds: this.tournament.scoringRules.timed,
       roomScoringMode: this.tournament.roomScoringMode,
       rooms: this.tournament.rooms.map((room) => ({

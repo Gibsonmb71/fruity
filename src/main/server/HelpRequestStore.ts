@@ -11,6 +11,10 @@ import {
 const validCategories = new Set<HelpRequestCategory>([
   'wrong-matchup',
   'team-missing',
+  'protest',
+  'question-packet',
+  'roster-change',
+  'equipment-technical',
   'rules-question',
   'scoring-problem',
   'device-network',

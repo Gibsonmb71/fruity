@@ -5,6 +5,7 @@ import path from 'path';
 import TournamentServer from '../main/server/TournamentServer';
 import { IMatchSubmission, ITournamentSnapshot, SessionStatus, sessionTokenHeader } from '../main/server/ServerTypes';
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import { ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import { makeStandardModaqMatch, testTeamNames } from './TestFixtures';
@@ -13,7 +14,8 @@ function snapshot(
   recoveryKey = 'recovery-test',
   overrides: Partial<Pick<ITournamentSnapshot, 'assignments'>> = {},
 ): ITournamentSnapshot {
-  const format = scoringRulesToModaqGameFormat(new ScoringRules(CommonRuleSets.AcfPowers));
+  const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+  const format = scoringRulesToModaqGameFormat(rules);
   return {
     name: 'Recovery Tournament',
     rounds: [{ number: 1, name: '1' }],
@@ -21,6 +23,7 @@ function snapshot(
     gameFormat: format.ok ? format.gameFormat : null,
     gameFormatErrors: format.ok ? [] : format.errors,
     gameFormatWarnings: format.ok ? format.warnings : [],
+    scoringFormat: scoringRulesToScorekeeperFormat(rules),
     timedRounds: false,
     roomScoringMode: 'browser',
     rooms: [],

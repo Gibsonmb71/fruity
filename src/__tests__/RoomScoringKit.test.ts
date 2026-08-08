@@ -17,8 +17,11 @@ import {
   writeScoringKit,
 } from '../room/ScoringKit';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
+import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 
 const gameFormat = { regulationTossupCount: 20, minimumOvertimeQuestionCount: 1 } as unknown as IModaqGameFormat;
+const scoringFormat = scoringRulesToScorekeeperFormat(new ScoringRules(CommonRuleSets.AcfPowers));
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const store = { ...initial };
@@ -39,6 +42,7 @@ function source(overrides: Partial<Parameters<typeof buildScoringKit>[0]> = {}) 
     tournamentKey: 'Ninety Six Invitational',
     tournamentName: 'Ninety Six Invitational',
     gameFormat,
+    scoringFormat,
     timedRounds: false,
     teams: [
       { name: 'Ninety Six A', players: [{ name: 'Ada' }, { name: 'Ben' }] },
@@ -94,6 +98,7 @@ describe('what the kit keeps', () => {
         'roomId',
         'roomName',
         'rounds',
+        'scoringFormat',
         'teams',
         'timedRounds',
         'tournamentKey',

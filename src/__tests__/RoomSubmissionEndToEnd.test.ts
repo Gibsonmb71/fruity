@@ -23,6 +23,7 @@ import {
 import TournamentServerService from '../renderer/Services/TournamentServerService';
 import MatchImportService from '../renderer/Services/MatchImportService';
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { ImportResultStatus } from '../renderer/DataModel/MatchImportResult';
 import { StatsValidity } from '../renderer/DataModel/Match';
 import Tournament from '../renderer/DataModel/Tournament';
@@ -50,6 +51,7 @@ function snapshotFor(t: Tournament): ITournamentSnapshot {
     gameFormat: formatResult.ok ? formatResult.gameFormat : null,
     gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
     gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
+    scoringFormat: scoringRulesToScorekeeperFormat(t.scoringRules),
     timedRounds: false,
     roomScoringMode: 'browser',
     rooms: [],

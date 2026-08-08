@@ -39,6 +39,7 @@ function assignment(overrides: Partial<IRoomAssignmentResponse> = {}): IRoomAssi
     gameFormat: null,
     gameFormatErrors: [],
     gameFormatWarnings: [],
+    scoringFormat: null,
     timedRounds: false,
     ...overrides,
   };
