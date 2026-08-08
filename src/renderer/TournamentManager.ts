@@ -49,6 +49,7 @@ import { ISecondaryBackupHealth, emptyBackupHealth as emptySecondaryBackupHealth
 import { getReportDiagnostics, IReportScope, projectTournamentForReport } from './Services/ReportScope';
 import TournamentServerService from './Services/TournamentServerService';
 import { checkBrowserRoomScoringDisable, shouldStopServerBeforeDisabling } from './Services/RoomScoringMode';
+import { IRoomProcedure, readRoomProcedure } from './Services/RoomProcedure';
 import { repairOperationalIntegrity, IOperationalIntegrityResult } from './Services/OperationalIntegrity';
 import {
   canDeleteTeam,
@@ -1083,6 +1084,27 @@ export class TournamentManager {
     this.tournament.roomScoringMode = mode;
     this.onDataChanged();
     return { ok: true };
+  }
+
+  /**
+   * Change how rooms conduct a game: halves, clock length, timeouts.
+   *
+   * No guard and no confirmation, because nothing here can invalidate a game that has already been
+   * played. It changes what the room offers from the next game onwards; a room mid-round keeps the
+   * procedure it started with until it polls again, which is the same as any other setting.
+   */
+  setRoomProcedure(procedure: IRoomProcedure) {
+    const next = readRoomProcedure(procedure);
+    const current = this.tournament.roomProcedure;
+    if (
+      current.halves === next.halves &&
+      current.halfLengthMinutes === next.halfLengthMinutes &&
+      current.timeoutsPerTeam === next.timeoutsPerTeam
+    ) {
+      return;
+    }
+    this.tournament.roomProcedure = next;
+    this.onDataChanged();
   }
 
   setPacketName(round: Round, packetName: string) {

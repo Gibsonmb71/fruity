@@ -4,6 +4,7 @@
 import stringSimilarity from 'string-similarity-js';
 import { versionLt } from '../Utils/GeneralUtils';
 import { ILiveDisplaySettings, LiveDisplayTheme, makeDefaultLiveDisplaySettings } from '../../shared/LiveTypes';
+import { readRoomProcedure } from '../Services/RoomProcedure';
 import AnswerType, { IQbjAnswerType, sortAnswerTypes } from './AnswerType';
 import { IIndeterminateQbj, IQbjObject, IQbjRefPointer, IRefTargetDict, IYftDataModelObject } from './Interfaces';
 import { IQbjMatch, IYftFileMatch, Match } from './Match';
@@ -223,6 +224,10 @@ export default class FileParser {
         this.tourn.roomScoringMode = hasLegacyRoomConfiguration ? 'browser' : 'traditional';
       }
       this.tourn.liveDisplaySettings = FileParser.parseLiveDisplaySettings(yfExtraData.liveDisplay);
+      // Absent, malformed or from a future version all mean the same thing: this tournament runs no
+      // room procedure. `readRoomProcedure` never throws, because a bad setting must not stop a file
+      // opening.
+      this.tourn.roomProcedure = readRoomProcedure(yfExtraData.roomProcedure);
 
       const rawRooms = Array.isArray(yfExtraData.rooms) ? yfExtraData.rooms : [];
       const roomsMissingIdentity = rawRooms.filter((entry) => {

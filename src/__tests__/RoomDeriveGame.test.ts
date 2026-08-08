@@ -750,3 +750,299 @@ describe('robustness', () => {
     expect(second.phase).toEqual(first.phase);
   });
 });
+
+describe('the overtime minimum is a minimum', () => {
+  /** Play `count` dead tossups, which is the quickest way to a tied game. */
+  function deadTossups(count: number, from = 1): ScoreEvent[] {
+    return Array.from({ length: count }, (_, i) => dead(from + i));
+  }
+
+  /**
+   * NAQT's `minimumOvertimeQuestionCount` of 3 means "at least three", not "in blocks of three".
+   * Reading it as a period length makes a team that leads after four overtime tossups play two more,
+   * which is a real game decided by a misread field.
+   */
+  test('once the minimum is played out, every further tossup is sudden death', () => {
+    const format = formatFor((rules) => {
+      rules.minimumOvertimeQuestionCount = 3;
+    });
+    const game = deriveGame(format, setup, [
+      ...deadTossups(20),
+      ...deadTossups(3, 21),
+      ...convertedCycle(format, 24, 'left', 'Sarah', 10, 20),
+    ]);
+
+    expect(game.overtimeTossupsRead).toBe(4);
+    expect(game.phase).toEqual({ kind: 'complete', reason: 'overtime' });
+  });
+
+  test('the minimum is still played out in full even once somebody leads', () => {
+    const format = formatFor((rules) => {
+      rules.minimumOvertimeQuestionCount = 3;
+    });
+    const game = deriveGame(format, setup, [
+      ...deadTossups(20),
+      ...convertedCycle(format, 21, 'left', 'Sarah', 10, 20),
+      dead(22),
+    ]);
+
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 23, period: 'overtime' });
+  });
+
+  test('a tie after the minimum keeps the game going one tossup at a time', () => {
+    const format = formatFor((rules) => {
+      rules.minimumOvertimeQuestionCount = 3;
+    });
+    const game = deriveGame(format, setup, deadTossups(24));
+
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 25, period: 'overtime' });
+  });
+});
+
+describe('a wrong answer worth nothing', () => {
+  function wrong(questionNumber: number, team: 'left' | 'right', playerName?: string): ScoreEvent {
+    return event({ type: 'tossup-no-penalty', questionNumber, team, playerName });
+  }
+
+  test('it costs the team its chance without costing it points', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [wrong(1, 'left', 'Sarah')]);
+
+    expect(game.left.points).toBe(0);
+    expect(game.phase).toEqual({
+      kind: 'tossup',
+      questionNumber: 1,
+      period: 'regulation',
+      eligibleTeams: ['right'],
+    });
+  });
+
+  test('it never appears in a player answer count, which is the whole reason it is not an answer type', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [wrong(1, 'left', 'Sarah'), dead(1)]);
+    const sarah = game.left.players.find((player) => player.name === 'Sarah')!;
+
+    expect(sarah.answerCounts.size).toBe(0);
+    expect(sarah.points).toBe(0);
+    // She was on the floor for a tossup that was read, so she heard it.
+    expect(sarah.tossupsHeard).toBe(1);
+  });
+
+  test('both teams answering wrong resolves the tossup with nothing scored', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [wrong(1, 'left', 'Sarah'), wrong(1, 'right', 'Emma')]);
+
+    expect(game.tossupsRead).toBe(1);
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 2 });
+  });
+
+  test('the second team can still convert after the first answers wrong', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      wrong(1, 'left', 'Sarah'),
+      buzz(1, 'right', 'Emma', typeIndex(format, 10)),
+    ]);
+
+    expect(game.right.points).toBe(10);
+    expect(game.phase).toEqual({ kind: 'bonus', questionNumber: 1, period: 'regulation', team: 'right' });
+  });
+});
+
+describe('the regulation boundary in a timed game', () => {
+  test('time called on a question nobody started leaves that question in overtime', () => {
+    const format = formatFor((rules) => {
+      rules.timed = true;
+      rules.minimumOvertimeQuestionCount = 1;
+    });
+    // Q1 finished and Q2 is on screen when the horn goes, so regulation ended after Q1.
+    const game = deriveGame(format, setup, [
+      dead(1),
+      event({ type: 'end-regulation', questionNumber: 2, lastRegulationQuestion: 1 }),
+      ...convertedCycle(format, 2, 'left', 'Sarah', 10, 20),
+    ]);
+
+    expect(game.questions.find((question) => question.questionNumber === 2)!.period).toBe('overtime');
+    expect(game.overtimeTossupsRead).toBe(1);
+    expect(game.left.overtimeBuzzes.get(typeIndex(format, 10))).toBe(1);
+    expect(game.phase).toEqual({ kind: 'complete', reason: 'overtime' });
+  });
+
+  test('a tossup already in progress when time is called stays in regulation', () => {
+    const format = formatFor((rules) => {
+      rules.timed = true;
+    });
+    const game = deriveGame(format, setup, [
+      dead(1),
+      buzz(2, 'left', 'Sarah', typeIndex(format, -5)),
+      event({ type: 'end-regulation', questionNumber: 2, lastRegulationQuestion: 2 }),
+      dead(2),
+    ]);
+
+    expect(game.questions.find((question) => question.questionNumber === 2)!.period).toBe('regulation');
+    expect(game.overtimeTossupsRead).toBe(0);
+  });
+});
+
+describe('halves and timeouts', () => {
+  test('a break stops the game until the score is confirmed', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      dead(1),
+      event({ type: 'half-break', questionNumber: 2, lastQuestion: 1 }),
+    ]);
+
+    expect(game.awaitingScoreCheck).toBe(true);
+    expect(game.phase).toEqual({ kind: 'score-check', afterQuestion: 1 });
+  });
+
+  test('confirming the score puts the game back on the next tossup', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      dead(1),
+      event({ type: 'half-break', questionNumber: 2, lastQuestion: 1 }),
+      event({ type: 'half-resume', questionNumber: 2 }),
+    ]);
+
+    expect(game.awaitingScoreCheck).toBe(false);
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 2 });
+  });
+
+  test('timeouts are counted per team and change nothing about the score', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [dead(1), event({ type: 'timeout', questionNumber: 2, team: 'left' })]);
+
+    expect(game.timeouts).toEqual({ left: 1, right: 0 });
+    expect(game.left.points).toBe(0);
+  });
+});
+
+describe('replacing a spoiled question', () => {
+  test('the cycle is played again without charging anybody a second tossup heard', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
+      ...convertedCycle(format, 2, 'right', 'Emma', 15, 30),
+      event({ type: 'question-void', questionNumber: 2, scope: 'tossup', reason: 'Wrong packet' }),
+      ...convertedCycle(format, 2, 'left', 'James', 10, 10),
+    ]);
+
+    expect(game.tossupsRead).toBe(2);
+    expect(game.right.points).toBe(0);
+    expect(game.left.points).toBe(50);
+    expect(game.left.players.find((player) => player.name === 'Sarah')!.tossupsHeard).toBe(2);
+    expect(game.questions.find((question) => question.questionNumber === 2)!.replaced).toBe(true);
+  });
+
+  test('a voided cycle with nothing recorded since is simply the next question again', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      dead(1),
+      dead(2),
+      event({ type: 'question-void', questionNumber: 2, scope: 'tossup', reason: 'Already heard' }),
+    ]);
+
+    expect(game.tossupsRead).toBe(1);
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 2 });
+  });
+
+  test('replacing a bonus leaves the tossup that earned it alone', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      ...convertedCycle(format, 1, 'left', 'Sarah', 10, 30),
+      event({ type: 'question-void', questionNumber: 1, scope: 'bonus', reason: 'Spoiled part' }),
+    ]);
+
+    expect(game.left.tossupPoints).toBe(10);
+    expect(game.left.bonusPoints).toBe(0);
+    expect(game.phase).toEqual({ kind: 'bonus', questionNumber: 1, period: 'regulation', team: 'left' });
+  });
+});
+
+describe('ending a game short', () => {
+  test('the game is over at the score it had, with the reason kept', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
+      event({ type: 'end-game-early', questionNumber: 2, reason: 'Packet ran out', tossupsRead: 1 }),
+    ]);
+
+    expect(game.phase).toEqual({ kind: 'complete', reason: 'short' });
+    expect(game.tossupsRead).toBe(1);
+    expect(game.endedEarly).toEqual({ reason: 'Packet ran out', tossupsRead: 1 });
+  });
+});
+
+describe('starting lineups', () => {
+  const bigRosters: IGameSetup = {
+    left: { name: 'Ninety Six', players: ['Sarah', 'James', 'Alex', 'Taylor', 'Riley'] },
+    right: { name: 'Greenwood', players: ['Emma', 'Jordan', 'Morgan', 'Casey', 'Quinn'] },
+  };
+
+  test('a roster bigger than the floor is a question, not a guess', () => {
+    const format = formatFor();
+    const game = deriveGame(format, bigRosters, []);
+
+    expect(game.needsStartingLineup).toEqual(['left', 'right']);
+    expect(game.phase).toEqual({ kind: 'lineup', teams: ['left', 'right'] });
+  });
+
+  test('a roster that fits on the floor is never asked about', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, []);
+
+    expect(game.needsStartingLineup).toEqual([]);
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 1 });
+  });
+
+  test('naming the starters settles it and the game begins', () => {
+    const format = formatFor();
+    const game = deriveGame(format, bigRosters, [
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'Riley'] }),
+      event({ type: 'substitution', questionNumber: 1, team: 'right', activePlayers: ['Quinn', 'Casey'] }),
+    ]);
+
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 1 });
+    expect(game.left.activePlayers).toEqual(['Sarah', 'Riley']);
+    expect(game.right.activePlayers).toEqual(['Quinn', 'Casey']);
+  });
+
+  test('an explicit lineup in the setup answers the question before it is asked', () => {
+    const format = formatFor();
+    const game = deriveGame(
+      format,
+      { ...bigRosters, left: { ...bigRosters.left, startingLineup: ['Alex', 'Taylor', 'Riley', 'James'] } },
+      [],
+    );
+
+    expect(game.needsStartingLineup).toEqual(['right']);
+  });
+});
+
+describe('the running score on each question', () => {
+  test('it is the score as it stood once that cycle closed', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
+      ...convertedCycle(format, 2, 'right', 'Emma', 15, 30),
+    ]);
+
+    expect(game.questions[0].scoreAfter).toEqual({ left: 30, right: 0 });
+    expect(game.questions[1].scoreAfter).toEqual({ left: 30, right: 45 });
+  });
+});
+
+describe('events the model cannot hold', () => {
+  test('a second answer by the same team on one tossup is reported, not scored', () => {
+    const format = formatFor();
+    const game = deriveGame(format, setup, [
+      buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
+      buzz(1, 'left', 'James', typeIndex(format, 10)),
+      bonus(1, 'left', 20),
+    ]);
+
+    // MatchQuestion.getPoints finds a team's buzz with `find`, so the second one has nowhere to go.
+    expect(game.left.tossupPoints).toBe(10);
+    expect(game.integrityProblems).toHaveLength(1);
+    expect(game.integrityProblems[0].message).toContain('two answers');
+  });
+});

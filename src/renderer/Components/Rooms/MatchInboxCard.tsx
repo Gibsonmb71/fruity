@@ -2,6 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { Box, Button, Divider, Stack, TextField, Typography } from '@mui/material';
 import { Check, Close } from '@mui/icons-material';
 import { IInboxItem, IMatchSubmissionConflict, TournamentServerContext } from '../../Services/TournamentServerService';
+import { unresolvedProtestLines } from '../../Services/ProtestNotes';
 import { ImportResultStatus } from '../../DataModel/MatchImportResult';
 import { INavigationIntent } from '../../Services/Navigation';
 
@@ -14,6 +15,14 @@ function InboxRow({ item }: { item: IInboxItem }) {
   const service = useContext(TournamentServerContext);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  /**
+   * A protest nobody has decided yet.
+   *
+   * The result is legitimate and control may well accept it — the score is what it is until somebody
+   * rules otherwise — but it must not be accepted by somebody who did not know there was an argument
+   * still running in that room. So it is said loudly and it costs one extra press.
+   */
+  const [protestAcknowledged, setProtestAcknowledged] = useState(false);
   if (!service) return null;
 
   const { importResult } = item;
@@ -24,6 +33,8 @@ function InboxRow({ item }: { item: IInboxItem }) {
   const rightName = match?.rightTeam.team?.name ?? item.rightTeam;
   const leftScore = match?.leftTeam.points ?? '–';
   const rightScore = match?.rightTeam.points ?? '–';
+  const openProtests = unresolvedProtestLines(match?.notes);
+  const blockedByProtest = openProtests.length > 0 && !protestAcknowledged;
 
   return (
     <div className="rooms-inbox-row" data-inbox-session-id={item.sessionId} tabIndex={-1}>
@@ -51,6 +62,17 @@ function InboxRow({ item }: { item: IInboxItem }) {
           </div>
         )}
         {needsOverride && <div className="rooms-validation-warning">Warning · review before accepting</div>}
+        {openProtests.length > 0 && (
+          <div className="rooms-protest-warning" role="alert">
+            <strong>
+              {openProtests.length === 1 ? 'An unresolved protest' : `${openProtests.length} unresolved protests`} on
+              this game
+            </strong>
+            {openProtests.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        )}
         {isFatal && <div className="rooms-state is-error">Cannot be imported</div>}
         {messages.length > 0 && (
           <div className="rooms-inline-message">
@@ -105,7 +127,12 @@ function InboxRow({ item }: { item: IInboxItem }) {
               justifyContent: 'flex-end',
             }}
           >
-            {!isFatal && !needsOverride && (
+            {blockedByProtest && !isFatal && (
+              <Button size="small" variant="outlined" color="warning" onClick={() => setProtestAcknowledged(true)}>
+                I have seen the protest
+              </Button>
+            )}
+            {!isFatal && !needsOverride && !blockedByProtest && (
               <Button
                 size="small"
                 variant="contained"
@@ -115,7 +142,7 @@ function InboxRow({ item }: { item: IInboxItem }) {
                 Accept result
               </Button>
             )}
-            {needsOverride && (
+            {needsOverride && !blockedByProtest && (
               <Button
                 size="small"
                 variant="outlined"

@@ -21,6 +21,7 @@ import YfCard from './YfCard';
 import { NullDate } from '../Utils/UtilTypes';
 import { YfFieldGrid, YfFieldRow, YfNotice, YfPageHeader, YfToggleGrid, YfToggleRow } from '../Utils/GeneralReactUtils';
 import { Round } from '../DataModel/Round';
+import { maximumHalfLengthMinutes, maximumTimeoutsPerTeam } from '../Services/RoomProcedure';
 
 /**
  * Beyond this many rounds the packet list would drive the page height on its own, so it scrolls
@@ -149,7 +150,103 @@ function GameEntryPanel() {
           {modeError}
         </Typography>
       )}
+      {mode === 'browser' && <RoomProcedurePanel />}
     </YfCard>
+  );
+}
+
+/**
+ * How rooms conduct a game, as opposed to how one is scored.
+ *
+ * Sits inside the browser-scoring panel rather than in the scoring rules because none of it changes
+ * what a game is worth: halves, a clock and timeouts are not carried by any statistic YellowFruit
+ * stores, and local tournaments modify them routinely even when the scoring rules are standard.
+ * Everything here is off unless a director turns it on.
+ */
+function RoomProcedurePanel() {
+  const tournManager = useContext(TournamentContext);
+  const procedure = tournManager.tournament.roomProcedure;
+  const [halfLength, setHalfLength] = useSubscription(
+    procedure.halfLengthMinutes === undefined ? '' : String(procedure.halfLengthMinutes),
+  );
+
+  const commitHalfLength = () => {
+    const trimmed = halfLength.trim();
+    const minutes = trimmed === '' ? undefined : Number(trimmed);
+    tournManager.setRoomProcedure({
+      ...procedure,
+      halfLengthMinutes:
+        minutes !== undefined && Number.isFinite(minutes) && minutes > 0 && minutes <= maximumHalfLengthMinutes
+          ? minutes
+          : undefined,
+    });
+  };
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="subtitle2">Room procedure</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        Optional. Affects only what a room scorekeeper is offered, never how a game is scored.
+      </Typography>
+      <Stack spacing={1}>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={procedure.halves}
+              onChange={(e) =>
+                tournManager.setRoomProcedure({
+                  ...procedure,
+                  halves: e.target.checked,
+                  halfLengthMinutes: e.target.checked ? procedure.halfLengthMinutes : undefined,
+                })
+              }
+            />
+          }
+          label={
+            <Box>
+              <Typography variant="body2">Play in halves</Typography>
+              <Typography variant="caption" color="text.secondary">
+                The room stops at the break to confirm the score with the moderator.
+              </Typography>
+            </Box>
+          }
+        />
+        {procedure.halves && (
+          <TextField
+            size="small"
+            type="number"
+            label="Minutes per half"
+            helperText="Leave blank when the moderator keeps the clock. YellowFruit stores no default."
+            slotProps={{ htmlInput: { min: 1, max: maximumHalfLengthMinutes } }}
+            sx={{ maxWidth: 260 }}
+            value={halfLength}
+            onChange={(e) => setHalfLength(e.target.value)}
+            onBlur={commitHalfLength}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitHalfLength();
+            }}
+          />
+        )}
+        <TextField
+          size="small"
+          type="number"
+          label="Timeouts per team"
+          helperText="Zero means the room does not track timeouts."
+          slotProps={{ htmlInput: { min: 0, max: maximumTimeoutsPerTeam } }}
+          sx={{ maxWidth: 260 }}
+          value={procedure.timeoutsPerTeam}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            if (!Number.isInteger(value)) return;
+            tournManager.setRoomProcedure({
+              ...procedure,
+              timeoutsPerTeam: Math.min(maximumTimeoutsPerTeam, Math.max(0, value)),
+            });
+          }}
+        />
+      </Stack>
+    </Box>
   );
 }
 
