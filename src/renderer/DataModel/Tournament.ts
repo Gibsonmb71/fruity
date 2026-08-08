@@ -20,6 +20,7 @@ import { IQbjTournamentSite, TournamentSite } from './TournamentSite';
 import { IYftFileScheduledMatch, ScheduledMatch } from './ScheduledMatch';
 import { IYftFileRoom, TournamentRoom } from './TournamentRoom';
 import { ILiveDisplaySettings, makeDefaultLiveDisplaySettings } from '../../shared/LiveTypes';
+import { defaultRoomProcedure, IRoomProcedure, roomProcedureIsActive } from '../Services/RoomProcedure';
 import { randomId } from '../Utils/RandomIds';
 
 /**
@@ -81,6 +82,8 @@ interface ITournamentExtraData {
   usingScheduleTemplate?: boolean;
   /** Explicitly selects manual YellowFruit entry or browser room scoring. */
   roomScoringMode?: TournamentRoomScoringMode;
+  /** How rooms conduct a game: halves, clock length, timeouts. Absent means none of it is used. */
+  roomProcedure?: IRoomProcedure;
   /** Physical playing locations, for the tournament server's room workflow */
   rooms?: IYftFileRoom[];
   /** Games the tournament intends to play, as opposed to ones it has played */
@@ -133,6 +136,15 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
 
   /** Traditional manual entry is the safe default for new tournaments. */
   roomScoringMode: TournamentRoomScoringMode = 'traditional';
+
+  /**
+   * How rooms run a game, as opposed to how one is scored.
+   *
+   * Deliberately not part of `ScoringRules`: halves, a clock and timeouts change nothing about what
+   * a game is worth, they are not carried by any statistic, and local tournaments vary them. Off by
+   * default, so a tournament that never touches it behaves exactly as it always did.
+   */
+  roomProcedure: IRoomProcedure = defaultRoomProcedure();
 
   rankings: Ranking[] = [];
 
@@ -250,6 +262,9 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
       finalRankingsReady: this.finalRankingsReady,
       usingScheduleTemplate: this.usingScheduleTemplate,
       roomScoringMode: this.roomScoringMode,
+      // Same reasoning as `rooms` below: a tournament that configured no procedure writes no
+      // procedure, rather than a block of defaults nobody chose.
+      roomProcedure: roomProcedureIsActive(this.roomProcedure) ? this.roomProcedure : undefined,
       // Omitted entirely when there are none, so a tournament that never used the server writes the
       // same file it always did.
       rooms: this.rooms.length > 0 ? this.rooms.map((room) => room.toYftFileObject()) : undefined,

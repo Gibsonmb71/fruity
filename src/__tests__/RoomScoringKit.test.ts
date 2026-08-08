@@ -97,6 +97,7 @@ describe('what the kit keeps', () => {
         'gameFormat',
         'roomId',
         'roomName',
+        'roomProcedure',
         'rounds',
         'scoringFormat',
         'teams',
