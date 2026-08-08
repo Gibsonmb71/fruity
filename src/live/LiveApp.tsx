@@ -171,6 +171,7 @@ function PublicPairingsApp() {
               <span>Find a team</span>
               <input
                 id="public-pairings-search"
+                type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Team name"
@@ -233,6 +234,7 @@ function AudienceApp({ snapshot, connection }: { snapshot: IPublicLiveSnapshot |
                 className={activeView === view ? 'is-active' : ''}
                 key={view}
                 type="button"
+                aria-pressed={activeView === view}
                 onClick={() => setActiveView(view)}
               >
                 {label}

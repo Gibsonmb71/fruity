@@ -24,6 +24,7 @@ import {
   IRoomJoinListResponse,
   IRoomPresence,
   IRoomPresenceUpdateRequest,
+  IRoomPlayerAddRequest,
   ITournamentSnapshot,
   SessionStatus,
   apiPrefix,
@@ -31,11 +32,14 @@ import {
   maxRequestBodyBytes,
   operatorNameHeader,
   roomTokenHeader,
+  roomPlayerNameMaxLength,
   RoomBlockedReason,
+  RoomScorerKind,
   sessionTokenHeader,
 } from './ServerTypes';
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
 import { selectRoomAssignments } from '../../shared/RoomAssignmentState';
+import { scorekeeperFormatProblems } from '../../renderer/Services/ScorekeeperFormat';
 
 /** A parsed request body, or the reason it was refused */
 type BodyResult = { ok: true; body: unknown } | { ok: false; status: number; message: string };
@@ -75,6 +79,8 @@ export interface IRouterHost {
   createHelpRequest?: (roomId: string, request: ICreateHelpRequest) => IHelpRequest | null;
   /** Resolve/cancel a help request after its owner has been checked. */
   updateHelpRequest?: (id: string, status: 'resolved' | 'cancelled', note?: string) => IHelpRequest | null;
+  /** Forward one validated roster addition to the renderer that owns the Tournament model. */
+  onRoomPlayerAdd?: (request: IRoomPlayerAddRequest) => void;
 }
 
 /** Longest URL we'll even look at, to avoid pathological parsing */
@@ -233,6 +239,13 @@ function tokenFrom(req: IncomingMessage): string | undefined {
   return headerToken(req, sessionTokenHeader);
 }
 
+/** Missing scorer fields use the rules the server actually has, while explicit choices stay strict. */
+function parseRequestedScorer(value: unknown, snapshot: ITournamentSnapshot): RoomScorerKind {
+  if (value === undefined) return snapshot.scoringFormat !== null ? 'first-party' : 'legacy';
+  if (value === 'legacy') return 'legacy';
+  return 'first-party';
+}
+
 /** Validate a create-session request body against the tournament we're actually running */
 function validateCreateRequest(
   body: unknown,
@@ -240,7 +253,8 @@ function validateCreateRequest(
 ): { ok: true; request: ICreateSessionRequest } | { ok: false; message: string } {
   if (typeof body !== 'object' || body === null) return { ok: false, message: 'Expected a JSON object.' };
 
-  const { roundNumber, leftTeam, rightTeam } = body as Record<string, unknown>;
+  const { roundNumber, leftTeam, rightTeam, scorer: requestedScorer } = body as Record<string, unknown>;
+  const scorer = parseRequestedScorer(requestedScorer, snapshot);
 
   if (typeof roundNumber !== 'number' || !Number.isFinite(roundNumber)) {
     return { ok: false, message: 'roundNumber must be a number.' };
@@ -264,8 +278,12 @@ function validateCreateRequest(
   if (leftTeam === rightTeam) {
     return { ok: false, message: 'A team cannot play itself.' };
   }
-  if (snapshot.gameFormat === null) {
-    return { ok: false, message: "This tournament's scoring rules cannot be used for room scorekeeping." };
+  if (
+    scorer === 'legacy'
+      ? snapshot.gameFormat === null
+      : snapshot.scoringFormat === null || scorekeeperFormatProblems(snapshot.scoringFormat).length > 0
+  ) {
+    return { ok: false, message: "This tournament's scoring rules cannot be used by the selected room scorer." };
   }
   if (snapshot.roomScoringMode === 'traditional') {
     return { ok: false, message: 'The generic session endpoint is disabled for traditional YellowFruit scoring.' };
@@ -289,7 +307,7 @@ function validateCreateRequest(
     return { ok: false, message: 'That game is assigned to a room; use the assigned-room link.' };
   }
 
-  return { ok: true, request: { roundNumber, leftTeam, rightTeam } };
+  return { ok: true, request: { roundNumber, leftTeam, rightTeam, scorer } };
 }
 
 /** A QBJ Match body is only accepted if it at least looks like one */
@@ -468,6 +486,16 @@ export default class Router {
         return;
       }
 
+      // POST /api/v1/rooms/:roomId/players
+      if (segments.length === 3 && segments[2] === 'players') {
+        if (method !== 'POST') {
+          sendError(res, 405, `${method} is not allowed for this endpoint.`);
+          return;
+        }
+        await this.addRoomPlayer(req, res, roomId);
+        return;
+      }
+
       // GET /api/v1/rooms/:roomId/presence
       if (segments.length === 3 && segments[2] === 'presence') {
         if (method !== 'GET' && method !== 'POST') {
@@ -635,11 +663,16 @@ export default class Router {
         deviceId: typeof body.deviceId === 'string' ? body.deviceId : headerToken(req, deviceIdHeader),
         operatorName: typeof body.operatorName === 'string' ? body.operatorName : headerToken(req, operatorNameHeader),
         ready: typeof body.ready === 'boolean' ? body.ready : undefined,
+        scorer: parseRequestedScorer(body.scorer, this.host.getSnapshot()),
       };
     }
 
     const snapshot = this.host.getSnapshot();
-    if (update.ready === true && snapshot.gameFormat === null) {
+    const readyRulesUsable =
+      update.scorer === 'legacy'
+        ? snapshot.gameFormat !== null
+        : snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
+    if (update.ready === true && !readyRulesUsable) {
       sendError(res, 409, 'This browser cannot be marked ready until usable scoring rules are loaded.');
       return;
     }
@@ -648,7 +681,7 @@ export default class Router {
       roomId,
       deviceId,
       update.operatorName ?? headerToken(req, operatorNameHeader),
-      snapshot.gameFormat === null ? false : update.ready,
+      readyRulesUsable ? update.ready : false,
     );
     sendJson(res, 200, { presence: this.roomPresenceValue(roomId) });
   }
@@ -773,7 +806,9 @@ export default class Router {
       roomId,
       headerToken(req, deviceIdHeader),
       headerToken(req, operatorNameHeader),
-      snapshot.gameFormat === null ? false : undefined,
+      snapshot.scoringFormat === null || scorekeeperFormatProblems(snapshot.scoringFormat).length > 0
+        ? false
+        : undefined,
     );
     const response = buildAssignmentResponse(snapshot, room);
 
@@ -832,7 +867,9 @@ export default class Router {
       return;
     }
 
-    const scheduledMatchId = (bodyResult.body as Record<string, unknown>)?.scheduledMatchId;
+    const startBody = bodyResult.body as Record<string, unknown>;
+    const scheduledMatchId = startBody?.scheduledMatchId;
+    const scorer = parseRequestedScorer(startBody?.scorer, this.host.getSnapshot());
     if (typeof scheduledMatchId !== 'string' || scheduledMatchId === '') {
       sendError(res, 400, 'scheduledMatchId must be a string.');
       return;
@@ -858,7 +895,7 @@ export default class Router {
       return;
     }
 
-    const block = checkCanStart(snapshot, room, assignment);
+    const block = checkCanStart(snapshot, room, assignment, scorer);
     const canResumeDuringHold =
       existing !== undefined &&
       (existing.status === SessionStatus.Created || existing.status === SessionStatus.Playing) &&
@@ -889,6 +926,57 @@ export default class Router {
     sendJson(res, existing ? 200 : 201, payload);
     this.host.onSessionChanged?.();
     if (!existing) this.host.onSessionStarted?.(session.id);
+  }
+
+  private async addRoomPlayer(req: IncomingMessage, res: ServerResponse, roomId: string) {
+    const room = this.authorizeRoomOrRefuse(req, res, roomId);
+    if (!room) {
+      req.resume();
+      return;
+    }
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) {
+      sendError(res, bodyResult.status, bodyResult.message);
+      return;
+    }
+    const body = bodyResult.body as Record<string, unknown>;
+    const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
+    const teamName = typeof body?.teamName === 'string' ? body.teamName : '';
+    const playerName = typeof body?.playerName === 'string' ? body.playerName.trim() : '';
+    if (!sessionId || !teamName || !playerName || playerName.length > roomPlayerNameMaxLength) {
+      sendError(res, 400, 'sessionId, teamName, and a valid playerName are required.');
+      return;
+    }
+    const read = this.host.sessions.read(sessionId, tokenFrom(req));
+    if (!read.ok) {
+      sendSessionWriteError(res, read);
+      return;
+    }
+    const { session } = read;
+    if (session.roomId !== roomId || session.status !== SessionStatus.Playing || session.finalReceived) {
+      sendError(res, 409, "That session is not this room's current playing game.");
+      return;
+    }
+    if (teamName !== session.leftTeam && teamName !== session.rightTeam) {
+      sendError(res, 403, 'A room can only add a player to a team in its current game.');
+      return;
+    }
+    const snapshot = this.host.getSnapshot();
+    const assignment = session.scheduledMatchId
+      ? findAssignmentForRoom(snapshot, roomId, session.scheduledMatchId)
+      : undefined;
+    if (!assignment || assignment.status !== 'playing') {
+      sendError(res, 409, 'That session is not the current playing assignment for this room.');
+      return;
+    }
+    this.host.onRoomPlayerAdd?.({
+      roomId,
+      sessionId,
+      teamName,
+      playerName,
+      tournamentKey: session.tournamentKey,
+    });
+    sendJson(res, 202, { requested: true });
   }
 
   /**

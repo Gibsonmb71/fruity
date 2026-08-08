@@ -19,8 +19,10 @@ import {
   IRoomTeam,
   ITournamentSnapshot,
   RoomBlockedReason,
+  RoomScorerKind,
 } from './ServerTypes';
 import { selectRoomAssignments } from '../../shared/RoomAssignmentState';
+import { scorekeeperFormatProblems } from '../../renderer/Services/ScorekeeperFormat';
 
 /** Why a room lookup failed */
 export enum RoomAuthError {
@@ -144,7 +146,9 @@ export function checkCanStart(
   snapshot: ITournamentSnapshot,
   room: IRoomDescriptor,
   assignment: IAssignmentDescriptor,
+  scorer?: RoomScorerKind,
 ): IStartBlock | null {
+  const selectedScorer = scorer ?? (snapshot.scoringFormat !== null ? 'first-party' : 'legacy');
   if (!room.enabled) {
     return {
       reason: RoomBlockedReason.RoomDisabled,
@@ -161,10 +165,18 @@ export function checkCanStart(
     };
   }
 
-  if (snapshot.gameFormat === null) {
+  const firstPartyUnusable =
+    snapshot.scoringFormat === null || scorekeeperFormatProblems(snapshot.scoringFormat).length > 0;
+  if (
+    (selectedScorer === 'legacy' && snapshot.gameFormat === null) ||
+    (selectedScorer === 'first-party' && firstPartyUnusable)
+  ) {
     return {
       reason: RoomBlockedReason.RulesUnusable,
-      message: "This tournament's scoring rules cannot be used for room scorekeeping.",
+      message:
+        selectedScorer === 'legacy'
+          ? "This tournament's scoring rules cannot be used by the legacy scorer."
+          : "This tournament's scoring rules cannot be used by the room scorer.",
     };
   }
 

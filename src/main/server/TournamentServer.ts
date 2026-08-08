@@ -14,6 +14,7 @@ import {
   IMatchSubmission,
   INetworkAddress,
   IRoomPresence,
+  IRoomPlayerAddRequest,
   IServerStatus,
   ISessionSummary,
   ISubmissionVerdict,
@@ -65,6 +66,8 @@ export interface ITournamentServerOptions {
   onSessionStarted?: (sessionId: string, scheduledMatchId: string, tournamentKey?: string) => void;
   /** Called when a room creates or closes an operational help request. */
   onHelpRequestsChanged?: (requests: IHelpRequest[]) => void;
+  /** Called after the HTTP layer authenticates and scopes a room roster addition. */
+  onRoomPlayerAdd?: (request: IRoomPlayerAddRequest) => void;
   /** Small versioned JSON file in app-data used to restore active room sessions after a restart. */
   recoveryFilePath?: string;
 }
@@ -143,6 +146,7 @@ export default class TournamentServer {
       getHelpRequests: () => this.getHelpRequests(),
       createHelpRequest: (roomId, request) => this.createHelpRequest(roomId, request),
       updateHelpRequest: (id, status, note) => this.updateHelpRequest(id, status, note),
+      onRoomPlayerAdd: (request) => this.options.onRoomPlayerAdd?.(request),
       serveStatic: (req, res, pathname) => this.serveStatic(req, res, pathname),
     };
     this.router = new Router(host);

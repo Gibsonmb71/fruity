@@ -8,8 +8,9 @@ import { describe, expect, test } from 'vitest';
 import scoringRulesToScorekeeperFormat, { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import AnswerType from '../renderer/DataModel/AnswerType';
-import deriveGame, { IGameSetup } from '../room/scoring/deriveGame';
+import deriveGame, { IGameSetup, lineupChangeEffectiveQuestion } from '../room/scoring/deriveGame';
 import { ScoreEvent } from '../room/scoring/ScoreEvents';
+import { event } from './RoomScoreEventFixtures';
 
 const setup: IGameSetup = {
   left: { name: 'Ninety Six', players: ['Sarah', 'James', 'Alex', 'Taylor'] },
@@ -29,14 +30,11 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
   return found.index;
 }
 
-let nextId = 0;
 function buzz(questionNumber: number, team: 'left' | 'right', playerName: string, answerTypeIndex: number): ScoreEvent {
-  nextId += 1;
-  return { id: `e${nextId}`, type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex };
+  return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex });
 }
 function dead(questionNumber: number): ScoreEvent {
-  nextId += 1;
-  return { id: `e${nextId}`, type: 'tossup-dead', questionNumber };
+  return event({ type: 'tossup-dead', questionNumber });
 }
 function bonus(
   questionNumber: number,
@@ -44,8 +42,7 @@ function bonus(
   controlledPoints: number,
   bouncebackPoints?: number,
 ): ScoreEvent {
-  nextId += 1;
-  return { id: `e${nextId}`, type: 'bonus', questionNumber, team, controlledPoints, bouncebackPoints };
+  return event({ type: 'bonus', questionNumber, team, controlledPoints, bouncebackPoints });
 }
 
 /** Play a straightforward converted tossup plus bonus. */
@@ -210,16 +207,14 @@ describe('bonus phase', () => {
 
   test('a bonus given per part totals the parts', () => {
     const format = formatFor();
-    nextId += 1;
     const game = deriveGame(format, setup, [
       buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
-      {
-        id: `e${nextId}`,
+      event({
         type: 'bonus',
         questionNumber: 1,
         team: 'left',
         parts: [{ controlledPoints: 10 }, { controlledPoints: 0 }, { controlledPoints: 10 }],
-      },
+      }),
     ]);
 
     expect(game.left.bonusPoints).toBe(20);
@@ -243,11 +238,9 @@ describe('bouncebacks', () => {
     const format = formatFor((rules) => {
       rules.bonusesBounceBack = true;
     });
-    nextId += 1;
     const game = deriveGame(format, setup, [
       buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
-      {
-        id: `e${nextId}`,
+      event({
         type: 'bonus',
         questionNumber: 1,
         team: 'left',
@@ -256,7 +249,7 @@ describe('bouncebacks', () => {
           { controlledPoints: 0, bouncebackPoints: 10 },
           { controlledPoints: 0, bouncebackPoints: 10 },
         ],
-      },
+      }),
     ]);
 
     expect(game.left.bonusPoints).toBe(10);
@@ -269,10 +262,9 @@ describe('lightning rounds', () => {
     const format = formatFor((rules) => {
       rules.lightningCountPerTeam = 1;
     });
-    nextId += 1;
     const game = deriveGame(format, setup, [
       ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
-      { id: `e${nextId}`, type: 'lightning', questionNumber: 1, team: 'left', points: 60 },
+      event({ type: 'lightning', questionNumber: 1, team: 'left', points: 60 }),
     ]);
 
     expect(game.left.lightningPoints).toBe(60);
@@ -285,8 +277,8 @@ describe('lightning rounds', () => {
       rules.lightningCountPerTeam = 1;
     });
     const game = deriveGame(format, setup, [
-      { id: 'l1', type: 'lightning', questionNumber: 1, team: 'left', points: 60 },
-      { id: 'l2', type: 'lightning', questionNumber: 1, team: 'left', points: 40 },
+      event({ type: 'lightning', questionNumber: 1, team: 'left', points: 60 }),
+      event({ type: 'lightning', questionNumber: 1, team: 'left', points: 40 }),
     ]);
 
     expect(game.left.lightningPoints).toBe(40);
@@ -294,6 +286,19 @@ describe('lightning rounds', () => {
 });
 
 describe('substitutions', () => {
+  test('a selected starting lineup applies to Tossup 1', () => {
+    const format = formatFor((rules) => {
+      rules.maximumPlayersPerTeam = 2;
+    });
+    const game = deriveGame(format, setup, [
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Alex'] }),
+      dead(1),
+    ]);
+
+    expect(game.left.players.find((p) => p.name === 'Alex')!.tossupsHeard).toBe(1);
+    expect(game.left.players.find((p) => p.name === 'Sarah')!.tossupsHeard).toBe(0);
+  });
+
   test('only active players hear a tossup', () => {
     const format = formatFor((rules) => {
       rules.maximumPlayersPerTeam = 2;
@@ -311,7 +316,7 @@ describe('substitutions', () => {
     const game = deriveGame(format, setup, [
       dead(1),
       dead(2),
-      { id: 's1', type: 'substitution', questionNumber: 3, team: 'left', activePlayers: ['Sarah', 'Alex'] },
+      event({ type: 'substitution', questionNumber: 3, team: 'left', activePlayers: ['Sarah', 'Alex'] }),
       dead(3),
       dead(4),
     ]);
@@ -326,12 +331,64 @@ describe('substitutions', () => {
       rules.maximumPlayersPerTeam = 1;
     });
     const game = deriveGame(format, setup, [
-      { id: 's1', type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['James'] },
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['James'] }),
       dead(1),
     ]);
 
     expect(game.left.players.find((p) => p.name === 'James')!.tossupsHeard).toBe(1);
     expect(game.left.players.find((p) => p.name === 'Sarah')!.tossupsHeard).toBe(0);
+  });
+
+  test('a future personnel event updates the upcoming lineup without creating a fake question', () => {
+    const format = formatFor((rules) => {
+      rules.maximumPlayersPerTeam = 1;
+    });
+    const game = deriveGame(format, setup, [
+      dead(5),
+      event({ type: 'substitution', questionNumber: 6, team: 'left', activePlayers: ['Alex'] }),
+    ]);
+
+    expect(game.questions.map((question) => question.questionNumber)).toEqual([5]);
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 6 });
+    expect(game.left.activePlayers).toEqual(['Alex']);
+  });
+
+  test('the safe boundary moves past a tossup after its first buzz and while its bonus is being scored', () => {
+    const format = formatFor();
+    const before = deriveGame(format, setup, []);
+    expect(lineupChangeEffectiveQuestion(before, [])).toBe(1);
+
+    const negEvents = [buzz(1, 'left', 'Sarah', typeIndex(format, -5))];
+    expect(lineupChangeEffectiveQuestion(deriveGame(format, setup, negEvents), negEvents)).toBe(2);
+
+    const bonusEvents = [buzz(1, 'left', 'Sarah', typeIndex(format, 10))];
+    expect(lineupChangeEffectiveQuestion(deriveGame(format, setup, bonusEvents), bonusEvents)).toBe(2);
+  });
+
+  test('moving a lineup boundary recalculates TUH from the corrected tossup', () => {
+    const format = formatFor((rules) => {
+      rules.maximumPlayersPerTeam = 1;
+    });
+    const played = Array.from({ length: 12 }, (_, index) => dead(index + 1));
+    const atEleven = event({ type: 'substitution', questionNumber: 11, team: 'left', activePlayers: ['Alex'] });
+    const corrected = { ...atEleven, questionNumber: 9 };
+
+    expect(
+      deriveGame(format, setup, [...played, atEleven]).left.players.find((p) => p.name === 'Alex')!.tossupsHeard,
+    ).toBe(2);
+    expect(
+      deriveGame(format, setup, [...played, corrected]).left.players.find((p) => p.name === 'Alex')!.tossupsHeard,
+    ).toBe(4);
+  });
+
+  test('a buzz by a benched player is surfaced as a personnel invariant violation', () => {
+    const format = formatFor((rules) => {
+      rules.maximumPlayersPerTeam = 1;
+    });
+    const game = deriveGame(format, setup, [buzz(1, 'left', 'Alex', typeIndex(format, 10))]);
+
+    expect(game.personnelProblems[0]?.message).toContain('Alex was not active');
+    expect(game.questions[0].activePlayers.left).toEqual(['Sarah']);
   });
 });
 
@@ -472,7 +529,7 @@ describe('timed formats', () => {
     const game = deriveGame(format, setup, [
       ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
       dead(2),
-      { id: 'end', type: 'end-regulation', questionNumber: 2 },
+      event({ type: 'end-regulation', questionNumber: 2 }),
     ]);
 
     expect(game.regulationComplete).toBe(true);
@@ -484,7 +541,7 @@ describe('timed formats', () => {
       rules.timed = true;
       rules.minimumOvertimeQuestionCount = 1;
     });
-    const game = deriveGame(format, setup, [dead(1), { id: 'end', type: 'end-regulation', questionNumber: 1 }]);
+    const game = deriveGame(format, setup, [dead(1), event({ type: 'end-regulation', questionNumber: 1 })]);
 
     expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 2, period: 'overtime' });
   });
@@ -493,7 +550,7 @@ describe('timed formats', () => {
 describe('forfeits', () => {
   test('a single forfeit ends the game', () => {
     const format = formatFor();
-    const game = deriveGame(format, setup, [{ id: 'f', type: 'forfeit', questionNumber: 1, teams: ['right'] }]);
+    const game = deriveGame(format, setup, [event({ type: 'forfeit', questionNumber: 1, teams: ['right'] })]);
 
     expect(game.right.forfeited).toBe(true);
     expect(game.left.forfeited).toBe(false);
@@ -502,7 +559,7 @@ describe('forfeits', () => {
 
   test('a double forfeit marks both teams', () => {
     const format = formatFor();
-    const game = deriveGame(format, setup, [{ id: 'f', type: 'forfeit', questionNumber: 1, teams: ['left', 'right'] }]);
+    const game = deriveGame(format, setup, [event({ type: 'forfeit', questionNumber: 1, teams: ['left', 'right'] })]);
 
     expect(game.left.forfeited).toBe(true);
     expect(game.right.forfeited).toBe(true);
@@ -513,7 +570,7 @@ describe('forfeits', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, [
       buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
-      { id: 'f', type: 'forfeit', questionNumber: 1, teams: ['right'] },
+      event({ type: 'forfeit', questionNumber: 1, teams: ['right'] }),
     ]);
 
     expect(game.phase).toEqual({ kind: 'complete', reason: 'forfeit' });
@@ -542,12 +599,12 @@ describe('undo and correction', () => {
     expect(deriveGame(format, setup, events).left.points).toBe(75);
 
     // Sarah's 15 was really a 10, and the bonus was 0.
-    const corrected = events.map((event) => {
-      if (event.type === 'tossup-buzz' && event.questionNumber === 1) {
-        return { ...event, answerTypeIndex: typeIndex(format, 10) };
+    const corrected = events.map((scoreEvent) => {
+      if (scoreEvent.type === 'tossup-buzz' && scoreEvent.questionNumber === 1) {
+        return { ...scoreEvent, answerTypeIndex: typeIndex(format, 10) };
       }
-      if (event.type === 'bonus' && event.questionNumber === 1) return { ...event, controlledPoints: 0 };
-      return event;
+      if (scoreEvent.type === 'bonus' && scoreEvent.questionNumber === 1) return { ...scoreEvent, controlledPoints: 0 };
+      return scoreEvent;
     });
 
     const game = deriveGame(format, setup, corrected);
@@ -560,7 +617,7 @@ describe('undo and correction', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, [
       ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
-      { id: 'adj', type: 'adjustment', questionNumber: 1, team: 'left', points: 5, reason: 'Agreed with control' },
+      event({ type: 'adjustment', questionNumber: 1, team: 'left', points: 5, reason: 'Agreed with control' }),
     ]);
 
     expect(game.left.adjustmentPoints).toBe(5);
@@ -573,8 +630,8 @@ describe('notes', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, [
       dead(1),
-      { id: 'n1', type: 'note', questionNumber: 12, text: 'possible protest', flagged: true },
-      { id: 'n2', type: 'note', questionNumber: 1, text: 'late start' },
+      event({ type: 'note', questionNumber: 12, text: 'possible protest', flagged: true }),
+      event({ type: 'note', questionNumber: 1, text: 'late start' }),
     ]);
 
     expect(game.notes).toEqual([
@@ -633,7 +690,7 @@ describe('formats MODAQ refuses', () => {
     const game = deriveGame(format, setup, [
       buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
       bonus(1, 'left', 30, 10),
-      { id: 'lt', type: 'lightning', questionNumber: 1, team: 'right', points: 45 },
+      event({ type: 'lightning', questionNumber: 1, team: 'right', points: 45 }),
     ]);
 
     expect(game.left.points).toBe(40);

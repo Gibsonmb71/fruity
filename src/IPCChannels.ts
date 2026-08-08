@@ -83,6 +83,8 @@ export enum IpcMainToRend {
   TournamentServerSessionStarted = 'TournamentServerSessionStarted',
   /** A room browser's operational help-request view changed */
   TournamentServerHelpRequestsChanged = 'TournamentServerHelpRequestsChanged',
+  /** A room requested a narrowly scoped authoritative roster addition. */
+  TournamentServerRoomPlayerAddRequested = 'TournamentServerRoomPlayerAddRequested',
   /** The redundant .yft backup succeeded or failed, so the Control page can show its health */
   SecondaryBackupHealthChanged = 'SecondaryBackupHealthChanged',
 }
@@ -152,6 +154,7 @@ export const rendererListenableEvents = [
   IpcMainToRend.TournamentServerSessionsChanged,
   IpcMainToRend.TournamentServerSessionStarted,
   IpcMainToRend.TournamentServerHelpRequestsChanged,
+  IpcMainToRend.TournamentServerRoomPlayerAddRequested,
   IpcMainToRend.SecondaryBackupHealthChanged,
   IpcBidirectional.LoadBackup,
   IpcBidirectional.ExportQbjFile,

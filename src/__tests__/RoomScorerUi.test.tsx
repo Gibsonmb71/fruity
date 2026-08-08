@@ -59,10 +59,43 @@ function renderScorer(
   return { onSubmit: submit };
 }
 
-/** The scoring buttons on one player's row. */
+/**
+ * The scoring buttons on one player's row.
+ *
+ * Matched against the roster specifically: a player's name also appears in the activity rail once
+ * they have buzzed, and a bare text query would find both.
+ */
 function buttonsFor(playerName: string): HTMLElement[] {
-  const row = screen.getByText(playerName).closest('li') as HTMLElement;
-  return within(row).getAllByRole('button');
+  const row = Array.from(document.querySelectorAll('.scorer-player')).find(
+    (candidate) => candidate.querySelector('.scorer-player-name')?.textContent === playerName,
+  );
+  if (!row) throw new Error(`No roster row for ${playerName}`);
+  return within(row as HTMLElement).getAllByRole('button');
+}
+
+/**
+ * Press a control wherever it currently lives.
+ *
+ * The footer and the Game menu trade controls between them as the layout settles, and a test that
+ * hard-codes which one holds "Players" is asserting on a layout decision rather than on behaviour.
+ * This looks on the footer first, then opens the menu.
+ */
+function pressControl(name: string | RegExp) {
+  const onFooter = screen.queryByRole('button', { name });
+  if (onFooter) {
+    fireEvent.click(onFooter);
+    return;
+  }
+  fireEvent.click(screen.getByText('Game'));
+  fireEvent.click(screen.getByText(name));
+}
+
+/** Every control the screen offers, footer and Game menu together. */
+function availableControls(): string[] {
+  fireEvent.click(screen.getByText('Game'));
+  return Array.from(document.querySelectorAll('.scorer-footer button, .scorer-menu-item')).map(
+    (button) => button.textContent ?? '',
+  );
 }
 
 function scoreOf(teamName: string): string {
@@ -95,8 +128,24 @@ function installLocalStorage() {
   });
 }
 
+/** jsdom exposes `<dialog>` but not the modal methods browsers provide. */
+function installDialogMethods() {
+  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.open = true;
+    };
+  }
+  if (typeof HTMLDialogElement.prototype.close !== 'function') {
+    HTMLDialogElement.prototype.close = function close() {
+      this.open = false;
+      this.dispatchEvent(new Event('close'));
+    };
+  }
+}
+
 beforeEach(() => {
   installLocalStorage();
+  installDialogMethods();
 });
 
 afterEach(() => {
@@ -281,7 +330,7 @@ describe('no buzz', () => {
     fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
 
     expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
-    expect(screen.getByText('No buzz', { selector: '.scorer-rail-line' })).toBeTruthy();
+    expect(screen.getByText('No buzz', { selector: '.scorer-rail-what' })).toBeTruthy();
   });
 });
 
@@ -301,6 +350,33 @@ describe('undo', () => {
 
     expect((screen.getByText('Undo') as HTMLButtonElement).disabled).toBe(true);
   });
+
+  test('redo becomes available after undo and restores the action', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
+    fireEvent.click(screen.getByText('Undo'));
+
+    const redo = screen.getByText('Redo') as HTMLButtonElement;
+    expect(redo.disabled).toBe(false);
+    fireEvent.click(redo);
+
+    expect(scoreOf('Ninety Six')).toBe('15');
+  });
+
+  test('Ctrl+Z in a scoring input is left to the input', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.pointsPerBonusPart = undefined;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    const input = screen.getByLabelText('Bonus points');
+
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+
+    expect(scoreOf('Ninety Six')).toBe('10');
+    expect(screen.getByLabelText('Bonus points')).toBeTruthy();
+  });
 });
 
 describe('the recent rail', () => {
@@ -313,20 +389,45 @@ describe('the recent rail', () => {
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
 
     const rail = screen.getByLabelText('Recent activity');
-    expect(within(rail).getByText('Sarah Mitchell +15')).toBeTruthy();
-    expect(within(rail).getByText('Ninety Six bonus +20')).toBeTruthy();
+    // What happened and what it was worth are separate cells, so the points can be set in their own
+    // right-aligned column. Assert on the pairing rather than on one run of text.
+    const lines = Array.from(rail.querySelectorAll('.scorer-rail-line')).map((line) => [
+      line.querySelector('.scorer-rail-what')?.textContent,
+      line.querySelector('.scorer-rail-points')?.textContent,
+    ]);
+
+    expect(lines).toEqual([
+      ['Sarah Mitchell', '+15'],
+      ['Ninety Six bonus', '+20'],
+    ]);
+  });
+
+  test('a dead tossup reads as one line with nothing in the points column', () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+
+    const rail = screen.getByLabelText('Recent activity');
+    const line = rail.querySelector('.scorer-rail-line');
+
+    expect(line?.querySelector('.scorer-rail-what')?.textContent).toBe('No buzz');
+    expect(line?.querySelector('.scorer-rail-points')?.textContent).toBe('');
   });
 });
 
 describe('the game menu', () => {
   test('keeps operational tools behind the single Game menu', () => {
     renderScorer(formatFor());
-    fireEvent.click(screen.getByText('Game'));
+    const controls = availableControls();
 
-    expect(screen.getByText('Issue / tournament control')).toBeTruthy();
-    expect(screen.getByText('Full scoresheet review')).toBeTruthy();
-    expect(screen.getByText('Download QBJ backup')).toBeTruthy();
-    expect(screen.getByText('Recover from QBJ')).toBeTruthy();
+    // Matched loosely: what matters is that each tool is reachable from the scoring screen without
+    // hunting, not which of the footer or the menu is holding it today.
+    for (const tool of [/players/i, /issue/i, /scoresheet review/i, /download qbj/i, /recover from qbj/i]) {
+      expect(
+        controls.some((control) => tool.test(control)),
+        `${tool} should be reachable`,
+      ).toBe(true);
+    }
   });
 
   test('lightning is offered only when the format has lightning rounds', () => {
@@ -369,8 +470,7 @@ describe('the game menu', () => {
         rules.maximumPlayersPerTeam = 1;
       }),
     );
-    fireEvent.click(screen.getByText('Game'));
-    fireEvent.click(screen.getByText('Players'));
+    pressControl('Players');
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
     fireEvent.click(within(lineup).getByLabelText(/Sarah Mitchell/));
@@ -381,11 +481,22 @@ describe('the game menu', () => {
     expect(screen.getByText('James Robinson')).toBeTruthy();
   });
 
+  test('a lineup change after tossup activity is shown as effective on the next tossup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // neg starts Tossup 1
+    pressControl('Players');
+
+    expect(screen.getByText('Changes apply starting Tossup 2.')).toBeTruthy();
+  });
+
   test('a player can be added during a game and the roster change is sent to control', async () => {
     const requestControl = vi.fn().mockResolvedValue(undefined);
     renderScorer(formatFor(), undefined, requestControl);
-    fireEvent.click(screen.getByText('Game'));
-    fireEvent.click(screen.getByText('Players'));
+    pressControl('Players');
 
     fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
       target: { value: 'Taylor Brooks' },
@@ -400,8 +511,7 @@ describe('the game menu', () => {
   test('reviewing the scoresheet can correct an earlier ruling', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
-    fireEvent.click(screen.getByText('Game'));
-    fireEvent.click(screen.getByText('Full scoresheet review'));
+    pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit'));
 
     fireEvent.change(screen.getByLabelText('Ruling'), { target: { value: '0' } }); // +15
@@ -410,11 +520,52 @@ describe('the game menu', () => {
     expect(scoreOf('Ninety Six')).toBe('15');
   });
 
+  test('buzz correction uses the players who were active for that tossup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit'));
+
+    const player = screen.getByLabelText('Player') as HTMLSelectElement;
+    expect(Array.from(player.options, (option) => option.value)).toEqual(['Sarah Mitchell']);
+    expect(Array.from(player.options, (option) => option.value)).not.toContain('James Robinson');
+  });
+
+  test('an invalid bonus correction stays open with an explanation', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getAllByText('Edit')[1]);
+
+    fireEvent.change(screen.getByLabelText('Points'), { target: { value: '40' } });
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
+    expect(screen.getByText('Save correction')).toBeTruthy();
+  });
+
+  test('removing a scoresheet event requires confirmation', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    pressControl('Full scoresheet review');
+
+    fireEvent.click(screen.getByText('Remove'));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('No buzz', { selector: '.scorer-review-event > span' })).toBeTruthy();
+    confirm.mockRestore();
+  });
+
   test('a protest is saved and can request tournament control', async () => {
     const requestControl = vi.fn().mockResolvedValue(undefined);
     renderScorer(formatFor(), undefined, requestControl);
-    fireEvent.click(screen.getByText('Game'));
-    fireEvent.click(screen.getByText('Issue / tournament control'));
+    pressControl(/issue/i);
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The ruling was disputed.' } });
     fireEvent.click(screen.getByText('Save and request control'));
 
@@ -453,7 +604,7 @@ describe('finishing', () => {
     expect(onSubmit.mock.calls[0][0]).toHaveProperty('match_teams');
   });
 
-  test('a tie is called out rather than quietly submitted', () => {
+  test('a tied regulation goes to overtime rather than ending', () => {
     renderScorer(formatFor());
     for (let question = 1; question <= 20; question += 1) {
       fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
@@ -461,6 +612,16 @@ describe('finishing', () => {
 
     // Still tied, so the game has not ended: it has gone to overtime.
     expect(screen.getByText(/Overtime tossup 1/)).toBeTruthy();
+  });
+
+  test('a tied game is called out without offering submission', () => {
+    renderScorer(formatFor());
+    for (let question = 1; question <= 20; question += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    }
+
+    expect(screen.getByText('This game is a tie.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Submit result' })).toBeNull();
   });
 });
 

@@ -5,10 +5,12 @@ import Tournament, { IYftFileTournament, NullTournament } from './DataModel/Tour
 import { dateFieldChanged, getFileNameFromPath, textFieldChanged, versionLt } from './Utils/GeneralUtils';
 import { NullObjects } from './Utils/UtilTypes';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../IPCChannels';
-import { IIndeterminateQbj, IQbjWholeFile, IRefTargetDict } from './DataModel/Interfaces';
+import { IIndeterminateQbj, IQbjWholeFile, IRefTargetDict, ValidationStatuses } from './DataModel/Interfaces';
 import AnswerType from './DataModel/AnswerType';
 import StandardSchedule from './DataModel/StandardSchedule';
 import { Team } from './DataModel/Team';
+import { Player } from './DataModel/Player';
+import { IRoomPlayerAddRequest } from '../main/server/ServerTypes';
 import Registration, { IQbjRegistration } from './DataModel/Registration';
 import { TempTeamManager } from './Modal Managers/TempTeamManager';
 import { GenericModalManager } from './Modal Managers/GenericModalManager';
@@ -167,6 +169,7 @@ export class TournamentManager {
     this.tournamentServerService = new TournamentServerService(this.tournament);
     this.tournamentServerService.onMatchAccepted = () => this.onRemoteMatchAccepted();
     this.tournamentServerService.onScheduleChanged = () => this.markTournamentDataChanged();
+    this.tournamentServerService.onRoomPlayerAdd = (request) => this.addPlayerFromRoom(request);
     this.addIpcListeners();
 
     this.genericModalManager = new GenericModalManager();
@@ -2086,6 +2089,41 @@ export class TournamentManager {
    */
   markTournamentDataChanged() {
     this.onDataChanged();
+  }
+
+  /** Append one room-added player without replacing the Team or any existing Player identity. */
+  addPlayerFromRoom(request: IRoomPlayerAddRequest): { ok: true; added: boolean } | { ok: false; reason: string } {
+    if (request.tournamentKey && request.tournamentKey !== this.tournament.operationalId) {
+      return { ok: false, reason: 'The roster request belongs to a different tournament.' };
+    }
+    const team = this.tournament.getListOfAllTeams().find((candidate) => candidate.name === request.teamName);
+    if (!team) return { ok: false, reason: 'That team is not part of the open tournament.' };
+    const name = request.playerName.trim();
+    const duplicate = team.players.find((player) => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (duplicate) return { ok: true, added: false };
+    if (team.players.length >= Team.maxPlayers) {
+      return { ok: false, reason: `A team cannot have more than ${Team.maxPlayers} players.` };
+    }
+    const player = new Player(name);
+    player.validateName(true);
+    if (player.nameValidation.status === ValidationStatuses.Error) {
+      return { ok: false, reason: player.nameValidation.message };
+    }
+
+    team.players.push(player);
+    team.validatePlayerList();
+    team.validatePlayerUniqueness();
+    const errors = team.getErrorMessages();
+    if (errors.length > 0) {
+      team.players.pop();
+      team.validatePlayerList();
+      team.validatePlayerUniqueness();
+      return { ok: false, reason: errors.join(' ') };
+    }
+
+    this.tournamentServerService.revalidatePendingSubmissionsForTeam(team.name);
+    this.onDataChanged();
+    return { ok: true, added: true };
   }
 
   private markFileDirty() {

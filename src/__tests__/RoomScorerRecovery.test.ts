@@ -43,6 +43,26 @@ describe('first-party QBJ recovery layer', () => {
 
     expect(readScorerRecovery(qbj, setup)).toBeNull();
   });
+
+  test.each([
+    ['a bonus without a team', { id: 'bad', type: 'bonus', questionNumber: 1, controlledPoints: 20 }],
+    ['a bonus without numeric points', { id: 'bad', type: 'bonus', questionNumber: 1, team: 'left' }],
+    ['lightning without a team', { id: 'bad', type: 'lightning', questionNumber: 1, points: 40 }],
+    ['an adjustment without numeric points', { id: 'bad', type: 'adjustment', questionNumber: 1, team: 'left' }],
+    [
+      'an empty substitution lineup',
+      { id: 'bad', type: 'substitution', questionNumber: 1, team: 'left', activePlayers: [] },
+    ],
+    [
+      'a substitution lineup with a blank name',
+      { id: 'bad', type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', ' '] },
+    ],
+  ])('refuses %s', (_description, malformedEvent) => {
+    const qbj = attachScorerRecovery({}, setup, events);
+    (qbj as any)[scorerRecoveryKey].events = [malformedEvent];
+
+    expect(readScorerRecovery(qbj, setup)).toBeNull();
+  });
 });
 
 describe('a recovery-bearing payload is still an ordinary QBJ match', () => {

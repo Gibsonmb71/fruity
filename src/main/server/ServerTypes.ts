@@ -8,13 +8,16 @@
  */
 import { ScheduledMatchStatus } from '../../renderer/DataModel/ScheduledMatch';
 import { IModaqGameFormat } from '../../renderer/Services/YellowFruitScoringRulesToModaq';
-import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
+import type { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 
 /** Default port for the local tournament server */
 export const defaultServerPort = 4732;
 
 /** Largest request body the server will accept, in bytes. Room submissions are small JSON. */
 export const maxRequestBodyBytes = 512 * 1024;
+
+/** Mirrors Player.nameMaxLength without importing renderer model objects into the main process. */
+export const roomPlayerNameMaxLength = 200;
 
 /** Header a room client uses to prove it owns the session it's writing to */
 export const sessionTokenHeader = 'x-yf-session-token';
@@ -47,6 +50,15 @@ export const staleRoomThresholdMs = 60 * 1000;
 /** One player on a team roster, as a room needs it */
 export interface IRoomPlayer {
   name: string;
+}
+
+/** Narrow, authenticated request forwarded from a playing room to the authoritative renderer. */
+export interface IRoomPlayerAddRequest {
+  roomId: string;
+  sessionId: string;
+  teamName: string;
+  playerName: string;
+  tournamentKey?: string;
 }
 
 /** One team a room is allowed to pick */
@@ -289,10 +301,13 @@ export interface ISessionStateResponse {
 }
 
 /** Request body for creating a session */
+export type RoomScorerKind = 'first-party' | 'legacy';
+
 export interface ICreateSessionRequest {
   roundNumber: number;
   leftTeam: string;
   rightTeam: string;
+  scorer?: RoomScorerKind;
 }
 
 // #endregion
@@ -409,6 +424,7 @@ export interface ISessionResumeInfo {
 export interface IStartAssignedMatchRequest {
   /** Which assignment the room believes it is starting, so a stale page can't start the wrong game */
   scheduledMatchId: string;
+  scorer?: RoomScorerKind;
 }
 
 /** A running score line derived from a QBJ snapshot, for the desktop live dashboard */
@@ -467,6 +483,7 @@ export interface IRoomPresenceUpdateRequest {
   deviceId?: string;
   operatorName?: string;
   ready?: boolean;
+  scorer?: RoomScorerKind;
 }
 
 export type HelpRequestCategory =

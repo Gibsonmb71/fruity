@@ -421,16 +421,18 @@ describe('session creation', () => {
     expect(res.status).toBe(400);
   });
 
-  test('rooms cannot be started when the scoring rules are unusable in MODAQ', async () => {
+  test('MODAQ-incompatible rules start in first-party mode and remain blocked in legacy mode', async () => {
     server.setTournamentSnapshot({
       ...makeSnapshot(),
       gameFormat: null,
       gameFormatErrors: ['Lightning rounds are not supported.'],
     });
-    const { res, body } = await createSession();
+    const firstParty = await createSession();
+    const legacy = await createSession({ scorer: 'legacy' });
 
-    expect(res.status).toBe(400);
-    expect(body.error).toContain('cannot be used');
+    expect(firstParty.res.status).toBe(201);
+    expect(legacy.res.status).toBe(400);
+    expect(legacy.body.error).toContain('cannot be used');
   });
 
   test('GET is not allowed on the sessions collection', async () => {

@@ -96,7 +96,12 @@ export default function LiveDisplaySettingsCard() {
         </div>
         <div className="rooms-live-settings-body">
           <div className="rooms-live-setting-column">
-            <Typography variant="subtitle2">Slides enabled</Typography>
+            <Typography variant="subtitle2">{settings.enabled ? 'Slides enabled' : 'Display currently off'}</Typography>
+            {!settings.enabled && (
+              <Typography variant="body2" color="text.secondary">
+                These settings are saved for when you turn the live display on.
+              </Typography>
+            )}
             <Stack spacing={0.25}>
               <SlideCheckbox
                 label="Team standings"

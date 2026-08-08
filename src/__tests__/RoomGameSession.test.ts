@@ -127,6 +127,29 @@ describe('what is refused', () => {
     expect(loadGame('session-a', now, storage)).toBeNull();
   });
 
+  test('a saved game with an individually malformed event is refused', () => {
+    const storage = memoryStorage({
+      'yellowfruit.room.game.v1.session-a': JSON.stringify({
+        version: gameSessionVersion,
+        gameKey: 'session-a',
+        setup,
+        events: [
+          {
+            id: 'bad-event',
+            type: 'tossup-buzz',
+            questionNumber: 'one',
+            team: 'left',
+            playerName: 'Sarah',
+            answerTypeIndex: 0,
+          },
+        ],
+        updatedAt: now.toISOString(),
+      }),
+    });
+
+    expect(loadGame('session-a', now, storage)).toBeNull();
+  });
+
   test('an empty key saves nothing, rather than sharing one bucket between games', () => {
     const storage = memoryStorage();
 

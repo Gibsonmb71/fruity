@@ -13,6 +13,7 @@ import MatchImportService from '../renderer/Services/MatchImportService';
 import { ImportResultStatus } from '../renderer/DataModel/MatchImportResult';
 import Tournament from '../renderer/DataModel/Tournament';
 import { Match } from '../renderer/DataModel/Match';
+import { Player } from '../renderer/DataModel/Player';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import AnswerType from '../renderer/DataModel/AnswerType';
 import scoringRulesToScorekeeperFormat, { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
@@ -20,6 +21,7 @@ import deriveGame, { IGameSetup } from '../room/scoring/deriveGame';
 import { ScoreEvent } from '../room/scoring/ScoreEvents';
 import toQbjMatch from '../room/scoring/toQbjMatch';
 import { makeTestTournament, testTeamNames } from './TestFixtures';
+import { event } from './RoomScoreEventFixtures';
 
 const [leftTeamName, rightTeamName] = testTeamNames;
 
@@ -48,17 +50,6 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
   return found.index;
 }
 
-let nextId = 0;
-/**
- * Distributive, so each member of the union keeps its own fields. A bare `Omit<ScoreEvent, 'id'>`
- * collapses the union to the properties they all share, which rejects every real event.
- */
-type EventInput<T = ScoreEvent> = T extends ScoreEvent ? Omit<T, 'id'> : never;
-
-function event(partial: EventInput): ScoreEvent {
-  nextId += 1;
-  return { ...partial, id: `e${nextId}` } as ScoreEvent;
-}
 function buzz(questionNumber: number, team: 'left' | 'right', playerName: string, answerTypeIndex: number) {
   return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex });
 }
@@ -369,6 +360,50 @@ describe('overtime', () => {
 });
 
 describe('substitutions', () => {
+  test('substitution and a room-added player preserve exact TUH and answer counts through QBJ import', () => {
+    const { tournament, format } = tournamentAndFormat((rules) => {
+      rules.maximumPlayersPerTeam = 1;
+    });
+    const addedName = `${leftTeamName} Taylor Brown`;
+    tournament
+      .getListOfAllTeams()
+      .find((team) => team.name === leftTeamName)!
+      .players.push(new Player(addedName));
+    const events: ScoreEvent[] = [];
+    for (let question = 1; question <= 20; question += 1) {
+      if (question === 11) {
+        events.push(
+          event({
+            type: 'substitution',
+            questionNumber: 11,
+            team: 'left',
+            activePlayers: [`${leftTeamName} Player 2`],
+          }),
+        );
+      }
+      if (question === 15) {
+        events.push(
+          event({ type: 'roster-add', questionNumber: 15, team: 'left', playerName: addedName }),
+          event({ type: 'substitution', questionNumber: 15, team: 'left', activePlayers: [addedName] }),
+        );
+      }
+      if (question === 12) {
+        events.push(buzz(12, 'left', `${leftTeamName} Player 2`, typeIndex(format, 10)), bonus(12, 'left', 20));
+      } else events.push(dead(question));
+    }
+
+    const { match, messages } = roundTrip(tournament, format, events);
+    expect(messages).toEqual([]);
+    const byName = new Map(match.leftTeam.matchPlayers.map((matchPlayer) => [matchPlayer.player.name, matchPlayer]));
+    expect(byName.get(`${leftTeamName} Player 1`)?.tossupsHeard).toBe(10);
+    expect(byName.get(`${leftTeamName} Player 2`)?.tossupsHeard).toBe(4);
+    expect(byName.get(addedName)?.tossupsHeard).toBe(6);
+    expect(
+      byName.get(`${leftTeamName} Player 2`)?.answerCounts.find((count) => count.answerType.value === 10)?.number,
+    ).toBe(1);
+    expect(match.leftTeam.points).toBe(30);
+  });
+
   test('tossups heard are split between the players who actually played', () => {
     const { tournament, format } = tournamentAndFormat((rules) => {
       rules.maximumPlayersPerTeam = 2;

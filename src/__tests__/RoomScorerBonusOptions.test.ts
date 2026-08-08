@@ -116,6 +116,17 @@ describe('bouncebacks', () => {
 
     expect(bouncebackOptions(bonus, 10)).toEqual([0, 5, 10]);
   });
+
+  test('the exact remainder is offered when the step does not land on it', () => {
+    const bonus = bonusFor((rules) => {
+      rules.bonusesBounceBack = true;
+      rules.pointsPerBonusPart = undefined;
+      rules.bonusDivisor = 5;
+      rules.maximumBonusScore = 30;
+    });
+
+    expect(bouncebackOptions(bonus, 12)).toEqual([0, 5, 10, 15, 18]);
+  });
 });
 
 describe('validating a typed bonus total', () => {
