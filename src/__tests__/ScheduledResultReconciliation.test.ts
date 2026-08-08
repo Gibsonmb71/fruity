@@ -34,6 +34,10 @@ function tournamentWithSchedule(): Tournament {
   return tournament;
 }
 
+function transitionForTest(scheduled: ScheduledMatch, next: ScheduledMatchStatus) {
+  expect(transitionScheduledMatch(scheduled, next).ok).toBe(true);
+}
+
 /** A well-formed MODAQ payload between any two of the test teams. */
 function qbjBetween(left: string, right: string) {
   const line = (name: string, bonusPoints: number, tens: number) => ({
@@ -203,7 +207,7 @@ describe('finding the game a file belongs to', () => {
 
   test('an interrupted game is recognized as interrupted', () => {
     const tournament = tournamentWithSchedule();
-    transitionScheduledMatch(tournament.scheduledMatches[0], ScheduledMatchStatus.Playing);
+    transitionForTest(tournament.scheduledMatches[0], ScheduledMatchStatus.Playing);
 
     const outcome = suggestScheduledMatchForImport(tournament, importOneFile(tournament, teamA, teamB));
 
@@ -241,7 +245,7 @@ describe('recording a file as the scheduled result', () => {
 
   test('resolves a game that was interrupted mid-play, with no session involved', () => {
     const tournament = tournamentWithSchedule();
-    transitionScheduledMatch(tournament.scheduledMatches[0], ScheduledMatchStatus.Playing);
+    transitionForTest(tournament.scheduledMatches[0], ScheduledMatchStatus.Playing);
     const result = importOneFile(tournament, teamA, teamB);
 
     expect(commitScheduledResult(tournament, result, 'sched-a').ok).toBe(true);
@@ -251,8 +255,8 @@ describe('recording a file as the scheduled result', () => {
   test('resolves a game left Submitted by a server that never came back', () => {
     const tournament = tournamentWithSchedule();
     const [scheduled] = tournament.scheduledMatches;
-    transitionScheduledMatch(scheduled, ScheduledMatchStatus.Playing);
-    transitionScheduledMatch(scheduled, ScheduledMatchStatus.Submitted);
+    transitionForTest(scheduled, ScheduledMatchStatus.Playing);
+    transitionForTest(scheduled, ScheduledMatchStatus.Submitted);
     const result = importOneFile(tournament, teamA, teamB);
 
     expect(commitScheduledResult(tournament, result, 'sched-a').ok).toBe(true);
@@ -262,8 +266,8 @@ describe('recording a file as the scheduled result', () => {
   test('resolves a game marked NeedsAttention', () => {
     const tournament = tournamentWithSchedule();
     const [scheduled] = tournament.scheduledMatches;
-    transitionScheduledMatch(scheduled, ScheduledMatchStatus.Playing);
-    transitionScheduledMatch(scheduled, ScheduledMatchStatus.NeedsAttention);
+    transitionForTest(scheduled, ScheduledMatchStatus.Playing);
+    transitionForTest(scheduled, ScheduledMatchStatus.NeedsAttention);
     const result = importOneFile(tournament, teamA, teamB);
 
     expect(commitScheduledResult(tournament, result, 'sched-a').ok).toBe(true);
@@ -381,6 +385,39 @@ describe('recording a file as the scheduled result', () => {
     expect(committed.ok).toBe(false);
     expect(scheduled.status).toBe(ScheduledMatchStatus.NeedsAttention);
     expect(scheduled.resultMatchId).toBeUndefined();
+    expect(officialMatches(tournament)).toHaveLength(0);
+  });
+
+  test('rolls back scheduled and match state when acceptance fails after submission', () => {
+    const tournament = tournamentWithSchedule();
+    const [scheduled] = tournament.scheduledMatches;
+    const result = importOneFile(tournament, teamA, teamB);
+    const match = result.match!;
+    const originalImportedFile = 'before-import.qbj';
+    match.importedFile = originalImportedFile;
+    scheduled.roomNameAtPlay = 'Original room';
+
+    // Fault-inject exactly between advanceToSubmitted and the Accepted transition. Assigning the
+    // result link normally happens there; this setter changes the status so Accepted is refused.
+    let resultMatchId: string | undefined;
+    Object.defineProperty(scheduled, 'resultMatchId', {
+      configurable: true,
+      get: () => resultMatchId,
+      set: (value: string | undefined) => {
+        resultMatchId = value;
+        if (value !== undefined && scheduled.status === ScheduledMatchStatus.Submitted) {
+          scheduled.status = ScheduledMatchStatus.NeedsAttention;
+        }
+      },
+    });
+
+    const committed = commitScheduledResult(tournament, result, 'sched-a');
+
+    expect(committed.ok).toBe(false);
+    expect(scheduled.status).toBe(ScheduledMatchStatus.Ready);
+    expect(scheduled.resultMatchId).toBeUndefined();
+    expect(scheduled.roomNameAtPlay).toBe('Original room');
+    expect(match.importedFile).toBe(originalImportedFile);
     expect(officialMatches(tournament)).toHaveLength(0);
   });
 
