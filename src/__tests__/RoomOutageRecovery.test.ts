@@ -336,7 +336,7 @@ describe('emergency scoring from cached tournament data', () => {
 });
 
 describe('the server stays the only authority', () => {
-  test('the local copy is only marked accepted when the server says so', async () => {
+  test('a submitted local copy changes to accepted only when acceptance is applied', async () => {
     const outbox = makeOutbox(createMemoryDriver(true));
     const credentials = await startAssignedGame();
     const enqueued = await outbox.enqueue({
@@ -357,7 +357,8 @@ describe('the server stays the only authority', () => {
 
     server.acceptSession(credentials.sessionId);
     expect(server.sessions.get(credentials.sessionId)?.status).toBe(SessionStatus.Accepted);
-    // The room only follows that verdict when it sees it on the next assignment poll.
+    // This test intentionally exercises the local state-machine step directly; assignment-poll
+    // integration is covered elsewhere.
     await outbox.markAccepted(enqueued.entry.id);
     expect(outbox.find(enqueued.entry.id)?.deliveryState).toBe('accepted');
   });
