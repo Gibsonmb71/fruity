@@ -480,6 +480,17 @@
   overflow-wrap: anywhere;
 }
 
+/*
+  The numeric address, printed under a preferred hostname. Smaller, but present: a scorekeeper whose
+  Chromebook cannot resolve the name has nothing else to try.
+*/
+.rooms-qr-url-fallback {
+  color: var(--ops-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.65rem;
+  overflow-wrap: anywhere;
+}
+
 .rooms-qr-code {
   margin: 4px 0;
   color: var(--ops-text);

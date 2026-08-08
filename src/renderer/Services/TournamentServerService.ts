@@ -7,6 +7,13 @@ import MatchImportService from './MatchImportService';
 import scoringRulesToModaqGameFormat from './YellowFruitScoringRulesToModaq';
 import buildPublicLiveSnapshot, { buildPublicPairingsSnapshot } from './PublicLiveSnapshot';
 import { checkTournamentRoundRelease } from './ScheduleService';
+import {
+  IAdvertisedRoomAddress,
+  IRoomAddressChange,
+  detectRoomAddressChange,
+  normalizePreferredRoomUrl,
+  resolveRoomLinkOrigin,
+} from './RoomAddressAdvertising';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
 import {
   IMatchSubmission,
@@ -67,6 +74,12 @@ export default class TournamentServerService {
 
   private preferredNetworkAddress: string | null = TournamentServerService.readPreferredNetworkAddress();
 
+  /** Optional friendlier origin for room sheets and QR codes. Raw input is retained so host-only values can follow the active port. */
+  private preferredRoomUrlValue: string | null = TournamentServerService.readPreferredRoomUrl();
+
+  /** What the rooms were actually told to open, which is not the same as what we detect now. */
+  private advertisedRoomAddress: IAdvertisedRoomAddress | null = TournamentServerService.readAdvertisedRoomAddress();
+
   /** Port the user wants to use next time they start the server */
   requestedPort: number = defaultServerPort;
 
@@ -125,6 +138,12 @@ export default class TournamentServerService {
 
   private static readonly preferredNetworkAddressStorageKey = 'yellowfruit.preferred-network-address';
 
+  /** Local app preference. Deliberately not written to the .yft, QBJ or SQBS: it is this machine's. */
+  private static readonly preferredRoomUrlStorageKey = 'yellowfruit.preferred-room-url';
+
+  /** The address room devices were actually given, tracked apart from whatever is detected now. */
+  private static readonly advertisedRoomAddressStorageKey = 'yellowfruit.advertised-room-address';
+
   private static readPreferredNetworkAddress(): string | null {
     if (typeof localStorage === 'undefined') return null;
     return localStorage.getItem(TournamentServerService.preferredNetworkAddressStorageKey);
@@ -134,6 +153,28 @@ export default class TournamentServerService {
     if (typeof localStorage === 'undefined') return;
     if (address) localStorage.setItem(TournamentServerService.preferredNetworkAddressStorageKey, address);
     else localStorage.removeItem(TournamentServerService.preferredNetworkAddressStorageKey);
+  }
+
+  private static readPreferredRoomUrl(): string | null {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(TournamentServerService.preferredRoomUrlStorageKey);
+  }
+
+  private static readAdvertisedRoomAddress(): IAdvertisedRoomAddress | null {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(TournamentServerService.advertisedRoomAddressStorageKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<IAdvertisedRoomAddress>;
+      if (typeof parsed?.url !== 'string' || parsed.url === '') return null;
+      return {
+        url: parsed.url,
+        advertisedAt: typeof parsed.advertisedAt === 'string' ? parsed.advertisedAt : new Date().toISOString(),
+        tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
+      };
+    } catch {
+      return null;
+    }
   }
 
   get networkAddresses(): INetworkAddress[] {
@@ -150,6 +191,103 @@ export default class TournamentServerService {
     const valid = address && this.networkAddresses.some((entry) => entry.url === address) ? address : null;
     this.preferredNetworkAddress = valid;
     TournamentServerService.writePreferredNetworkAddress(valid);
+    // Choosing an address is the director saying "this is the one the rooms use", so it is exactly
+    // the moment to record what was advertised.
+    if (valid) this.recordAdvertisedAddress(valid);
+    this.dataChangedReactCallback();
+  }
+
+  /** The optional friendlier hostname a director has arranged for room devices. */
+  get preferredRoomUrl(): string | null {
+    return this.preferredRoomUrlValue;
+  }
+
+  /**
+   * Set (or clear) the preferred room URL.
+   *
+   * @returns false when the value cannot be an origin, so the caller can say why rather than
+   * silently keeping the old one.
+   */
+  setPreferredRoomUrl(value: string): boolean {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      this.preferredRoomUrlValue = null;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(TournamentServerService.preferredRoomUrlStorageKey);
+      }
+      this.dataChangedReactCallback();
+      return true;
+    }
+    const normalized = normalizePreferredRoomUrl(trimmed, this.status.port || this.requestedPort);
+    if (!normalized) {
+      this.lastError = 'A preferred room address must be a host or http:// URL with no path, e.g. yellowfruit.local.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    this.preferredRoomUrlValue = trimmed;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(TournamentServerService.preferredRoomUrlStorageKey, trimmed);
+    }
+    this.lastError = '';
+    this.dataChangedReactCallback();
+    return true;
+  }
+
+  /**
+   * The origin printed on room sheets, encoded into QR codes, and used for room links.
+   *
+   * The numeric address remains available separately as `selectedAddress` and is shown beside this
+   * one, because a name that does not resolve on the room devices has to be diagnosable from the
+   * sheet the scorekeeper is holding.
+   */
+  get roomLinkOrigin(): string {
+    const normalized =
+      this.preferredRoomUrlValue === null
+        ? null
+        : normalizePreferredRoomUrl(this.preferredRoomUrlValue, this.status.port || this.requestedPort);
+    return resolveRoomLinkOrigin(normalized, this.selectedAddress);
+  }
+
+  /** Set when the address the rooms were given is no longer one this machine has. */
+  get roomAddressChange(): IRoomAddressChange | null {
+    return detectRoomAddressChange(this.advertisedRoomAddress, this.networkAddresses, this.selectedAddress, {
+      running: this.status.running,
+      tournamentKey: this.recoveryKey(),
+    });
+  }
+
+  /**
+   * Remember the address the rooms are being given.
+   *
+   * Recorded rather than derived, because the whole question is what the *printed sheets* say, and
+   * that is decided at the moment the director starts the server or picks an interface — not by
+   * whatever the machine happens to report later.
+   */
+  recordAdvertisedAddress(url: string) {
+    if (url === '') return;
+    const advertised: IAdvertisedRoomAddress = {
+      url,
+      advertisedAt: new Date().toISOString(),
+      tournamentKey: this.recoveryKey(),
+    };
+    this.advertisedRoomAddress = advertised;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(TournamentServerService.advertisedRoomAddressStorageKey, JSON.stringify(advertised));
+      } catch {
+        // The warning degrades to not appearing. Nothing about scoring depends on it.
+      }
+    }
+  }
+
+  /**
+   * The director has dealt with the change: new sheets are printed, or the rooms have been told.
+   *
+   * Implemented as re-advertising the current address rather than as a dismissal flag, so that if
+   * the address changes *again* the warning comes back with the right "previous" value.
+   */
+  acknowledgeRoomAddressChange() {
+    if (this.selectedAddress !== '') this.recordAdvertisedAddress(this.selectedAddress);
     this.dataChangedReactCallback();
   }
 
@@ -586,6 +724,17 @@ export default class TournamentServerService {
       if (!status.tournamentKey || status.tournamentKey === this.recoveryKey()) {
         this.status = status;
         this.lastError = status.errorMessage ?? '';
+        // Starting the server is when an address becomes the one rooms are given. Recording it here
+        // is what makes a later DHCP change detectable rather than invisible.
+        // A record left over from a different tournament is not this tournament's advertised
+        // address, so the first start of a newly opened document re-establishes it.
+        if (
+          status.running &&
+          this.selectedAddress !== '' &&
+          this.advertisedRoomAddress?.tournamentKey !== this.recoveryKey()
+        ) {
+          this.recordAdvertisedAddress(this.selectedAddress);
+        }
         if (status.running && !this.pushTournamentSnapshot()) {
           return { ...status, errorMessage: this.lastError };
         }

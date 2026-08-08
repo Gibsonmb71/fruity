@@ -57,7 +57,7 @@ export interface IRouterHost {
    * playing. Not called when an existing session is resumed.
    */
   onSessionStarted?: (sessionId: string) => void;
-  /** Called when a permanent room page polls, including while it is waiting between games. */
+  /** Called whenever a permanent room page polls, including while it is waiting between games. */
   onRoomCheckIn?: (roomId: string, deviceId?: string, operatorName?: string, ready?: boolean) => void;
   /** Called after any session mutation so transient recovery state can be flushed. */
   onSessionChanged?: () => void;
@@ -419,6 +419,7 @@ export default class Router {
       this.requireMethod(req, res, 'GET', () => {
         const snapshot = this.host.getSnapshot();
         sendJson(res, 200, {
+          tournamentKey: snapshot.recoveryKey,
           name: snapshot.name,
           gameFormat: snapshot.gameFormat,
           gameFormatErrors: snapshot.gameFormatErrors,

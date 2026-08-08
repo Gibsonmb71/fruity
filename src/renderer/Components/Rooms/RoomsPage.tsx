@@ -2,6 +2,7 @@ import { useContext, useEffect, useMemo, useState } from 'react';
 import type { ContextType, JSX } from 'react';
 import {
   Alert,
+  AlertTitle,
   Box,
   Button,
   Chip,
@@ -63,6 +64,12 @@ import {
   restoreRoomAssignmentSnapshot,
 } from '../../Services/RoomAllocationService';
 import { resolveTournamentReadiness } from '../../Services/TournamentReadiness';
+import {
+  IStrandedGame,
+  describeRestartConfirmation,
+  findStrandedGames,
+  restartScheduledGame,
+} from '../../Services/StandbyRecovery';
 import { createNavigationIntent, INavigationIntent } from '../../Services/Navigation';
 import { dispatchReadinessAction } from '../../Services/TournamentActions';
 import { ConfirmDialog, RoomDetailDialog, RoomEditorDialog, RoomQrDialog, RoomSetupDialog } from './RoomDialogs';
@@ -287,6 +294,16 @@ export default function RoomsPage({
   const rebracketNextPhase = rebracketBoundary ? tournament.getNextFullPhase(rebracketBoundary) ?? null : null;
 
   const serverAddress = service.selectedAddress;
+  /**
+   * What goes on room sheets, QR codes and room links.
+   *
+   * The preferred hostname when the director has arranged one, otherwise the numeric LAN address.
+   * `serverAddress` stays the numeric one everywhere it is shown as a fallback or tested against,
+   * because a name that does not resolve on the room devices has to remain diagnosable.
+   */
+  const { roomLinkOrigin } = service;
+  const addressChange = service.roomAddressChange;
+  const backupHealth = manager.secondaryBackupHealth;
   const nextRelease = service.nextRoundToRelease();
   const releasedPrintRound = service.releasedRoundNumber ?? service.currentRoundNumber;
   const releasedPrintMatches =
@@ -613,6 +630,39 @@ export default function RoomsPage({
     setGeneratorOpen(false);
   };
 
+  /**
+   * Games the previous computer left mid-flight with nothing behind them.
+   *
+   * Computed on every render rather than memoized. Its inputs are the schedule, the live session
+   * list and the Match Inbox, all three of which change in ways a dependency array cannot see —
+   * scheduled matches are mutated in place — and a stranded game that has quietly stopped being
+   * listed is exactly the failure this whole area exists to prevent. The work is a filter over a
+   * few dozen scheduled matches.
+   */
+  const strandedGames = findStrandedGames(tournament, {
+    sessions: service.sessions,
+    inboxSessionIds: service.inbox.map((item) => item.sessionId),
+  });
+
+  const requestRestartGame = (game: IStrandedGame) => {
+    setConfirmState({
+      title: `Restart Round ${game.roundName}: ${game.leftTeam} vs ${game.rightTeam}?`,
+      message: describeRestartConfirmation(game),
+      confirmLabel: 'Restart this game',
+      destructive: true,
+      onConfirm: () => {
+        const restarted = restartScheduledGame(tournament, game.scheduledMatchId);
+        if (!restarted.ok) {
+          manager.makeToast(restarted.reason, 'error');
+          setConfirmState(null);
+          return;
+        }
+        manager.markTournamentDataChanged();
+        setConfirmState(null);
+      },
+    });
+  };
+
   const releaseRound = (): boolean => {
     if (nextRelease === null || releaseBlocked) return false;
     const released = service.releaseRound(nextRelease);
@@ -684,6 +734,70 @@ export default function RoomsPage({
               Settings
             </Button>
           </div>
+        )}
+
+        {/*
+          Persistent, on every Control tab, and not dismissible by looking at it.
+          Every printed room sheet and every QR code says the previous address, so this stays until
+          the director has actually done something about it. Both addresses are printed in full
+          because the useful action is comparing them against a sheet in someone's hand.
+        */}
+        {addressChange !== null && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 1 }}
+            action={
+              <>
+                <Button size="small" onClick={() => copyText(addressChange.current)}>
+                  Copy new address
+                </Button>
+                <Button size="small" onClick={() => setServerSettingsOpen(true)}>
+                  Open room setup
+                </Button>
+                <Button size="small" onClick={() => service.acknowledgeRoomAddressChange()}>
+                  Sheets updated
+                </Button>
+              </>
+            }
+          >
+            <AlertTitle>Room server address changed</AlertTitle>
+            <div>
+              Previous <strong>{addressChange.previous.replace(/^https?:\/\//, '')}</strong>
+            </div>
+            <div>
+              Current <strong>{addressChange.current.replace(/^https?:\/\//, '')}</strong>
+            </div>
+            <div>
+              Room credentials are unchanged and games in progress are not interrupted. Rooms between games need the new
+              address; reprint the setup sheets or give them the pairing code.
+            </div>
+          </Alert>
+        )}
+
+        {/*
+          Persistent, because a backup folder that stopped working an hour ago is exactly the thing
+          nobody notices until they need it. It never says the tournament is at risk: the primary
+          save succeeded, which is why this is a warning and not an error.
+        */}
+        {backupHealth.folder !== null && backupHealth.lastError !== null && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 1 }}
+            action={
+              <Button size="small" onClick={() => manager.retrySecondaryBackup()}>
+                Retry backup
+              </Button>
+            }
+          >
+            <AlertTitle>Backup copy not written</AlertTitle>
+            <div>
+              Your tournament file saved normally. The redundant copy in {backupHealth.folder} could not be written:{' '}
+              {backupHealth.lastError}
+            </div>
+            {backupHealth.lastSuccessAt !== null && (
+              <div>Last successful backup {new Date(backupHealth.lastSuccessAt).toLocaleString()}.</div>
+            )}
+          </Alert>
         )}
 
         {activeTab === ControlPages.Live && (
@@ -930,6 +1044,8 @@ export default function RoomsPage({
                 helpRequests={service.helpRequests}
                 resolvingHelpId={resolvingHelpId}
                 onResolveHelp={resolveHelpRequest}
+                strandedGames={strandedGames}
+                onRestartGame={requestRestartGame}
               />
             </section>
           )}
@@ -1087,7 +1203,7 @@ export default function RoomsPage({
           room={roomDetail}
           tournament={tournament}
           manager={manager}
-          serverAddress={serverAddress}
+          serverAddress={roomLinkOrigin}
           sessions={service.sessions}
           presence={roomDetail ? roomPresenceFor(roomDetail, service) : undefined}
           helpRequest={
@@ -1100,7 +1216,7 @@ export default function RoomsPage({
             setRoomDetail(null);
             setRoomEditor(room);
           }}
-          onCopyUrl={(room) => copyText(room.url(serverAddress))}
+          onCopyUrl={(room) => copyText(room.url(roomLinkOrigin))}
           onCopyPairingCode={(room) => copyText(formatPairingCode(room.pairingCode))}
           onPrintRoom={(room) => {
             setSetupPrintRoomId(room.id);
@@ -1113,14 +1229,15 @@ export default function RoomsPage({
         <RoomQrDialog
           open={qrRoom !== null}
           room={qrRoom}
-          serverAddress={serverAddress}
+          serverAddress={roomLinkOrigin}
           onClose={() => setQrRoom(null)}
         />
         <RoomSetupDialog
           open={setupOpen}
           rooms={rooms}
           tournamentName={tournament.name || 'Untitled tournament'}
-          serverAddress={serverAddress}
+          serverAddress={roomLinkOrigin}
+          fallbackAddress={roomLinkOrigin === serverAddress ? undefined : serverAddress}
           autoPrintRoomId={setupPrintRoomId}
           onClose={() => {
             setSetupOpen(false);
@@ -1164,6 +1281,7 @@ export default function RoomsPage({
         />
         <ServerSettingsDialog
           service={service}
+          manager={manager}
           open={serverSettingsOpen}
           onClose={() => setServerSettingsOpen(false)}
         />
@@ -1587,6 +1705,8 @@ function AttentionList({
   helpRequests,
   resolvingHelpId,
   onResolveHelp,
+  strandedGames,
+  onRestartGame,
 }: {
   service: TournamentServerContextValue;
   rooms: TournamentRoom[];
@@ -1597,8 +1717,29 @@ function AttentionList({
   helpRequests: IHelpRequest[];
   resolvingHelpId: string | null;
   onResolveHelp: (request: IHelpRequest) => void;
+  strandedGames: IStrandedGame[];
+  onRestartGame: (game: IStrandedGame) => void;
 }) {
   const items: JSX.Element[] = [];
+
+  // First, because after a failover this is the only thing on the page that matters. Each one
+  // carries its own instruction rather than a generic "needs attention": the two kinds want
+  // different things done about them, and the wrong one loses a game.
+  strandedGames.forEach((game) => {
+    items.push(
+      <li key={`stranded-${game.scheduledMatchId}`}>
+        <strong>
+          Round {game.roundName}: {game.leftTeam} vs {game.rightTeam}
+          {game.roomName ? ` (${game.roomName})` : ''} was left {game.kind === 'playing' ? 'playing' : 'submitted'}.
+        </strong>{' '}
+        {game.guidance}
+        <Button size="small" sx={{ ml: 1 }} color="warning" onClick={() => onRestartGame(game)}>
+          Restart this game…
+        </Button>
+        <YfHelpPopover topic="control.failover" label="Help for recovering after a computer failure" />
+      </li>,
+    );
+  });
   if (!service.status.running) {
     items.push(
       <li key="server">
@@ -1765,21 +1906,89 @@ function AllocationPreviewDialog({
   );
 }
 
+/**
+ * Where redundant .yft copies go, and how the last one went.
+ *
+ * Lives in the tournament-day settings dialog rather than getting a page of its own: it is set once
+ * at the start of the day and then never touched, and the thing a director actually needs mid-day
+ * is the persistent warning on Control, not this.
+ */
+function RedundantBackupSection({ manager }: { manager: ContextType<typeof TournamentContext> }) {
+  const health = manager.secondaryBackupHealth;
+  return (
+    <>
+      <Typography variant="subtitle2" sx={{ mt: 3 }}>
+        Backup copy
+        <YfHelpPopover topic="control.redundant-backup" label="Help for redundant backups" />
+      </Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+        After every successful save, YellowFruit can write a second copy of the tournament file to a USB drive, a synced
+        folder, or a share on another computer. Your normal save is unaffected either way.
+      </Typography>
+      {health.folder === null ? (
+        <Button size="small" variant="outlined" onClick={() => manager.chooseSecondaryBackupFolder()}>
+          Choose backup folder…
+        </Button>
+      ) : (
+        <>
+          <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+            <strong>{health.folder}</strong>
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            {health.lastSuccessAt !== null
+              ? `Last backup ${new Date(health.lastSuccessAt).toLocaleString()}.`
+              : 'No backup written yet — the next save will write one.'}
+          </Typography>
+          {health.lastError !== null && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              {health.lastError}
+            </Alert>
+          )}
+          <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+            <Button size="small" onClick={() => manager.chooseSecondaryBackupFolder()}>
+              Change folder…
+            </Button>
+            {health.lastError !== null && (
+              <Button size="small" onClick={() => manager.retrySecondaryBackup()}>
+                Retry now
+              </Button>
+            )}
+            <Button size="small" color="inherit" onClick={() => manager.clearSecondaryBackupFolder()}>
+              Turn off
+            </Button>
+          </Stack>
+        </>
+      )}
+    </>
+  );
+}
+
 function ServerSettingsDialog({
   service,
+  manager,
   open,
   onClose,
 }: {
   service: TournamentServerContextValue;
+  manager: ContextType<typeof TournamentContext>;
   open: boolean;
   onClose: () => void;
 }) {
   const [portText, setPortText] = useState(String(service.requestedPort));
+  const [roomUrlText, setRoomUrlText] = useState(service.preferredRoomUrl ?? '');
+  const [roomUrlError, setRoomUrlError] = useState('');
   const [busy, setBusy] = useState(false);
   const [stopConfirmationOpen, setStopConfirmationOpen] = useState(false);
   useEffect(() => {
-    if (open) setPortText(String(service.requestedPort));
-  }, [open, service.requestedPort]);
+    if (open) {
+      setPortText(String(service.requestedPort));
+      setRoomUrlText(service.preferredRoomUrl ?? '');
+      setRoomUrlError('');
+    }
+  }, [open, service.requestedPort, service.preferredRoomUrl]);
+  const applyRoomUrl = () => {
+    setRoomUrlError(service.setPreferredRoomUrl(roomUrlText) ? '' : service.lastError);
+  };
   const port = Number.parseInt(portText, 10);
   const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
   const stopServer = async () => {
@@ -1807,7 +2016,7 @@ function ServerSettingsDialog({
   return (
     <>
       <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-        <DialogTitle>Tournament Server settings</DialogTitle>
+        <DialogTitle>Tournament-day settings</DialogTitle>
         <DialogContent>
           <Typography
             variant="body2"
@@ -1855,11 +2064,34 @@ function ServerSettingsDialog({
               )}
             </>
           )}
+          {/*
+            Advanced and optional. YellowFruit does not provide the name — a director who has one
+            has arranged it themselves through DNS, a hosts file, or a name the devices already
+            resolve — so the only thing this does is decide what gets printed and encoded. The
+            numeric address stays on the sheet underneath.
+          */}
+          <TextField
+            fullWidth
+            size="small"
+            sx={{ mt: 2 }}
+            label="Preferred room address (optional)"
+            placeholder="yellowfruit.local"
+            value={roomUrlText}
+            onChange={(event) => setRoomUrlText(event.target.value)}
+            onBlur={applyRoomUrl}
+            error={roomUrlError !== ''}
+            helperText={
+              roomUrlError !== ''
+                ? roomUrlError
+                : 'Used for room sheets, QR codes and room links. The numeric address stays visible as a fallback. YellowFruit does not set this name up for you.'
+            }
+          />
           {service.lastError !== '' && (
             <Alert severity="error" sx={{ mt: 2 }}>
               {service.lastError}
             </Alert>
           )}
+          <RedundantBackupSection manager={manager} />
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Close</Button>

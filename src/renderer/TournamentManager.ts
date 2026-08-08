@@ -43,6 +43,7 @@ import parseTeamsFromSqbsFile from './DataModel/SqbsParsing';
 import SqbsExportModalManager from './Modal Managers/SqbsExportModalManager';
 import SqbsGenerator from './DataModel/SqbsFileGeneration';
 import MatchImportService, { invalidJsonMessage } from './Services/MatchImportService';
+import { ISecondaryBackupHealth, emptyBackupHealth as emptySecondaryBackupHealth } from '../shared/BackupTypes';
 import { getReportDiagnostics, IReportScope, projectTournamentForReport } from './Services/ReportScope';
 import TournamentServerService from './Services/TournamentServerService';
 import { checkBrowserRoomScoringDisable, shouldStopServerBeforeDisabling } from './Services/RoomScoringMode';
@@ -185,6 +186,52 @@ export class TournamentManager {
     this.installNewTournament();
 
     this.requestBackupFile();
+    this.refreshSecondaryBackupHealth();
+  }
+
+  /**
+   * Where redundant .yft copies go, and how the last one went.
+   *
+   * Read from the main process rather than tracked here: the write happens there, and a renderer
+   * that reloaded must not be able to show a stale "backed up at 10:42" for a drive that has since
+   * been unplugged.
+   */
+  secondaryBackupHealth: ISecondaryBackupHealth = emptySecondaryBackupHealth();
+
+  async refreshSecondaryBackupHealth() {
+    if (typeof window === 'undefined' || !window.electron) return;
+    try {
+      this.secondaryBackupHealth = (await window.electron.ipcRenderer.invoke(
+        IpcBidirectional.GetSecondaryBackupHealth,
+      )) as ISecondaryBackupHealth;
+      this.dataChangedReactCallback();
+    } catch {
+      // The feature degrades to "not configured". Nothing about saving depends on it.
+    }
+  }
+
+  async chooseSecondaryBackupFolder() {
+    if (typeof window === 'undefined' || !window.electron) return;
+    this.secondaryBackupHealth = (await window.electron.ipcRenderer.invoke(
+      IpcBidirectional.ChooseSecondaryBackupFolder,
+    )) as ISecondaryBackupHealth;
+    this.dataChangedReactCallback();
+  }
+
+  async clearSecondaryBackupFolder() {
+    if (typeof window === 'undefined' || !window.electron) return;
+    this.secondaryBackupHealth = (await window.electron.ipcRenderer.invoke(
+      IpcBidirectional.ClearSecondaryBackupFolder,
+    )) as ISecondaryBackupHealth;
+    this.dataChangedReactCallback();
+  }
+
+  async retrySecondaryBackup() {
+    if (typeof window === 'undefined' || !window.electron) return;
+    this.secondaryBackupHealth = (await window.electron.ipcRenderer.invoke(
+      IpcBidirectional.RetrySecondaryBackup,
+    )) as ISecondaryBackupHealth;
+    this.dataChangedReactCallback();
   }
 
   protected addIpcListeners() {
@@ -243,6 +290,10 @@ export class TournamentManager {
     });
     window.electron.ipcRenderer.on(IpcBidirectional.SqbsExport, () => {
       this.startSqbsExport();
+    });
+    window.electron.ipcRenderer.on(IpcMainToRend.SecondaryBackupHealthChanged, (health) => {
+      this.secondaryBackupHealth = health as ISecondaryBackupHealth;
+      this.dataChangedReactCallback();
     });
     window.electron.ipcRenderer.on(IpcMainToRend.LaunchAboutYf, () => {
       this.openAboutYfDialog();
@@ -1800,11 +1851,23 @@ export class TournamentManager {
   }
 
   openMatchImportModal(importResults: MatchImportResult[], round?: Round) {
-    this.matchImportResultsManager.openModal(importResults, round);
+    // The tournament goes in so the dialog can offer a scheduled game for a file that plainly
+    // belongs to one — the recovery route for a room that had to download its result.
+    this.matchImportResultsManager.openModal(importResults, round, this.tournament);
   }
 
   closeMatchImportModal(shouldSave: boolean) {
     this.matchImportResultsManager.closeModal(shouldSave);
+    const problems = this.matchImportResultsManager.importProblems;
+    if (shouldSave) {
+      // A linked import changes the schedule as well as the standings, so recompute rather than
+      // waiting for the next thing that happens to.
+      this.tournament.setMatchIdCounter();
+      this.compileStats();
+      if (problems.length > 0) {
+        this.openGenericModal('Import problems', problems.join('\n'));
+      }
+    }
     this.onDataChanged(!shouldSave);
   }
 

@@ -412,7 +412,17 @@ interface IRoomSetupDialogProps {
   open: boolean;
   rooms: TournamentRoom[];
   tournamentName: string;
+  /** The origin printed on the sheet: the preferred hostname when there is one. */
   serverAddress: string;
+  /**
+   * The numeric LAN address, when it is not what the sheet is printed with.
+   *
+   * Printed underneath as a fallback rather than hidden: a hostname that the room devices cannot
+   * resolve leaves a scorekeeper holding a piece of paper with no way forward, and the numeric
+   * address is the way forward.
+   */
+  // eslint-disable-next-line react/require-default-props
+  fallbackAddress?: string;
   // eslint-disable-next-line react/require-default-props
   autoPrintRoomId?: string | null;
   onClose: () => void;
@@ -423,11 +433,15 @@ export function RoomSetupDialog({
   rooms,
   tournamentName,
   serverAddress,
+  fallbackAddress,
   autoPrintRoomId = null,
   onClose,
 }: IRoomSetupDialogProps) {
   const [printRoomId, setPrintRoomId] = useState<string | null>(null);
   const joinUrl = serverAddress === '' ? '/join' : `${serverAddress.replace(/\/$/, '')}/join`;
+  const fallbackCandidate =
+    fallbackAddress === undefined || fallbackAddress === '' ? '' : `${fallbackAddress.replace(/\/$/, '')}/join`;
+  const fallbackJoinUrl = fallbackCandidate === joinUrl ? '' : fallbackCandidate;
 
   useEffect(() => {
     const clearPrintSelection = () => setPrintRoomId(null);
@@ -468,6 +482,7 @@ export function RoomSetupDialog({
                 <RoomQr room={room} serverAddress={serverAddress} />
                 <div className="rooms-qr-code">{formatPairingCode(room.pairingCode)}</div>
                 <div className="rooms-qr-url">{joinUrl}</div>
+                {fallbackJoinUrl !== '' && <div className="rooms-qr-url-fallback">or {fallbackJoinUrl}</div>}
                 <Button size="small" onClick={() => print(room.id)}>
                   Print this room
                 </Button>

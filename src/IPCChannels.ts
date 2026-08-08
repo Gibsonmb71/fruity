@@ -83,6 +83,8 @@ export enum IpcMainToRend {
   TournamentServerSessionStarted = 'TournamentServerSessionStarted',
   /** A room browser's operational help-request view changed */
   TournamentServerHelpRequestsChanged = 'TournamentServerHelpRequestsChanged',
+  /** The redundant .yft backup succeeded or failed, so the Control page can show its health */
+  SecondaryBackupHealthChanged = 'SecondaryBackupHealthChanged',
 }
 
 /** Channels for both directions renderer<-->main */
@@ -116,6 +118,14 @@ export enum IpcBidirectional {
   TournamentServerGetHelpRequests = 'TournamentServerGetHelpRequests',
   /** Resolve or cancel one operational help request from tournament control */
   TournamentServerUpdateHelpRequest = 'TournamentServerUpdateHelpRequest',
+  /** Ask where redundant .yft copies are written, and how the last one went */
+  GetSecondaryBackupHealth = 'GetSecondaryBackupHealth',
+  /** Open the folder picker for redundant .yft copies. Replies with the resulting health. */
+  ChooseSecondaryBackupFolder = 'ChooseSecondaryBackupFolder',
+  /** Stop writing redundant copies. Replies with the resulting health. */
+  ClearSecondaryBackupFolder = 'ClearSecondaryBackupFolder',
+  /** Try the last failed redundant copy again, e.g. after the drive was plugged back in */
+  RetrySecondaryBackup = 'RetrySecondaryBackup',
 }
 
 export type IpcChannels = IpcRendToMain | IpcMainToRend | IpcBidirectional;
@@ -142,6 +152,7 @@ export const rendererListenableEvents = [
   IpcMainToRend.TournamentServerSessionsChanged,
   IpcMainToRend.TournamentServerSessionStarted,
   IpcMainToRend.TournamentServerHelpRequestsChanged,
+  IpcMainToRend.SecondaryBackupHealthChanged,
   IpcBidirectional.LoadBackup,
   IpcBidirectional.ExportQbjFile,
   IpcBidirectional.ImportQbjGamesRendererLaunch,
@@ -156,4 +167,8 @@ export const rendererListenableEvents = [
   IpcBidirectional.TournamentServerGetRoomPresence,
   IpcBidirectional.TournamentServerGetHelpRequests,
   IpcBidirectional.TournamentServerUpdateHelpRequest,
+  IpcBidirectional.GetSecondaryBackupHealth,
+  IpcBidirectional.ChooseSecondaryBackupFolder,
+  IpcBidirectional.ClearSecondaryBackupFolder,
+  IpcBidirectional.RetrySecondaryBackup,
 ];
