@@ -3,7 +3,7 @@ name: Run room review fixes
 on:
   pull_request:
     branches:
-      - master
+      - fix/room-review-findings
 
 permissions:
   contents: write
