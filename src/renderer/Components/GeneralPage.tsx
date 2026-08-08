@@ -261,9 +261,11 @@ function RoomProcedurePanel() {
           onChange={(e) => {
             const value = Number(e.target.value);
             if (!Number.isInteger(value)) return;
+            const clamped = Math.min(maximumTimeoutsPerTeam, Math.max(0, value));
             tournManager.setRoomProcedure({
               ...procedure,
-              timeoutsPerTeam: Math.min(maximumTimeoutsPerTeam, Math.max(0, value)),
+              timeoutsPerTeam: clamped,
+              timeoutDurationSeconds: clamped === 0 ? undefined : procedure.timeoutDurationSeconds,
             });
           }}
         />
@@ -292,7 +294,7 @@ function RoomProcedurePanel() {
           onChange={(e) =>
             tournManager.setRoomProcedure({
               ...procedure,
-              protestCheckpoints: e.target.value as ProtestCheckpointPolicy,
+              protestCheckpoints: e.target.value === 'none' ? undefined : (e.target.value as ProtestCheckpointPolicy),
             })
           }
           sx={{ maxWidth: 360 }}
@@ -310,7 +312,8 @@ function RoomProcedurePanel() {
           onChange={(e) =>
             tournManager.setRoomProcedure({
               ...procedure,
-              substitutionPolicy: e.target.value as SubstitutionPolicy,
+              substitutionPolicy:
+                e.target.value === 'any-boundary' ? undefined : (e.target.value as SubstitutionPolicy),
             })
           }
           sx={{ maxWidth: 360 }}

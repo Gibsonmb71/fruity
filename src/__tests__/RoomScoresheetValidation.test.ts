@@ -61,6 +61,37 @@ describe('whole-scoresheet validation', () => {
     expect(deriveGame(format, setup, events).phase.kind).toBe('bonus');
   });
 
+  test.each([
+    [
+      'halftime',
+      [
+        event({ type: 'tossup-dead', questionNumber: 1 }),
+        event({ type: 'half-break', questionNumber: 1, lastQuestion: 1 }),
+      ],
+      { version: 2, halves: true, timeoutsPerTeam: 0 },
+    ],
+    [
+      'overtime checkpoint',
+      Array.from({ length: 20 }, (_, index) => event({ type: 'tossup-dead', questionNumber: index + 1 })),
+      undefined,
+    ],
+    [
+      'sudden-death checkpoint',
+      [
+        ...Array.from({ length: 20 }, (_, index) => event({ type: 'tossup-dead', questionNumber: index + 1 })),
+        event({ type: 'begin-overtime', questionNumber: 20 }),
+        event({ type: 'tossup-dead', questionNumber: 21 }),
+      ],
+      undefined,
+    ],
+    ['completed game', completedGame(), undefined],
+  ])('corrections remain valid at the %s phase', (_name, events, procedure) => {
+    const corrected = validateCorrectedHistory(formatFor(), setup, events, procedure);
+
+    expect(corrected.blockers.map((problem) => problem.code)).not.toContain('game-not-complete');
+    expect(corrected.valid).toBe(true);
+  });
+
   test('open protests are warnings by default and blockers under strict procedure', () => {
     const events = [
       ...completedGame(),

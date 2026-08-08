@@ -81,6 +81,50 @@ describe('question-level corrections', () => {
     expect(next[2].type).toBe('tossup-dead');
   });
 
+  test('correcting a replaced question keeps the new cycle after its question-void', () => {
+    const format = formatFor();
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-buzz', questionNumber: 7, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({ type: 'bonus', questionNumber: 7, team: 'left', controlledPoints: 20 }),
+      event({ type: 'note', questionNumber: 7, text: 'Replacement approved.' }),
+      event({ type: 'question-void', questionNumber: 7, scope: 'tossup', reason: 'Bad packet' }),
+      event({ type: 'tossup-buzz', questionNumber: 7, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({ type: 'bonus', questionNumber: 7, team: 'left', controlledPoints: 10 }),
+      event({
+        type: 'protest',
+        questionNumber: 7,
+        team: 'right',
+        subject: 'question',
+        description: 'Replacement reviewed.',
+        status: 'open',
+      }),
+    ];
+    const model = editableQuestionFromEvents(events, 7);
+    const replacement = eventsFromEditableQuestion(
+      { ...model, bonus: model.bonus ? { ...model.bonus, controlledPoints: 20, bouncebackPoints: 0 } : undefined },
+      (() => {
+        let id = 0;
+        return () => `corrected-${++id}`;
+      })(),
+    );
+    const next = replaceQuestionEvents(events, 7, replacement);
+    const voidIndex = next.findIndex((candidate) => candidate.type === 'question-void');
+    const correctedIndex = next.findIndex(
+      (candidate, index) => index > voidIndex && (candidate.type === 'tossup-buzz' || candidate.type === 'tossup-dead'),
+    );
+
+    expect(correctedIndex).toBeGreaterThan(voidIndex);
+    expect(next.find((candidate) => candidate.type === 'note')).toBeTruthy();
+    expect(next.find((candidate) => candidate.type === 'protest')).toBeTruthy();
+    const correctedGame = deriveGame(format, setup, next);
+    expect(correctedGame.questions.find((question) => question.questionNumber === 7)?.replaced).toBe(true);
+    expect(correctedGame.left.points).toBe(30);
+    const qbj = toQbjMatch(format, correctedGame) as { match_questions?: { tossup_question?: { type: string } }[] };
+    expect(qbj.match_questions?.find((question) => question.tossup_question)?.tossup_question).toEqual({
+      type: 'replacement',
+    });
+  });
+
   test('a dead question cannot also contain a zero-point answer', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, [event({ type: 'tossup-dead', questionNumber: 1 })]);

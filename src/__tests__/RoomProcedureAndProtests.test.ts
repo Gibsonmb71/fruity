@@ -21,6 +21,7 @@ import deriveGame, { IGameSetup } from '../room/scoring/deriveGame';
 import toQbjMatch from '../room/scoring/toQbjMatch';
 import { ScoreEvent } from '../room/scoring/ScoreEvents';
 import { event } from './RoomScoreEventFixtures';
+import { eventDescription } from '../room/scorer/OperationsDialogs';
 
 const setup: IGameSetup = {
   left: { name: 'Ninety Six B', players: ['Sarah', 'James'] },
@@ -71,6 +72,18 @@ describe('a procedure nobody configured does nothing', () => {
   test('a configured procedure is recognized as worth sending to a room', () => {
     expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: true, timeoutsPerTeam: 0 })).toBe(true);
     expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: false, timeoutsPerTeam: 1 })).toBe(true);
+  });
+
+  test('documented default policy values remain inert when explicitly present', () => {
+    expect(
+      roomProcedureIsActive({
+        version: roomProcedureVersion,
+        halves: false,
+        timeoutsPerTeam: 0,
+        protestCheckpoints: 'none',
+        substitutionPolicy: 'any-boundary',
+      }),
+    ).toBe(false);
   });
 
   test('new procedure fields migrate and clamp without losing legacy settings', () => {
@@ -155,6 +168,17 @@ describe('a protest reaches tournament control', () => {
 });
 
 describe('what a room-level event does to the exported match', () => {
+  test('timeout history uses the readable team name', () => {
+    const game = deriveGame(format, setup, []);
+
+    expect(eventDescription(event({ type: 'timeout', questionNumber: 1, team: 'left' }), format, game)).toBe(
+      'Timeout: Ninety Six B',
+    );
+    expect(eventDescription(event({ type: 'timeout-start', questionNumber: 1, team: 'left' }), format, game)).toBe(
+      'Timeout started: Ninety Six B',
+    );
+  });
+
   test('a game ended early says so on the result', () => {
     const game = deriveGame(format, setup, [
       event({ type: 'tossup-dead', questionNumber: 1 }),

@@ -81,6 +81,10 @@ describe('first-party QBJ recovery layer', () => {
       'a zero-point tossup with a blank player name',
       { id: 'bad', type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: ' ' },
     ],
+    [
+      'a timeout with a negative start timestamp',
+      { id: 'bad', type: 'timeout-start', questionNumber: 1, team: 'left', startedAt: -1 },
+    ],
   ])('refuses %s', (_description, malformedEvent) => {
     const qbj = attachScorerRecovery({}, setup, events);
     (qbj as any)[scorerRecoveryKey].events = [malformedEvent];

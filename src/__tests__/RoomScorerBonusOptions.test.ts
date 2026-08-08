@@ -5,6 +5,8 @@ import { describe, expect, test } from 'vitest';
 import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import {
+  bonusPartProblem,
+  bonusScoreProblem,
   bonusTotalProblem,
   bouncebackOptions,
   lightningTotalProblem,
@@ -157,8 +159,48 @@ describe('validating a typed bonus total', () => {
     expect(bonusTotalProblem(bonus, 15)).toBeNull();
   });
 
+  test('a regular five-point part format accepts its expressed part totals', () => {
+    const bonus = bonusFor((rules) => {
+      rules.pointsPerBonusPart = 5;
+      rules.maximumBonusScore = 15;
+    });
+
+    expect(bonusTotalProblem(bonus, 5)).toBeNull();
+    expect(bonusPartProblem(bonus, 5, 0)).toBeNull();
+  });
+
   test('a fractional total is refused', () => {
     expect(bonusTotalProblem(bonusFor(), 12.5)).toContain('whole number');
+  });
+
+  test.each([7, 17, 35])('a standard bonus rejects %s points', (points) => {
+    expect(bonusTotalProblem(bonusFor(), points)).not.toBeNull();
+  });
+
+  test('a controlled and bounceback pair shares the total contract', () => {
+    expect(
+      bonusScoreProblem(
+        bonusFor((rules) => {
+          rules.bonusesBounceBack = true;
+        }),
+        20,
+        10,
+      ),
+    ).toBeNull();
+    expect(
+      bonusScoreProblem(
+        bonusFor((rules) => {
+          rules.bonusesBounceBack = true;
+        }),
+        20,
+        20,
+      ),
+    ).not.toBeNull();
+  });
+
+  test('regular parts accept only their format outcomes', () => {
+    expect(bonusPartProblem(bonusFor(), 10, 0)).toBeNull();
+    expect(bonusPartProblem(bonusFor(), 7, 0)).toContain('0 or 10');
   });
 });
 
