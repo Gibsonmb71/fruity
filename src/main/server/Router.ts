@@ -664,16 +664,18 @@ export default class Router {
         deviceId: typeof body.deviceId === 'string' ? body.deviceId : headerToken(req, deviceIdHeader),
         operatorName: typeof body.operatorName === 'string' ? body.operatorName : headerToken(req, operatorNameHeader),
         ready: typeof body.ready === 'boolean' ? body.ready : undefined,
-        scorer: parseRequestedScorer(body.scorer, this.host.getSnapshot()),
+        scorer: body.scorer === undefined ? undefined : parseRequestedScorer(body.scorer, this.host.getSnapshot()),
       };
     }
 
     const snapshot = this.host.getSnapshot();
     const readyRulesUsable =
-      update.scorer === 'legacy'
-        ? snapshot.gameFormat !== null
-        : snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
-    if (update.ready === true && !readyRulesUsable) {
+      update.scorer === undefined
+        ? undefined
+        : update.scorer === 'legacy'
+          ? snapshot.gameFormat !== null
+          : snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
+    if (update.ready === true && readyRulesUsable === false) {
       sendError(res, 409, 'This browser cannot be marked ready until usable scoring rules are loaded.');
       return;
     }
@@ -682,7 +684,7 @@ export default class Router {
       roomId,
       deviceId,
       update.operatorName ?? headerToken(req, operatorNameHeader),
-      readyRulesUsable ? update.ready : false,
+      readyRulesUsable === undefined ? undefined : readyRulesUsable ? update.ready : false,
     );
     sendJson(res, 200, { presence: this.roomPresenceValue(roomId) });
   }
@@ -803,14 +805,7 @@ export default class Router {
     if (!room) return;
 
     const snapshot = this.host.getSnapshot();
-    this.host.onRoomCheckIn?.(
-      roomId,
-      headerToken(req, deviceIdHeader),
-      headerToken(req, operatorNameHeader),
-      snapshot.scoringFormat === null || scorekeeperFormatProblems(snapshot.scoringFormat).length > 0
-        ? false
-        : undefined,
-    );
+    this.host.onRoomCheckIn?.(roomId, headerToken(req, deviceIdHeader), headerToken(req, operatorNameHeader));
     const response = buildAssignmentResponse(snapshot, room);
 
     const scheduledMatchId = response.current?.scheduledMatchId;
