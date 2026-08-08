@@ -91,7 +91,6 @@ export default function useGameEvents(
   const undoStack = useRef<UndoFrame[]>([]);
   /** Events taken off by undo, newest action last, so redo can put them back. */
   const redoStack = useRef<ScoreEvent[][]>([]);
-
   const syncHistory = useCallback(() => {
     setHistory({ canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 });
   }, []);

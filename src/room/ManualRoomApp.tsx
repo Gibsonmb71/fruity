@@ -38,7 +38,7 @@ import { IScoringKit, describeUnusableKit, isScoringKitUsable, readScoringKit } 
 import ScoringView from './ScoringView';
 import ScoringUnavailable from './ScoringUnavailable';
 import ScorerHost from './scorer/ScorerHost';
-import { readScorerChoice } from './ScorerChoice';
+import { readScorerChoice, type ScorerChoice } from './ScorerChoice';
 import { RoomConnectionState } from './RoomLifecycle';
 import { scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
 
@@ -71,13 +71,29 @@ interface IEmergencyGameState {
   roundNumber: number;
   leftTeamName: string;
   rightTeamName: string;
+  scorer: ScorerChoice;
 }
 
-function readEmergencyGameState(): IEmergencyGameState | null {
+interface IEmergencyStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+function emergencyStorage(): IEmergencyStorage | null {
   try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(emergencyGameStorageKey) ?? 'null',
-    ) as Partial<IEmergencyGameState>;
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function readEmergencyGameState(
+  storage: IEmergencyStorage | null = emergencyStorage(),
+): IEmergencyGameState | null {
+  if (!storage) return null;
+  try {
+    const parsed = JSON.parse(storage.getItem(emergencyGameStorageKey) ?? 'null') as Partial<IEmergencyGameState>;
     if (
       typeof parsed?.gameId !== 'string' ||
       typeof parsed.roundNumber !== 'number' ||
@@ -92,23 +108,30 @@ function readEmergencyGameState(): IEmergencyGameState | null {
       roundNumber: parsed.roundNumber,
       leftTeamName: parsed.leftTeamName,
       rightTeamName: parsed.rightTeamName,
+      scorer: parsed.scorer === 'first-party' || parsed.scorer === 'legacy' ? parsed.scorer : 'legacy',
     };
   } catch {
     return null;
   }
 }
 
-function writeEmergencyGameState(state: IEmergencyGameState): void {
+export function writeEmergencyGameState(
+  state: IEmergencyGameState,
+  storage: IEmergencyStorage | null = emergencyStorage(),
+): void {
+  if (!storage) return;
   try {
-    window.localStorage.setItem(emergencyGameStorageKey, JSON.stringify(state));
+    storage.setItem(emergencyGameStorageKey, JSON.stringify(state));
   } catch {
     // MODAQ still has its in-page state. The result UI will avoid claiming reload durability.
   }
 }
 
 function clearEmergencyGameState(): void {
+  const storage = emergencyStorage();
+  if (!storage) return;
   try {
-    window.localStorage.removeItem(emergencyGameStorageKey);
+    storage.removeItem(emergencyGameStorageKey);
   } catch {
     // Nothing else to do; an old entry is still guarded by tournament identity on restore.
   }
@@ -145,9 +168,8 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const [teams, setTeams] = useState<IRoomTeam[]>([]);
   const [online, setOnline] = useState(true);
   const [cachedKit] = useState<IScoringKit | null>(() => readScoringKit());
-  // Read once per mount; see AssignedRoomApp.
-  const [scorerChoice] = useState(() => readScorerChoice());
-  const [cachedKitUsable] = useState(() => isScoringKitUsable(cachedKit, new Date(), scorerChoice));
+  const [scorerChoice, setScorerChoice] = useState(() => readScorerChoice());
+  const cachedKitUsable = isScoringKitUsable(cachedKit, new Date(), scorerChoice);
   const kit = emergency ? cachedKit : null;
 
   const [roundNumber, setRoundNumber] = useState<number | ''>('');
@@ -227,6 +249,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
             setLeftTeamName(leftTeam.name);
             setRightTeamName(rightTeam.name);
             setEmergencyGameId(saved.gameId);
+            setScorerChoice(saved.scorer);
             setSetup({ round, leftTeam, rightTeam });
             setPhase('scoring');
             return undefined;
@@ -312,6 +335,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         roundNumber: round.number,
         leftTeamName: leftTeam.name,
         rightTeamName: rightTeam.name,
+        scorer: scorerChoice,
       });
       setEmergencyGameId(gameId);
       setActiveResultId(null);

@@ -300,16 +300,13 @@ function EditableEvent(props: {
           </label>
           <fieldset>
             <legend>Active players</legend>
-            {eventTeam.players.map((player) => {
+            {eventTeam.players.map((player, index) => {
               const checked = activePlayers.includes(player.name);
+              const id = `event-lineup-${event.id}-${index}`;
               return (
-                <label
-                  key={player.name}
-                  className="scorer-checkbox"
-                  htmlFor={`event-lineup-${event.id}-${player.name}`}
-                >
+                <label key={player.name} className="scorer-checkbox" htmlFor={id}>
                   <input
-                    id={`event-lineup-${event.id}-${player.name}`}
+                    id={id}
                     type="checkbox"
                     checked={checked}
                     disabled={!checked && activePlayers.length >= format.players.maximumActive}

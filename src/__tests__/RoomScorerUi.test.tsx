@@ -16,6 +16,7 @@ import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules
 import AnswerType from '../renderer/DataModel/AnswerType';
 import ScorerHost from '../room/scorer/ScorerHost';
 import { IRoomProcedure } from '../renderer/Services/RoomProcedure';
+import { IRoomTeam } from '../main/server/ServerTypes';
 import { RoomConnectionState } from '../room/RoomLifecycle';
 
 const leftTeam = {
@@ -36,12 +37,22 @@ function formatFor(mutate: (rules: ScoringRules) => void = () => {}): IScorekeep
 
 let gameCounter = 0;
 
+interface IRosterSyncTestOptions {
+  authoritativeLeftTeam?: IRoomTeam;
+  authoritativeRightTeam?: IRoomTeam;
+  onSyncRosterPlayer?: (
+    teamName: string,
+    playerName: string,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+}
+
 function renderScorer(
   format: IScorekeeperFormat,
   onSubmit?: ReturnType<typeof vi.fn>,
   onRequestControl?: (category: any, message: string) => Promise<void>,
   procedure?: IRoomProcedure,
   packetName?: string,
+  rosterOptions: IRosterSyncTestOptions = {},
 ) {
   const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
@@ -59,6 +70,9 @@ function renderScorer(
       connection={RoomConnectionState.Connected}
       onSubmit={submit}
       onRequestControl={onRequestControl}
+      authoritativeLeftTeam={rosterOptions.authoritativeLeftTeam}
+      authoritativeRightTeam={rosterOptions.authoritativeRightTeam}
+      onSyncRosterPlayer={rosterOptions.onSyncRosterPlayer}
     />,
   );
   return { onSubmit: submit };
@@ -175,6 +189,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe('what the header says', () => {
@@ -538,6 +553,42 @@ describe('the game menu', () => {
     pressControl('Players');
 
     expect(screen.getByText('Changes apply starting Tossup 2.')).toBeTruthy();
+  });
+
+  test('a local roster addition is marked local when no authoritative roster is available', () => {
+    renderScorer(formatFor());
+    pressControl('Players');
+
+    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
+      target: { value: 'Taylor Brooks' },
+    });
+    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByRole('button', { name: 'Add to bench' }));
+    pressControl('Players');
+
+    expect(screen.getByText('Saved in this game')).toBeTruthy();
+  });
+
+  test('a failed roster sync is retried by its timer without another React dependency changing', async () => {
+    vi.useFakeTimers();
+    const sync = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {
+      authoritativeLeftTeam: leftTeam,
+      authoritativeRightTeam: rightTeam,
+      onSyncRosterPlayer: sync,
+    });
+    pressControl('Players');
+
+    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
+      target: { value: 'Taylor Brooks' },
+    });
+    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByRole('button', { name: 'Add to bench' }));
+
+    expect(sync).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(sync).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(sync).toHaveBeenLastCalledWith('Ninety Six', 'Taylor Brooks');
   });
 
   test('a player can be added during a game and the roster change is sent to control', async () => {
