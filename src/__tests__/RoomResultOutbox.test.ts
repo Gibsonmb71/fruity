@@ -323,7 +323,7 @@ describe('retrying', () => {
   });
 
   test('a permanent refusal stops automatic retry and keeps the result', async () => {
-    const { outbox } = makeOutbox();
+    const { outbox, clock } = makeOutbox();
     const enqueued = await outbox.enqueue(draft('Ninety Six A', 'Greenwood', 4));
 
     await outbox.deliverOne(enqueued.entry.id, async () => ({
@@ -337,7 +337,10 @@ describe('retrying', () => {
     expect(entry?.lastError).toBe('No such session.');
     // Kept, not discarded: the file is now the only route into the tournament.
     expect(outbox.list()).toHaveLength(1);
-    expect(isDueForRetry(entry as IRoomResultOutboxEntry, Date.now() + 10 * 60 * 1000)).toBe(false);
+    const blockedEntry = entry as IRoomResultOutboxEntry;
+    clock.advance(retryDelayMs(blockedEntry.attempts) + 1);
+    expect(clock.now().getTime()).toBeGreaterThan(new Date(blockedEntry.lastAttemptAt as string).getTime());
+    expect(isDueForRetry(blockedEntry, clock.now().getTime())).toBe(false);
   });
 
   test('a lost response does not create a second result', async () => {
