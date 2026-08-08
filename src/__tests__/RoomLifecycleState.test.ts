@@ -10,6 +10,7 @@ import {
   classifyPollResult,
   describeConnection,
   isAwaitingReview,
+  offlineReassurance,
   reduceConnectionStatus,
   resolveLifecycleNotice,
   RoomConnectionState,
@@ -367,5 +368,26 @@ describe('lifecycle notices belong to a game', () => {
   test('no outcome means no notice', () => {
     expect(resolveLifecycleNotice(assignment())).toBeNull();
     expect(resolveLifecycleNotice(null)).toBeNull();
+  });
+});
+
+describe('what an offline room is told will happen to the game', () => {
+  test('a saved game on a room that can still send is told to keep scoring and wait', () => {
+    expect(offlineReassurance(true, true)).toContain('will be sent when the connection comes back');
+  });
+
+  test('an emergency game is never told the connection will handle it', () => {
+    // Emergency scoring has no session behind it, so nothing sends this result: it reaches the
+    // tournament when a human carries the file. A scorekeeper who waits instead loses the game.
+    const message = offlineReassurance(true, false);
+
+    expect(message).not.toContain('will be sent when the connection comes back');
+    expect(message).toContain('download the QBJ');
+    expect(message).toContain('tournament control');
+  });
+
+  test('a browser that could not save the game says so before anything else', () => {
+    expect(offlineReassurance(false, true)).toContain('cannot save the game locally');
+    expect(offlineReassurance(false, false)).toContain('cannot save the game locally');
   });
 });
