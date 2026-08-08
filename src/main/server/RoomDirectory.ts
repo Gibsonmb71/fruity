@@ -242,6 +242,7 @@ export function buildAssignmentResponse(
     roomId: room.id,
     roomName: room.name,
     tournamentName: snapshot.name,
+    tournamentKey: snapshot.recoveryKey,
     current: current ? toMatchup(snapshot, current) : null,
     previous: previous ? toSummary(previous) : null,
     next: next ? toSummary(next) : null,

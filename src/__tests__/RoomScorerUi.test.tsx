@@ -135,10 +135,18 @@ function editReviewEvent(description: string) {
   fireEvent.click(screen.getByText('Edit question'));
 }
 
+/** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
+function addMissingPlayer(teamLabel: string, name: string) {
+  const lineup = screen.getByLabelText(teamLabel);
+  fireEvent.click(within(lineup).getByText('Add missing player\u2026'));
+  fireEvent.change(within(lineup).getByLabelText('Player name'), { target: { value: name } });
+  fireEvent.click(within(lineup).getByText('Add to roster'));
+}
+
 function chooseStarters(names: string[]) {
   const prompt = screen.getByLabelText('Starting lineups');
   for (const name of names) fireEvent.click(within(prompt).getByLabelText(name));
-  fireEvent.click(within(prompt).getByText('Start the game'));
+  fireEvent.click(within(prompt).getByText('Start game'));
 }
 
 /**
@@ -533,7 +541,7 @@ describe('the game menu', () => {
     expect(screen.getByText('End regulation')).toBeTruthy();
   });
 
-  test('substitutions are reachable and change who is on the floor', () => {
+  test('one Sub out, one Put in, one Confirm changes who is on the floor', () => {
     renderScorer(
       formatFor((rules) => {
         rules.maximumPlayersPerTeam = 1;
@@ -543,9 +551,31 @@ describe('the game menu', () => {
     pressControl('Players');
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Sub out'));
+    // The bench is offered as the answer to "replace Sarah with", rather than as a grid to audit.
+    expect(within(lineup).getByText('Replace Sarah Mitchell with:')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('Put in'));
+    expect(within(lineup).getByText('Sarah Mitchell \u2192 James Robinson')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('Confirm'));
+
+    expect(screen.queryByText('Sarah Mitchell')).toBeNull();
+    expect(screen.getByText('James Robinson')).toBeTruthy();
+  });
+
+  test('the full lineup editor is still there for a multi-player change', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+    pressControl('Players');
+
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Edit full lineup\u2026'));
     fireEvent.click(within(lineup).getByLabelText(/Sarah Mitchell/));
     fireEvent.click(within(lineup).getByLabelText(/James Robinson/));
-    fireEvent.click(within(lineup).getByText('Apply to Ninety Six'));
+    fireEvent.click(within(lineup).getByText('Apply lineup'));
 
     expect(screen.queryByText('Sarah Mitchell')).toBeNull();
     expect(screen.getByText('James Robinson')).toBeTruthy();
@@ -568,10 +598,7 @@ describe('the game menu', () => {
     renderScorer(formatFor());
     pressControl('Players');
 
-    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
-      target: { value: 'Taylor Brooks' },
-    });
-    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByRole('button', { name: 'Add to bench' }));
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
     pressControl('Players');
 
     expect(screen.getByText('Saved in this game')).toBeTruthy();
@@ -587,10 +614,7 @@ describe('the game menu', () => {
     });
     pressControl('Players');
 
-    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
-      target: { value: 'Taylor Brooks' },
-    });
-    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByRole('button', { name: 'Add to bench' }));
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
 
     expect(sync).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(9_999);
@@ -605,10 +629,7 @@ describe('the game menu', () => {
     renderScorer(formatFor(), undefined, requestControl);
     pressControl('Players');
 
-    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
-      target: { value: 'Taylor Brooks' },
-    });
-    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByText('Add to bench'));
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
 
     await vi.waitFor(() =>
       expect(requestControl).toHaveBeenCalledWith('roster-change', expect.stringContaining('Taylor Brooks')),
@@ -644,6 +665,17 @@ describe('the game menu', () => {
     expect(Array.from(player.options, (option) => option.value)).not.toContain('James Robinson');
   });
 
+  test('the correction offers only the bonus totals this format can produce', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const totals = within(screen.getByRole('group', { name: 'Bonus points' })).getAllByRole('button');
+    expect(totals.map((button) => button.textContent)).toEqual(['0', '10', '20', '30']);
+  });
+
   test('an invalid bonus correction stays open with an explanation', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
@@ -651,7 +683,10 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
 
-    fireEvent.change(screen.getByLabelText('Points'), { target: { value: '40' } });
+    // The quick totals cannot express an impossible bonus, so the per-part entry is where an
+    // out-of-range total can still be typed — and it still has to be refused.
+    fireEvent.click(screen.getByText('Enter parts\u2026'));
+    fireEvent.change(screen.getByLabelText('Bonus part 1 controlled points'), { target: { value: '40' } });
     fireEvent.click(screen.getByText('Save correction'));
 
     expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
@@ -665,7 +700,7 @@ describe('the game menu', () => {
 
     fireEvent.click(screen.getByText('Edit question'));
     fireEvent.click(screen.getByText('Remove'));
-    fireEvent.click(screen.getByLabelText('No buzz / tossup dead'));
+    fireEvent.click(screen.getByLabelText('No buzz'));
     fireEvent.click(screen.getByText('Save correction'));
 
     expect(scoreOf('Ninety Six')).toBe('0');
@@ -677,7 +712,9 @@ describe('the game menu', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
-    fireEvent.click(screen.getByText('Replace question…'));
+    // The replacement workflow is secondary information, so it lives behind the disclosure.
+    fireEvent.click(screen.getByText('More\u2026'));
+    fireEvent.click(screen.getByText('Replace question\u2026'));
 
     const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
     expect(replacementDialog).toBeTruthy();

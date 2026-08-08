@@ -1,6 +1,7 @@
 import { createHash, randomUUID, randomBytes } from 'crypto';
 import {
   ISession,
+  ISessionRecoveryResponse,
   ISessionResumeInfo,
   ISessionScoreLine,
   ISessionStateResponse,
@@ -446,6 +447,28 @@ export default class SessionStore {
       createdAt: session.createdAt,
       lastSeenAt: session.lastSeenAt,
       rejectionReason: session.rejectionReason,
+    };
+  }
+
+  /**
+   * Everything the owning room needs to rebuild its own game, and nothing about anyone else's.
+   *
+   * The token is not echoed back — the caller already had to present it — and no other session is
+   * reachable from this projection. See `ISessionRecoveryResponse`.
+   */
+  static toRecoveryResponse(session: ISession): ISessionRecoveryResponse {
+    return {
+      sessionId: session.id,
+      roundNumber: session.roundNumber,
+      leftTeam: session.leftTeam,
+      rightTeam: session.rightTeam,
+      status: session.status,
+      scheduledMatchId: session.scheduledMatchId,
+      roomId: session.roomId,
+      createdAt: session.createdAt,
+      lastSeenAt: session.lastSeenAt,
+      finalReceived: session.finalReceived,
+      latestQbj: session.latestQbj,
     };
   }
 

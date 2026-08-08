@@ -555,6 +555,29 @@ export default class Router {
         return;
       }
 
+      /*
+       * GET /api/v1/sessions/:sessionId/recovery
+       *
+       * The second recovery source, for a browser whose own local copy of its own game is missing
+       * or unreadable. Authorized by the same session capability token every other write to this
+       * session needs, so a room can only ever recover the game it is already holding credentials
+       * for — there is no room-wide or server-wide session read here, and no way to reach another
+       * session's payload by changing the id.
+       */
+      if (segments.length === 3 && segments[2] === 'recovery') {
+        if (method !== 'GET') {
+          sendError(res, 405, `${method} is not allowed for this endpoint.`);
+          return;
+        }
+        const result = this.host.sessions.read(sessionId, tokenFrom(req));
+        if (!result.ok) {
+          sendSessionWriteError(res, result);
+          return;
+        }
+        sendJson(res, 200, SessionStore.toRecoveryResponse(result.session));
+        return;
+      }
+
       // PUT /api/v1/sessions/:sessionId/snapshot
       if (segments.length === 3 && segments[2] === 'snapshot') {
         if (method !== 'PUT') {

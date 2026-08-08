@@ -136,7 +136,13 @@ export interface ITournamentSnapshot {
   holdNewRoomStarts?: boolean;
   /** Optional director-facing explanation shown to scorekeepers while the hold is active. */
   holdMessage?: string;
-  /** Stable tournament identity used to scope app-data recovery state. Never served to rooms. */
+  /**
+   * Stable tournament identity used to scope app-data recovery state.
+   *
+   * Also served to rooms, on `/tournament` and on the assignment response, so a browser can tell
+   * "the server came back" from "the server is now running a different event". It identifies the
+   * document and authorizes nothing.
+   */
   recoveryKey?: string;
 }
 
@@ -321,6 +327,35 @@ export interface ISessionStateResponse {
   rejectionReason?: string;
 }
 
+/**
+ * What the room that owns a session may read back to recover it.
+ *
+ * Deliberately narrow, and deliberately authorized by the session's own capability token: this is
+ * the *second* recovery source, for the case where a browser's local copy of its own game is gone
+ * or unreadable. It is not a room-wide or server-wide session listing, and nothing about any other
+ * session is reachable through it.
+ *
+ * `latestQbj` is whatever the room last pushed — a live snapshot mid-game, or the final. It is a
+ * QBJ Match, so recovering from it produces a scoresheet the ordinary import path already
+ * understands.
+ */
+export interface ISessionRecoveryResponse {
+  sessionId: string;
+  roundNumber: number;
+  leftTeam: string;
+  rightTeam: string;
+  status: SessionStatus;
+  /** Set when the session came from a scheduled assignment. */
+  scheduledMatchId?: string;
+  roomId?: string;
+  createdAt: string;
+  /** ISO 8601 of the last thing the room sent, which is how fresh `latestQbj` is. */
+  lastSeenAt: string;
+  finalReceived: boolean;
+  /** The most recent QBJ Match this session sent, or null if it never sent one. */
+  latestQbj: object | null;
+}
+
 /** Request body for creating a session */
 export type RoomScorerKind = 'first-party' | 'legacy';
 
@@ -387,6 +422,14 @@ export interface IRoomAssignmentResponse {
   roomId: string;
   roomName: string;
   tournamentName: string;
+  /**
+   * Stable identity of the tournament being served, so a room can tell a reconnect from a switch.
+   *
+   * Carried here rather than left to `/tournament` because a room in the middle of a game needs to
+   * notice a switch on the poll it is already making, not five minutes later on a refresh timer:
+   * every snapshot it sends in between would be filed against the wrong event.
+   */
+  tournamentKey?: string;
   /** The game this room should be playing now, or null if it has nothing assigned */
   current: IRoomMatchup | null;
   /** The room's previous game, for context */

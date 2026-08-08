@@ -77,6 +77,24 @@ export interface IMatchSubmissionConflict {
 export default class TournamentServerService {
   status: IServerStatus = { running: false, port: defaultServerPort, addresses: [], networkAddresses: [] };
 
+  /**
+   * A running server in the main process that belongs to a tournament this renderer has not opened.
+   *
+   * Normally impossible, and normally exactly one thing: the renderer restarted — a reload, a crash
+   * recovery, a hot rebuild in development — underneath a server that survived it. The new renderer
+   * starts on a blank document with its own random operationalId, so every status message the main
+   * process sends carries a key that does not match, and the desktop used to discard all of them
+   * and render "Stopped" over a server that was still serving live rooms.
+   *
+   * Discarding is still right for the status *field*: adopting another tournament's port, addresses
+   * and sessions is the isolation failure this whole key check exists to prevent. What was wrong was
+   * saying nothing. So the status is kept here instead, where Control can say the true thing — the
+   * server is up, reopen the file — and where a later matching key can reattach to it.
+   *
+   * Null whenever the main process and this renderer agree, which is almost always.
+   */
+  survivingServer: IServerStatus | null = null;
+
   private preferredNetworkAddress: string | null = TournamentServerService.readPreferredNetworkAddress();
 
   /** Optional friendlier origin for room sheets and QR codes. Raw input is retained so host-only values can follow the active port. */
@@ -307,6 +325,9 @@ export default class TournamentServerService {
     this.helpRequests = [];
     this.pendingDurableAcceptances.clear();
     this.pendingDurableVerdicts.clear();
+    // Opening a document is the only thing that can turn a surviving server's foreign key into this
+    // renderer's own. Checked before the push, so a reattach is not mistaken for a switch.
+    this.reattachSurvivingServer();
     // Push even while stopped so the main process can scope any recovery data before the next
     // start. This does not bind a port or make the optional server visible on the LAN.
     return this.pushTournamentSnapshot();
@@ -344,13 +365,70 @@ export default class TournamentServerService {
     return { ok: true };
   }
 
+  /**
+   * Take one status report from the main process, and decide what it is about.
+   *
+   * Three outcomes, and keeping them apart is the whole job:
+   *
+   * - It is about the tournament this renderer has open, or it names no tournament at all. Adopt it.
+   * - It is about a *different* tournament and that server is running. Do not adopt it — but do not
+   *   pretend it does not exist either. It goes to `survivingServer`, which is what lets Control
+   *   say "still running, reopen the file" instead of "Stopped".
+   * - It is about a different tournament and that server is stopped. Nothing to say; drop it.
+   *
+   * @returns whether anything the UI renders changed.
+   */
+  private acceptStatus(next: IServerStatus): boolean {
+    if (next.tournamentKey && next.tournamentKey !== this.recoveryKey()) {
+      const previous = this.survivingServer;
+      this.survivingServer = next.running ? next : null;
+      return (previous?.running ?? false) !== (this.survivingServer?.running ?? false);
+    }
+    // The main process is talking about this document again, so there is nothing surviving to
+    // reattach to: whatever is in `status` from here on *is* this tournament's server.
+    this.survivingServer = null;
+    this.status = next;
+    this.lastError = next.errorMessage ?? '';
+    return true;
+  }
+
+  /**
+   * Reattach to a server that outlived the renderer, once the matching tournament has been opened.
+   *
+   * Called after the document changes, because that is the only thing that can turn a foreign key
+   * into a matching one. Reopening the .yft the server is already serving restores the same
+   * operationalId, which is the server's recovery key, so from here everything — sessions,
+   * presence, the help queue, pending submissions — comes back through the ordinary refresh path
+   * rather than through anything special.
+   *
+   * A genuinely different tournament never matches and never reattaches, which is the point.
+   */
+  private reattachSurvivingServer() {
+    const surviving = this.survivingServer;
+    if (!surviving || surviving.tournamentKey !== this.recoveryKey()) return;
+    this.survivingServer = null;
+    this.status = surviving;
+    this.lastError = surviving.errorMessage ?? '';
+    this.refreshStatus().catch(() => undefined);
+    this.refreshSessions().catch(() => undefined);
+  }
+
+  /**
+   * What Control should say while a server for another tournament is still up.
+   *
+   * Empty in every ordinary case. Deliberately an instruction rather than a diagnosis: the fix is
+   * one action — open the file the server is serving — and nothing else the director could do here
+   * would be safe.
+   */
+  get survivingServerNotice(): string {
+    if (!this.survivingServer) return '';
+    return 'The Tournament Server is still running and rooms are still being served. Reopen the tournament file to reconnect tournament control.';
+  }
+
   /** Subscribe to the main process's tournament-server messages */
   addIpcListeners() {
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerStatusChanged, (status) => {
-      const next = status as IServerStatus;
-      if (next.tournamentKey && next.tournamentKey !== this.recoveryKey()) return;
-      this.status = next;
-      this.lastError = this.status.errorMessage ?? '';
+      if (!this.acceptStatus(status as IServerStatus)) return;
       this.dataChangedReactCallback();
     });
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerSessionsChanged, (sessions) => {
@@ -796,8 +874,13 @@ export default class TournamentServerService {
         IpcBidirectional.TournamentServerGetStatus,
       )) as IServerStatus;
       if (generation !== this.currentPoll('status')) return;
-      if (nextStatus.tournamentKey && nextStatus.tournamentKey !== this.recoveryKey()) return;
-      this.status = nextStatus;
+      if (nextStatus.tournamentKey && nextStatus.tournamentKey !== this.recoveryKey()) {
+        // Somebody else's server. Record that it is up so Control can say so, and read nothing
+        // else from it: sessions, submissions and presence all belong to that tournament.
+        if (this.acceptStatus(nextStatus)) this.dataChangedReactCallback();
+        return;
+      }
+      this.acceptStatus(nextStatus);
       const pending = (await window.electron.ipcRenderer.invoke(
         IpcBidirectional.TournamentServerGetPendingSubmissions,
       )) as IMatchSubmission[];

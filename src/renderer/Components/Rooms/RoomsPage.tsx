@@ -178,6 +178,18 @@ interface IRoomsPageProps {
   onNavigationHandled: () => void;
 }
 
+/**
+ * The one word Control uses for the server, including the state that has no button.
+ *
+ * "Running — reconnect" is a server the main process is still hosting for a tournament this window
+ * has not opened. It is neither running (for this document) nor offline, and calling it either one
+ * sends the director somewhere wrong: "offline" invites a restart that would drop live rooms.
+ */
+function describeServerState(service: TournamentServerContextValue): string {
+  if (service.status.running) return 'running';
+  return service.survivingServer ? 'running — reconnect' : 'offline';
+}
+
 export default function RoomsPage({
   activeTab: controlledTab,
   onTabChange,
@@ -686,10 +698,21 @@ export default function RoomsPage({
             <Chip
               size="small"
               color={service.status.running ? 'success' : 'default'}
-              label={service.status.running ? 'Server running' : 'Server offline'}
+              label={`Server ${describeServerState(service)}`}
             />
           }
         />
+
+        {/*
+          The desktop restarted underneath a server that did not. Saying "offline" here would be a
+          lie the director would act on — stopping and restarting a server that is currently serving
+          live games — so this says what is actually true and what actually fixes it.
+        */}
+        {service.survivingServerNotice !== '' && (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            {service.survivingServerNotice}
+          </Alert>
+        )}
 
         <Box className="control-tabs" sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
           <Tabs
@@ -734,8 +757,8 @@ export default function RoomsPage({
           />
         ) : (
           <div className="rooms-server-compact" aria-label="Tournament Server status">
-            <span className={service.status.running ? 'is-running' : 'is-offline'}>
-              Tournament Server {service.status.running ? 'running' : 'offline'}
+            <span className={service.status.running || service.survivingServer ? 'is-running' : 'is-offline'}>
+              Tournament Server {describeServerState(service)}
             </span>
             <Button size="small" startIcon={<Settings />} onClick={() => setServerSettingsOpen(true)}>
               Settings
