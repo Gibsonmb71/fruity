@@ -1752,7 +1752,7 @@ function AttentionList({
     items.push(
       <li key={`stranded-${game.scheduledMatchId}`}>
         <strong>
-          Round {game.roundName}: {game.leftTeam} vs {game.rightTeam}
+          {game.roundName}: {game.leftTeam} vs {game.rightTeam}
           {game.roomName ? ` (${game.roomName})` : ''} was left {game.kind === 'playing' ? 'playing' : 'submitted'}.
         </strong>{' '}
         {game.guidance}
@@ -1807,7 +1807,7 @@ function AttentionList({
           {request.currentMatchup && (
             <span>
               {' '}
-              · Round {request.currentMatchup.roundName}: {request.currentMatchup.leftTeam} vs{' '}
+              · {request.currentMatchup.roundName}: {request.currentMatchup.leftTeam} vs{' '}
               {request.currentMatchup.rightTeam}
             </span>
           )}

@@ -302,7 +302,7 @@ export function RoomDetailDialog(props: IRoomDetailDialogProps) {
             </Typography>
             {helpRequest.currentMatchup && (
               <Typography variant="body2" color="text.secondary">
-                Round {helpRequest.currentMatchup.roundName} · {helpRequest.currentMatchup.leftTeam} vs{' '}
+                {helpRequest.currentMatchup.roundName} · {helpRequest.currentMatchup.leftTeam} vs{' '}
                 {helpRequest.currentMatchup.rightTeam}
               </Typography>
             )}

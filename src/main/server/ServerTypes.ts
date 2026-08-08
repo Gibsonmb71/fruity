@@ -73,7 +73,7 @@ export interface IRoomTeam {
 /** One round a room is allowed to pick */
 export interface IRoomRound {
   number: number;
-  /** Display name, which for most rounds is just the number */
+  /** The round's complete display name, e.g. "Round 4" or "Finals". Shown as it stands. */
   name: string;
 }
 
@@ -185,7 +185,10 @@ export interface IAssignmentDescriptor {
   scheduledMatchId: string;
   roomId: string;
   roundNumber: number;
-  /** Display name for the round, which for most rounds is just the number */
+  /**
+   * The round's complete display name, from Round.displayName(): "Round 4" for a numbered round,
+   * "Finals" for a named one. Already says the word, so nothing downstream prefixes it.
+   */
   roundName: string;
   leftTeam: string;
   rightTeam: string;
@@ -320,6 +323,7 @@ export interface ICreateSessionRequest {
 export interface IRoomMatchup {
   scheduledMatchId: string;
   roundNumber: number;
+  /** The round's complete display name, e.g. "Round 4" or "Finals". Shown as it stands. */
   roundName: string;
   leftTeam: IRoomTeam;
   rightTeam: IRoomTeam;
@@ -330,6 +334,7 @@ export interface IRoomMatchup {
 export interface IRoomMatchupSummary {
   scheduledMatchId: string;
   roundNumber: number;
+  /** The round's complete display name, e.g. "Round 4" or "Finals". Shown as it stands. */
   roundName: string;
   leftTeam: string;
   rightTeam: string;
@@ -519,6 +524,7 @@ export const helpRequestCategoryLabels: Record<HelpRequestCategory, string> = {
 /** Authoritative matchup context captured when a room asks for help. */
 export interface IHelpMatchupContext {
   roundNumber: number;
+  /** The round's complete display name, e.g. "Round 4" or "Finals". Shown as it stands. */
   roundName: string;
   leftTeam: string;
   rightTeam: string;
