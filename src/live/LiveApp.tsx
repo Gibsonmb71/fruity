@@ -562,7 +562,7 @@ function DisplayApp({ snapshot, connection }: { snapshot: IPublicLiveSnapshot | 
 
   const activeSlide = slides[currentSlide];
   let emptyMessage: string | undefined;
-  if (snapshot && slides.length === 0) {
+  if (snapshot && connection === 'connected' && slides.length === 0) {
     emptyMessage = fixedMode
       ? 'This display view has no published data yet.'
       : 'No display slides are enabled. Ask tournament control to enable at least one slide.';
@@ -653,25 +653,30 @@ function DisplayTeams({
   rows: IPublicTeamStanding[];
   metricLabels: IPublicLiveSnapshot['metricLabels'];
 }) {
+  if (rows.length === 0) return <DisplayMessage message="Team standings are not available yet." />;
   return (
     <div className="display-table-wrap">
       <table className="display-table">
         <thead>
           <tr>
-            <th>Rank</th>
-            <th className="display-wide-cell">Team</th>
-            <th>Record</th>
-            <th>Pct</th>
-            <th>{metricLabels.teamPpg}</th>
-            {metricLabels.teamPpb && <th>{metricLabels.teamPpb}</th>}
-            <th>TUH</th>
+            <th scope="col">Rank</th>
+            <th scope="col" className="display-wide-cell">
+              Team
+            </th>
+            <th scope="col">Record</th>
+            <th scope="col">Pct</th>
+            <th scope="col">{metricLabels.teamPpg}</th>
+            {metricLabels.teamPpb && <th scope="col">{metricLabels.teamPpb}</th>}
+            <th scope="col">TUH</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={`${row.teamName}-${row.rank}`}>
               <td>{row.rank || '—'}</td>
-              <th className="display-wide-cell">{row.teamName}</th>
+              <th scope="row" className="display-wide-cell">
+                {row.teamName}
+              </th>
               <td>{row.record}</td>
               <td>{formatPct(row.winPct)}</td>
               <td>{formatNumber(row.ppg, 1)}</td>
@@ -694,19 +699,25 @@ function DisplayIndividuals({ rows, metricLabel }: { rows: IPublicIndividualStan
         <table className="display-table">
           <thead>
             <tr>
-              <th>Rank</th>
-              <th className="display-wide-cell">Player</th>
-              <th className="display-wide-cell">Team</th>
-              <th>GP</th>
-              <th>TUH</th>
-              <th>{metricLabel}</th>
+              <th scope="col">Rank</th>
+              <th scope="col" className="display-wide-cell">
+                Player
+              </th>
+              <th scope="col" className="display-wide-cell">
+                Team
+              </th>
+              <th scope="col">GP</th>
+              <th scope="col">TUH</th>
+              <th scope="col">{metricLabel}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={`${row.playerName}-${row.teamName}`}>
                 <td>{row.rank || '—'}</td>
-                <th className="display-wide-cell">{row.playerName}</th>
+                <th scope="row" className="display-wide-cell">
+                  {row.playerName}
+                </th>
                 <td className="display-wide-cell">{row.teamName}</td>
                 <td>{row.gamesPlayed.toFixed(1)}</td>
                 <td>{row.tossupsHeard}</td>
