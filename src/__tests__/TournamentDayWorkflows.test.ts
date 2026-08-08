@@ -47,6 +47,7 @@ function snapshot(overrides: Partial<ITournamentSnapshot> = {}): ITournamentSnap
     gameFormat: {} as ITournamentSnapshot['gameFormat'],
     gameFormatErrors: [],
     gameFormatWarnings: [],
+    scoringFormat: null,
     timedRounds: false,
     rooms: [room('room-1', 'Room 1', '12345678')],
     assignments: [assignment],

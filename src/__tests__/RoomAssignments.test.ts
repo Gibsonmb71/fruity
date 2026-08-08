@@ -24,6 +24,7 @@ import {
 } from '../main/server/ServerTypes';
 import { ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import { makeModaqQbjMatch, testTeamNames } from './TestFixtures';
 
@@ -80,7 +81,8 @@ function makeAssignments(): IAssignmentDescriptor[] {
 }
 
 function makeSnapshot(overrides: Partial<ITournamentSnapshot> = {}): ITournamentSnapshot {
-  const formatResult = scoringRulesToModaqGameFormat(new ScoringRules(CommonRuleSets.AcfPowers));
+  const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+  const formatResult = scoringRulesToModaqGameFormat(rules);
   return {
     name: 'Ninety Six Invitational',
     rounds: [1, 2, 3].map((n) => ({ number: n, name: String(n) })),
@@ -91,6 +93,7 @@ function makeSnapshot(overrides: Partial<ITournamentSnapshot> = {}): ITournament
     gameFormat: formatResult.ok ? formatResult.gameFormat : null,
     gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
     gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
+    scoringFormat: scoringRulesToScorekeeperFormat(rules),
     timedRounds: false,
     rooms,
     assignments: makeAssignments(),

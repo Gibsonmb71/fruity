@@ -12,6 +12,7 @@ import {
   sessionTokenHeader,
 } from '../main/server/ServerTypes';
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import { makeModaqCycleExport, makeStandardModaqMatch, testTeamNames } from './TestFixtures';
 import type { IPublicLiveSnapshot } from '../shared/LiveTypes';
@@ -38,7 +39,8 @@ const publicSnapshot: IPublicLiveSnapshot = {
 
 /** Snapshot matching the test fixtures: 3 rounds, 4 teams, ACF-with-powers rules */
 function makeSnapshot(): ITournamentSnapshot {
-  const formatResult = scoringRulesToModaqGameFormat(new ScoringRules(CommonRuleSets.AcfPowers));
+  const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+  const formatResult = scoringRulesToModaqGameFormat(rules);
   return {
     name: 'Test Tournament',
     rounds: [1, 2, 3].map((n) => ({ number: n, name: String(n) })),
@@ -46,6 +48,7 @@ function makeSnapshot(): ITournamentSnapshot {
     gameFormat: formatResult.ok ? formatResult.gameFormat : null,
     gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
     gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
+    scoringFormat: scoringRulesToScorekeeperFormat(rules),
     timedRounds: false,
     roomScoringMode: 'browser',
     rooms: [],
@@ -247,8 +250,47 @@ describe('read-only tournament endpoints', () => {
     expect(body.teamCount).toBe(4);
     // No internal object graph, no registrations, no existing match data.
     expect(Object.keys(body).sort()).toEqual(
-      ['gameFormat', 'gameFormatErrors', 'gameFormatWarnings', 'name', 'roundCount', 'teamCount', 'timedRounds'].sort(),
+      [
+        'gameFormat',
+        'gameFormatErrors',
+        'gameFormatWarnings',
+        'scoringFormat',
+        'name',
+        'roundCount',
+        'teamCount',
+        'timedRounds',
+      ].sort(),
     );
+  });
+
+  test('the scoring rules are served as structural data alongside the MODAQ format', async () => {
+    const body = await (await fetch(`${baseUrl}/api/v1/tournament`)).json();
+
+    expect(body.scoringFormat.answerTypes.map((at: { value: number }) => at.value)).toEqual([15, 10, -5]);
+    expect(body.scoringFormat.bonus.enabled).toBe(true);
+    expect(body.scoringFormat.regulation.tossupCount).toBe(20);
+  });
+
+  test('a tournament MODAQ refuses still describes its rules', async () => {
+    // Lightning rounds have no representation in MODAQ at all, so gameFormat is null and the legacy
+    // scorer cannot run. The rules themselves are still perfectly describable, which is the whole
+    // point of carrying both.
+    const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+    rules.lightningCountPerTeam = 2;
+    rules.lightningDivisor = 5;
+    const formatResult = scoringRulesToModaqGameFormat(rules);
+    server.setTournamentSnapshot({
+      ...makeSnapshot(),
+      gameFormat: formatResult.ok ? formatResult.gameFormat : null,
+      gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
+      scoringFormat: scoringRulesToScorekeeperFormat(rules),
+    });
+
+    const body = await (await fetch(`${baseUrl}/api/v1/tournament`)).json();
+
+    expect(body.gameFormat).toBeNull();
+    expect(body.gameFormatErrors.join(' ')).toContain('lightning');
+    expect(body.scoringFormat.lightning).toEqual({ enabled: true, countPerTeam: 2, divisor: 5 });
   });
 
   test('GET /api/v1/rounds lists the rounds', async () => {

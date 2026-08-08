@@ -237,6 +237,7 @@ export function buildAssignmentResponse(
     gameFormat: snapshot.gameFormat,
     gameFormatErrors: snapshot.gameFormatErrors,
     gameFormatWarnings: snapshot.gameFormatWarnings,
+    scoringFormat: snapshot.scoringFormat,
     timedRounds: snapshot.timedRounds,
     releasedRoundNumber:
       snapshot.releasedRoundNumber === undefined ? snapshot.currentRoundNumber : snapshot.releasedRoundNumber,
