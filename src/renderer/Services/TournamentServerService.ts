@@ -6,6 +6,7 @@ import { StatsValidity } from '../DataModel/Match';
 import MatchImportService from './MatchImportService';
 import scoringRulesToModaqGameFormat from './YellowFruitScoringRulesToModaq';
 import scoringRulesToScorekeeperFormat from './ScorekeeperFormat';
+import { roomProcedureIsActive } from './RoomProcedure';
 import buildPublicLiveSnapshot, { buildPublicPairingsSnapshot } from './PublicLiveSnapshot';
 import { checkTournamentRoundRelease } from './ScheduleService';
 import {
@@ -394,6 +395,14 @@ export default class TournamentServerService {
       players: team.players.filter((p) => p.name !== '').map((p) => ({ name: p.name })),
     }));
     const roundNames = new Map(rounds.map((round) => [round.number, round.name]));
+    // Packet identity only, and only where a director actually named one. A round with no packet
+    // name says nothing rather than guessing "Packet 4" from "Round 4".
+    const packetNames = new Map<number, string>();
+    for (const phase of this.tournament.phases) {
+      for (const round of phase.rounds) {
+        if (round.packet.name !== '') packetNames.set(round.number, round.packet.name);
+      }
+    }
 
     return {
       name: this.tournament.name || 'Untitled tournament',
@@ -404,6 +413,7 @@ export default class TournamentServerService {
       gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
       scoringFormat: scoringRulesToScorekeeperFormat(this.tournament.scoringRules),
       timedRounds: this.tournament.scoringRules.timed,
+      roomProcedure: roomProcedureIsActive(this.tournament.roomProcedure) ? this.tournament.roomProcedure : undefined,
       roomScoringMode: this.tournament.roomScoringMode,
       rooms: this.tournament.rooms.map((room) => ({
         id: room.id,
@@ -421,6 +431,7 @@ export default class TournamentServerService {
           roomId: match.roomId as string,
           roundNumber: match.roundNumber,
           roundName: roundNames.get(match.roundNumber) ?? String(match.roundNumber),
+          packetName: packetNames.get(match.roundNumber),
           leftTeam: match.leftTeamName,
           rightTeam: match.rightTeamName,
           status: match.status,

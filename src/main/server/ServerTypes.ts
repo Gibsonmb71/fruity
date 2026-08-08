@@ -9,6 +9,7 @@
 import { ScheduledMatchStatus } from '../../renderer/DataModel/ScheduledMatch';
 import { IModaqGameFormat } from '../../renderer/Services/YellowFruitScoringRulesToModaq';
 import type { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
+import type { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
 
 /** Default port for the local tournament server */
 export const defaultServerPort = 4732;
@@ -109,6 +110,13 @@ export interface ITournamentSnapshot {
    * this to work out how many tossups were actually heard; see `QbjMatchNormalizer`.
    */
   timedRounds: boolean;
+  /**
+   * How rooms run a game, as opposed to how one is scored: halves, clock length, timeouts.
+   *
+   * Optional and inert by default. Nothing in the scoring engine reads it, and a room that receives
+   * none behaves exactly as it did before the setting existed.
+   */
+  roomProcedure?: IRoomProcedure;
   /** Explicitly identifies the room-scoring workflow for the legacy generic session endpoint. */
   roomScoringMode?: 'browser' | 'traditional';
   /** Configured playing locations, including their access tokens. Tokens are never served. */
@@ -190,6 +198,14 @@ export interface IAssignmentDescriptor {
    * "Finals" for a named one. Already says the word, so nothing downstream prefixes it.
    */
   roundName: string;
+  /**
+   * What the room should be reading from, when the round names a packet.
+   *
+   * Identity only — never any question text. A reader working from paper can be handed the wrong
+   * packet, and the room saying "Packet 4" next to "Round 4" is the cheapest way there is to catch
+   * it before a game is scored on questions the other rooms have already played.
+   */
+  packetName?: string;
   leftTeam: string;
   rightTeam: string;
   status: ScheduledMatchStatus;
@@ -325,6 +341,8 @@ export interface IRoomMatchup {
   roundNumber: number;
   /** The round's complete display name, e.g. "Round 4" or "Finals". Shown as it stands. */
   roundName: string;
+  /** The packet this round uses, when one is named. Identity only; see `IAssignmentDescriptor`. */
+  packetName?: string;
   leftTeam: IRoomTeam;
   rightTeam: IRoomTeam;
   status: ScheduledMatchStatus;
@@ -392,6 +410,8 @@ export interface IRoomAssignmentResponse {
   /** The scoring rules as structural data. See `ITournamentSnapshot.scoringFormat`. */
   scoringFormat: IScorekeeperFormat | null;
   timedRounds: boolean;
+  /** Halves, clock and timeouts, when the tournament configured any. See `ITournamentSnapshot`. */
+  roomProcedure?: IRoomProcedure;
   /** The highest round the director has released, if any. */
   releasedRoundNumber?: number | null;
   /** Whether new starts are paused. Existing sessions continue to work. */

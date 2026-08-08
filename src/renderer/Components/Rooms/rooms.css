@@ -357,6 +357,24 @@
   line-height: 1.4;
 }
 
+/*
+ * An argument still running in that room. Louder than a validation warning on purpose: a validation
+ * warning is about the numbers, and this is about whether the numbers are the ones both teams think
+ * they are.
+ */
+.rooms-protest-warning {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--ops-warning);
+  color: var(--ops-warning);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.rooms-protest-warning div {
+  color: var(--ops-muted);
+}
+
 .rooms-live-settings-body {
   display: grid;
   grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);

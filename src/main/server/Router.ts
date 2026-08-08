@@ -445,6 +445,7 @@ export default class Router {
           gameFormatWarnings: snapshot.gameFormatWarnings,
           scoringFormat: snapshot.scoringFormat,
           timedRounds: snapshot.timedRounds,
+          roomProcedure: snapshot.roomProcedure,
           roundCount: snapshot.rounds.length,
           teamCount: snapshot.teams.length,
         });
