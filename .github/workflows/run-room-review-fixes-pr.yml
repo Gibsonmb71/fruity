@@ -24,17 +24,7 @@ jobs:
           cache: npm
 
       - name: Apply targeted fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          text = Path('.github/workflows/apply-room-review-fixes.yml').read_text()
-          start = text.index("          python - <<'PY'") + len("          python - <<'PY'\n")
-          end = text.index("          PY\n", start)
-          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in text[start:end].splitlines())
-          script = script.replace("'src/room/PlayersDialog.tsx'", "'src/room/scorer/PlayersDialog.tsx'")
-          Path('/tmp/apply-room-review-fixes.py').write_text(script)
-          PY
-          python /tmp/apply-room-review-fixes.py
+        run: python .github/apply_room_review_fixes.py
 
       - name: Format changed files
         run: >-
