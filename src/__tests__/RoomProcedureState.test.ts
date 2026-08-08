@@ -72,6 +72,95 @@ describe('explicit room procedure states', () => {
     expect(deriveGame(format, setup, active).phase).toEqual({ kind: 'timeout', questionNumber: 1, team: 'left' });
   });
 
+  test('timeouts are limited to an unstarted tossup and the active question', () => {
+    const format = formatFor();
+    const procedure = { version: 2, halves: false, timeoutsPerTeam: 1 };
+    const context = { format, setup, procedure };
+    const positive = format.answerTypes.find((answerType) => answerType.value > 0)!;
+    const neg = format.answerTypes.find((answerType) => answerType.isNeg)!;
+
+    expect(canApplyScoreEvent(context, [], event({ type: 'timeout-start', questionNumber: 2, team: 'left' })).ok).toBe(
+      false,
+    );
+    expect(
+      canApplyScoreEvent(
+        context,
+        [
+          event({
+            type: 'tossup-buzz',
+            questionNumber: 1,
+            team: 'left',
+            playerName: 'Sarah',
+            answerTypeIndex: positive.index,
+          }),
+        ],
+        event({ type: 'timeout-start', questionNumber: 1, team: 'left' }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      canApplyScoreEvent(
+        context,
+        [
+          event({
+            type: 'tossup-buzz',
+            questionNumber: 1,
+            team: 'left',
+            playerName: 'Sarah',
+            answerTypeIndex: neg.index,
+          }),
+        ],
+        event({ type: 'timeout-start', questionNumber: 1, team: 'left' }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      canApplyScoreEvent(
+        context,
+        [event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' })],
+        event({ type: 'timeout-start', questionNumber: 1, team: 'left' }),
+      ).ok,
+    ).toBe(false);
+
+    const active = [event({ type: 'timeout-start', questionNumber: 1, team: 'left' })];
+    expect(canApplyScoreEvent(context, active, event({ type: 'timeout-resume', questionNumber: 2 })).ok).toBe(false);
+  });
+
+  test.each([
+    ['none', true, true],
+    ['phase-boundaries', false, false],
+    ['strict-overtime', true, false],
+  ] as const)('protest checkpoint policy %s matches the engine', (policy, overtime, suddenDeath) => {
+    const format = formatFor();
+    const procedure = { version: 2, halves: false, timeoutsPerTeam: 0, protestCheckpoints: policy };
+    const base = [
+      ...deadTossups(20),
+      event({
+        type: 'protest',
+        questionNumber: 20,
+        team: 'right',
+        subject: 'question',
+        description: 'Open',
+        status: 'open' as const,
+      }),
+    ];
+    const beginOvertime = event({ type: 'begin-overtime', questionNumber: 20 });
+    const overtimeResult = canApplyScoreEvent({ format, setup, procedure }, base, beginOvertime).ok;
+    expect(overtimeResult).toBe(overtime);
+    if (overtime) {
+      const after = [
+        ...base,
+        { ...beginOvertime, id: 'overtime-started' },
+        event({ type: 'tossup-dead', questionNumber: 21 }),
+      ];
+      expect(
+        canApplyScoreEvent(
+          { format, setup, procedure },
+          after,
+          event({ type: 'begin-sudden-death', questionNumber: 21 }),
+        ).ok,
+      ).toBe(suddenDeath);
+    }
+  });
+
   test('strict overtime protests block both the sudden-death checkpoint and next tossup', () => {
     const format = formatFor();
     const procedure = { version: 2, halves: false, timeoutsPerTeam: 0, protestCheckpoints: 'strict-overtime' as const };

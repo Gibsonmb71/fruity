@@ -132,7 +132,9 @@ function editReviewEvent(description: string) {
     (candidate) => candidate.textContent?.includes(description),
   );
   if (!row) throw new Error(`No scoresheet entry reading "${description}"`);
-  fireEvent.click(screen.getByText('Edit question'));
+  const questionRow = row.closest('.scorer-review-list > li');
+  if (!questionRow) throw new Error(`No question row for scoresheet entry reading "${description}"`);
+  fireEvent.click(within(questionRow as HTMLElement).getByRole('button', { name: 'Edit question' }));
 }
 
 function chooseStarters(names: string[]) {
@@ -476,7 +478,7 @@ describe('the recent rail', () => {
 });
 
 describe('the game menu', () => {
-  test('Flag opens the existing protest and issue workflows', () => {
+  test('Flag opens the existing protest workflow', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
 
@@ -615,6 +617,29 @@ describe('the game menu', () => {
     );
   });
 
+  test('a restricted substitution window adds a player to the bench without changing the lineup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 3;
+      }),
+      undefined,
+      undefined,
+      { version: 2, halves: false, timeoutsPerTeam: 0, substitutionPolicy: 'breaks-timeouts-overtime' },
+    );
+    pressControl('Players');
+
+    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
+      target: { value: 'Taylor Brooks' },
+    });
+    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByRole('button', { name: 'Add to bench' }));
+
+    pressControl('Players');
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    const lists = lineup.querySelectorAll('.scorer-lineup-list');
+    expect(lists[0].textContent).not.toContain('Taylor Brooks');
+    expect(lists[1].textContent).toContain('Taylor Brooks');
+  });
+
   test('reviewing the scoresheet can correct an earlier ruling', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
@@ -656,6 +681,34 @@ describe('the game menu', () => {
 
     expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
     expect(screen.getByText('Save correction')).toBeTruthy();
+  });
+
+  test('bonus correction drafts can be cleared without entering zero', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const points = screen.getByLabelText('Points') as HTMLInputElement;
+    fireEvent.change(points, { target: { value: '' } });
+    expect(points.value).toBe('');
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(screen.getByText('Enter a valid number for controlled.')).toBeTruthy();
+  });
+
+  test('reorder controls have row-specific accessible names', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+    fireEvent.click(screen.getByText('Add attempt'));
+
+    expect((screen.getByRole('button', { name: 'Move attempt 1 earlier' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Move attempt 1 later' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Move attempt 2 earlier' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Move attempt 2 later' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   test('the question editor can remove an attempt and replace it atomically', () => {
@@ -829,7 +882,7 @@ describe('a wrong answer that costs nothing', () => {
   test("the zero ends this team's chance and leaves the other team eligible", () => {
     renderScorer(formatFor());
 
-    fireEvent.click(screen.getByLabelText('Sarah Mitchell wrong, no penalty'));
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
 
     expect(scoreOf('Ninety Six')).toBe('0');
     expect(screen.getByText(/Greenwood may still answer/)).toBeTruthy();
