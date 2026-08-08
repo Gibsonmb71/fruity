@@ -62,6 +62,14 @@ const configuration: webpack.Configuration = {
       {
         test: /\.(woff|woff2|eot|ttf|otf)$/i,
         type: 'asset/resource',
+        /**
+         * Original filenames, not webpack's hashed ones. Fluent UI asks for each icon subset by its
+         * exact published filename (`fabric-icons-0-467ee27f.woff` and friends), so the emitted name
+         * has to match what `src/room/fluentIcons.ts` points it at.
+         */
+        generator: {
+          filename: 'fonts/[name][ext]',
+        },
       },
       {
         test: /\.(png|jpg|jpeg|gif|svg)$/i,
@@ -81,6 +89,17 @@ const configuration: webpack.Configuration = {
        */
       react: path.join(webpackPaths.rootPath, 'node_modules/react'),
       'react-dom': path.join(webpackPaths.rootPath, 'node_modules/react-dom'),
+
+      /**
+       * The Fluent UI icon fonts, which `src/room/fluentIcons.ts` emits so they can be served from
+       * this tournament's own server rather than Microsoft's CDN.
+       *
+       * An alias rather than a direct import because the package's `exports` map doesn't publish its
+       * `fonts` directory. Aliasing to the directory keeps the files in step with whatever version of
+       * @fluentui/font-icons-mdl2 is installed, which vendoring a copy into the repo would not:
+       * Fluent requests each subset by a content-hashed filename that changes between versions.
+       */
+      'fluent-icon-fonts': path.join(webpackPaths.rootPath, 'node_modules/@fluentui/font-icons-mdl2/fonts'),
     },
   },
 
