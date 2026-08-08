@@ -3,6 +3,7 @@ import {
   Button,
   FormControl,
   FormControlLabel,
+  MenuItem,
   Radio,
   RadioGroup,
   Stack,
@@ -21,7 +22,13 @@ import YfCard from './YfCard';
 import { NullDate } from '../Utils/UtilTypes';
 import { YfFieldGrid, YfFieldRow, YfNotice, YfPageHeader, YfToggleGrid, YfToggleRow } from '../Utils/GeneralReactUtils';
 import { Round } from '../DataModel/Round';
-import { maximumHalfLengthMinutes, maximumTimeoutsPerTeam } from '../Services/RoomProcedure';
+import {
+  maximumHalfLengthMinutes,
+  maximumTimeoutDurationSeconds,
+  maximumTimeoutsPerTeam,
+  ProtestCheckpointPolicy,
+  SubstitutionPolicy,
+} from '../Services/RoomProcedure';
 
 /**
  * Beyond this many rounds the packet list would drive the page height on its own, so it scrolls
@@ -169,6 +176,9 @@ function RoomProcedurePanel() {
   const [halfLength, setHalfLength] = useSubscription(
     procedure.halfLengthMinutes === undefined ? '' : String(procedure.halfLengthMinutes),
   );
+  const [timeoutDuration, setTimeoutDuration] = useSubscription(
+    procedure.timeoutDurationSeconds === undefined ? '' : String(procedure.timeoutDurationSeconds),
+  );
 
   const commitHalfLength = () => {
     const trimmed = halfLength.trim();
@@ -178,6 +188,18 @@ function RoomProcedurePanel() {
       halfLengthMinutes:
         minutes !== undefined && Number.isFinite(minutes) && minutes > 0 && minutes <= maximumHalfLengthMinutes
           ? minutes
+          : undefined,
+    });
+  };
+
+  const commitTimeoutDuration = () => {
+    const trimmed = timeoutDuration.trim();
+    const seconds = trimmed === '' ? undefined : Number(trimmed);
+    tournManager.setRoomProcedure({
+      ...procedure,
+      timeoutDurationSeconds:
+        seconds !== undefined && Number.isInteger(seconds) && seconds > 0 && seconds <= maximumTimeoutDurationSeconds
+          ? seconds
           : undefined,
     });
   };
@@ -245,6 +267,57 @@ function RoomProcedurePanel() {
             });
           }}
         />
+        {procedure.timeoutsPerTeam > 0 && (
+          <TextField
+            size="small"
+            type="number"
+            label="Timeout length (seconds)"
+            helperText="Optional. Leave blank when the moderator keeps timeout time."
+            slotProps={{ htmlInput: { min: 1, max: maximumTimeoutDurationSeconds } }}
+            sx={{ maxWidth: 260 }}
+            value={timeoutDuration}
+            onChange={(e) => setTimeoutDuration(e.target.value)}
+            onBlur={commitTimeoutDuration}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitTimeoutDuration();
+            }}
+          />
+        )}
+        <TextField
+          select
+          size="small"
+          label="Protest checkpoints"
+          helperText="Choose where an open protest must be resolved before play continues."
+          value={procedure.protestCheckpoints ?? 'none'}
+          onChange={(e) =>
+            tournManager.setRoomProcedure({
+              ...procedure,
+              protestCheckpoints: e.target.value as ProtestCheckpointPolicy,
+            })
+          }
+          sx={{ maxWidth: 360 }}
+        >
+          <MenuItem value="none">No forced stop</MenuItem>
+          <MenuItem value="phase-boundaries">At regulation / overtime boundaries</MenuItem>
+          <MenuItem value="strict-overtime">At overtime boundaries and sudden death</MenuItem>
+        </TextField>
+        <TextField
+          select
+          size="small"
+          label="Substitution windows"
+          helperText="Controls when a safe lineup boundary may be used."
+          value={procedure.substitutionPolicy ?? 'any-boundary'}
+          onChange={(e) =>
+            tournManager.setRoomProcedure({
+              ...procedure,
+              substitutionPolicy: e.target.value as SubstitutionPolicy,
+            })
+          }
+          sx={{ maxWidth: 360 }}
+        >
+          <MenuItem value="any-boundary">Any safe tossup boundary</MenuItem>
+          <MenuItem value="breaks-timeouts-overtime">Halftime, timeouts, and overtime checkpoints</MenuItem>
+        </TextField>
       </Stack>
     </Box>
   );

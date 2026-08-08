@@ -429,17 +429,12 @@ describe('regulation and overtime', () => {
     expect(game.phase).toEqual({ kind: 'complete', reason: 'regulation' });
   });
 
-  test('a tie at the end of regulation goes to overtime rather than ending', () => {
+  test('a tie at the end of regulation opens an overtime checkpoint', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, deadTossups(20));
 
     expect(game.regulationComplete).toBe(true);
-    expect(game.phase).toEqual({
-      kind: 'tossup',
-      questionNumber: 21,
-      period: 'overtime',
-      eligibleTeams: ['left', 'right'],
-    });
+    expect(game.phase).toEqual({ kind: 'checkpoint', checkpoint: 'overtime', afterQuestion: 20 });
   });
 
   test('sudden death ends the moment somebody scores', () => {
@@ -483,13 +478,13 @@ describe('regulation and overtime', () => {
     expect(game.phase).toEqual({ kind: 'complete', reason: 'overtime' });
   });
 
-  test('still tied after a period means another period', () => {
+  test('still tied after the initial overtime period opens sudden death', () => {
     const format = formatFor((rules) => {
       rules.minimumOvertimeQuestionCount = 3;
     });
     const game = deriveGame(format, setup, deadTossups(23));
 
-    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 24, period: 'overtime' });
+    expect(game.phase).toEqual({ kind: 'checkpoint', checkpoint: 'sudden-death', afterQuestion: 23 });
   });
 
   test('overtime excludes bonuses when the format says so', () => {
@@ -555,14 +550,14 @@ describe('timed formats', () => {
     expect(game.phase).toEqual({ kind: 'complete', reason: 'regulation' });
   });
 
-  test('time called on a tied game still goes to overtime', () => {
+  test('time called on a tied game opens the overtime checkpoint', () => {
     const format = formatFor((rules) => {
       rules.timed = true;
       rules.minimumOvertimeQuestionCount = 1;
     });
     const game = deriveGame(format, setup, [dead(1), event({ type: 'end-regulation', questionNumber: 1 })]);
 
-    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 2, period: 'overtime' });
+    expect(game.phase).toEqual({ kind: 'checkpoint', checkpoint: 'overtime', afterQuestion: 1 });
   });
 });
 
