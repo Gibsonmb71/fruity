@@ -51,6 +51,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'unknown error';
 }
 
+/**
+ * Does this projection describe a tournament a room could actually be served?
+ *
+ * A brand-new, never-opened tournament has no teams, no rooms and no assignments, so there is
+ * nothing in it for any room device or public display. That distinction is what lets the server
+ * tell a real tournament switch apart from a renderer that has simply restarted on a blank
+ * document.
+ */
+function snapshotCanServeRooms(snapshot: ITournamentSnapshot): boolean {
+  return snapshot.rooms.length > 0 || snapshot.assignments.length > 0 || snapshot.teams.length > 0;
+}
+
 export interface ITournamentServerOptions {
   /** Directory holding the built browser room bundle */
   roomBundleDirectory: string;
@@ -122,6 +134,12 @@ export default class TournamentServer {
   /** A deliberate stop clears in-memory sessions; the next start may restore the durable copy. */
   private restoreAfterStop = false;
 
+  /**
+   * Set while an empty projection from a different tournament is being refused, so the public
+   * projections that the renderer sends immediately after it are refused with it.
+   */
+  private ignoringForeignEmptySnapshot = false;
+
   constructor(options: ITournamentServerOptions) {
     this.options = options;
     this.restoreRecovery();
@@ -155,6 +173,16 @@ export default class TournamentServer {
 
   /** Replace the read-only tournament projection served to rooms */
   setTournamentSnapshot(snapshot: ITournamentSnapshot) {
+    if (this.shouldRefuseForeignEmptySnapshot(snapshot)) {
+      this.ignoringForeignEmptySnapshot = true;
+      // eslint-disable-next-line no-console
+      console.error(
+        'An empty tournament projection from a different tournament was ignored because rooms are still being served.',
+      );
+      return;
+    }
+    this.ignoringForeignEmptySnapshot = false;
+
     if (snapshot.recoveryKey && this.recoveryKey && snapshot.recoveryKey !== this.recoveryKey) {
       // A different tournament must never inherit another tournament's room credentials or final
       // results. The renderer sends this stable key before the server can serve a request.
@@ -171,12 +199,39 @@ export default class TournamentServer {
     this.persistRecovery();
   }
 
+  /**
+   * A renderer that has restarted underneath a running server starts on a brand-new blank
+   * tournament and pushes it before anyone has opened a file. That push must never be able to
+   * destroy the tournament this server is still serving: rooms in the middle of a game would lose
+   * their assignment and their credentials while the listener stayed up, which looks exactly like
+   * the server having silently wiped itself.
+   *
+   * An empty projection carries nothing a room could use, so there is never a reason to adopt one
+   * over a tournament that has rooms, assignments or teams. A genuine tournament switch is not
+   * affected: the renderer stops the server and resolves live games first, and the replacement
+   * document has content of its own.
+   */
+  private shouldRefuseForeignEmptySnapshot(snapshot: ITournamentSnapshot): boolean {
+    if (!snapshot.recoveryKey || !this.recoveryKey) return false;
+    if (snapshot.recoveryKey === this.recoveryKey) return false;
+    // Only a live server has something to lose. While it is stopped, nothing is being served and a
+    // deliberate switch to a blank new tournament must still take effect, or the next start would
+    // serve the previous tournament's rooms.
+    if (this.lifecycle === 'stopped' && this.sessions.getAll().length === 0) return false;
+    return !snapshotCanServeRooms(snapshot) && snapshotCanServeRooms(this.snapshot);
+  }
+
   /** Replace the separate public projection. It never shares the room snapshot's credentials or session state. */
   setPublicLiveSnapshot(snapshot: IPublicLiveSnapshot | null) {
+    // The renderer sends the public projections immediately after the room snapshot they were built
+    // from. A refused snapshot's companions describe the same blank tournament, so blanking the
+    // audience display with them would undo the refusal.
+    if (this.ignoringForeignEmptySnapshot) return;
     this.publicLiveSnapshot = snapshot;
   }
 
   setPublicPairingsSnapshot(snapshot: IPublicPairingsSnapshot | null) {
+    if (this.ignoringForeignEmptySnapshot) return;
     this.publicPairingsSnapshot = snapshot;
   }
 
