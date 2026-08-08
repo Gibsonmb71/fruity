@@ -334,7 +334,14 @@ export default function RoomsPage({
             match.roomId !== undefined &&
             rooms.some((room) => room.id === match.roomId && !room.enabled),
         ).length;
-  const releaseBlocked = nextRelease === null || !service.canReleaseRound(nextRelease).canRelease;
+  /*
+   * The gate returns why, not just whether. Holding on to the reason is the difference between
+   * telling a director "assign every game and resolve conflicts first" — which is a list of things
+   * to go and check — and telling them the one that is actually true.
+   */
+  const releaseCheck = nextRelease === null ? null : service.canReleaseRound(nextRelease);
+  const releaseBlocked = nextRelease === null || !releaseCheck?.canRelease;
+  const releaseBlockedReason = releaseCheck?.canRelease === false ? releaseCheck.reason : undefined;
 
   const copyText = async (value: string) => {
     try {
@@ -1040,6 +1047,7 @@ export default function RoomsPage({
                 scheduleIssues={scheduleIssues}
                 nextRelease={nextRelease}
                 releaseBlocked={releaseBlocked}
+                releaseBlockedReason={releaseBlockedReason}
                 disabledRoomAssignments={disabledRoomAssignments}
                 helpRequests={service.helpRequests}
                 resolvingHelpId={resolvingHelpId}
@@ -1713,6 +1721,7 @@ function AttentionList({
   scheduleIssues,
   nextRelease,
   releaseBlocked,
+  releaseBlockedReason,
   disabledRoomAssignments,
   helpRequests,
   resolvingHelpId,
@@ -1725,6 +1734,8 @@ function AttentionList({
   scheduleIssues: ReturnType<typeof validateSchedule>;
   nextRelease: number | null;
   releaseBlocked: boolean;
+  // eslint-disable-next-line react/require-default-props
+  releaseBlockedReason?: string;
   disabledRoomAssignments: number;
   helpRequests: IHelpRequest[];
   resolvingHelpId: string | null;
@@ -1832,7 +1843,8 @@ function AttentionList({
     }
     items.push(
       <li key="release">
-        <strong>Round {nextRelease} is not ready to release.</strong> Assign every game and resolve conflicts first.
+        <strong>Round {nextRelease} is not ready to release.</strong>{' '}
+        {releaseBlockedReason ?? 'Assign every game and resolve conflicts first.'}
       </li>,
     );
   }

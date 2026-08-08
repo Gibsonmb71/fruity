@@ -15,6 +15,7 @@ import {
   ScheduleIssueSeverity,
   allocatableRooms,
   checkRoomDeletion,
+  checkRoundRelease,
   generateSchedule,
   hasBlockingIssue,
   mergeGeneratedSchedule,
@@ -861,5 +862,53 @@ describe('generated schedule application', () => {
       'Round 2 is missing C vs A.',
       'Round 3 is missing A vs B.',
     ]);
+  });
+});
+
+describe('why a round cannot be released', () => {
+  /** A round with one game, assigned to an enabled room, ready to go. */
+  function releasableRound() {
+    const room = new TournamentRoom('101', 0, 'room-101', 'token-101');
+    const match = new ScheduledMatch(1, teamNames[0], teamNames[1], 'match-1');
+    match.roomId = room.id;
+    return { rooms: [room], matches: [match] };
+  }
+
+  test('a releasable round is releasable', () => {
+    const { rooms, matches } = releasableRound();
+
+    expect(checkRoundRelease(matches, rooms, 1)).toEqual({ canRelease: true });
+  });
+
+  test('a refusal always says why', () => {
+    // Tournament Control prints this reason verbatim. A refusal without one would leave a director
+    // looking at a disabled Release button and no way to find out what to do about it.
+    const { rooms, matches } = releasableRound();
+    matches[0].roomId = undefined;
+
+    const check = checkRoundRelease(matches, rooms, 1);
+
+    expect(check.canRelease).toBe(false);
+    expect(check.reason).toBeTruthy();
+  });
+
+  test('the reason distinguishes an unassigned game from a disabled room', () => {
+    // These used to read identically on screen — one generic sentence covered every refusal — which
+    // sent directors to the wrong page for half of them.
+    const unassigned = releasableRound();
+    unassigned.matches[0].roomId = undefined;
+
+    const disabled = releasableRound();
+    disabled.rooms[0].enabled = false;
+
+    const unassignedReason = checkRoundRelease(unassigned.matches, unassigned.rooms, 1).reason;
+    const disabledReason = checkRoundRelease(disabled.matches, disabled.rooms, 1).reason;
+
+    expect(unassignedReason).not.toBe(disabledReason);
+    expect(disabledReason).toMatch(/disabled/i);
+  });
+
+  test('an empty round says so rather than blaming assignments', () => {
+    expect(checkRoundRelease([], [], 9).reason).toMatch(/no games/i);
   });
 });
