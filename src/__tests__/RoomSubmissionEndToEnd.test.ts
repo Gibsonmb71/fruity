@@ -104,6 +104,12 @@ beforeEach(async () => {
       submissions.push(submission);
       service.handleSubmission(submission);
     },
+    onRoomPlayerAdd: (request) => {
+      const team = tournament.getListOfAllTeams().find((candidate) => candidate.name === request.teamName);
+      if (team && !team.players.some((player) => player.name === request.playerName)) {
+        team.players.push(new Player(request.playerName));
+      }
+    },
   });
   server.setTournamentSnapshot(snapshotFor(tournament));
 
@@ -407,6 +413,40 @@ describe('the full path from room submission to an accepted match', () => {
 });
 
 describe('validation failures reaching the inbox', () => {
+  test('an offline final replays its roster-add intent before inbox validation', async () => {
+    const addedName = 'Offline Taylor';
+    const qbj = makeModaqQbjMatch({
+      left: {
+        name: testTeamNames[0],
+        bonusPoints: 100,
+        players: [{ name: addedName, tossupsHeard: 20, buzzes: [[10, 5]] }],
+      },
+      right: {
+        name: testTeamNames[1],
+        bonusPoints: 80,
+        players: [{ name: `${testTeamNames[1]} Player 1`, tossupsHeard: 20, buzzes: [[10, 4]] }],
+      },
+    }) as Record<string, unknown>;
+    qbj._yf_scorekeeper_recovery = {
+      version: 1,
+      setup: {
+        left: { name: testTeamNames[0], players: [`${testTeamNames[0]} Player 1`] },
+        right: { name: testTeamNames[1], players: [`${testTeamNames[1]} Player 1`] },
+      },
+      events: [{ id: 'roster-1', type: 'roster-add', questionNumber: 15, team: 'left', playerName: addedName }],
+    };
+
+    await playAndSubmit(qbj, 1);
+
+    expect(
+      tournament
+        .getListOfAllTeams()
+        .find((team) => team.name === testTeamNames[0])
+        ?.players.some((player) => player.name === addedName),
+    ).toBe(true);
+    expect(service.inbox[0].importResult.status).not.toBe(ImportResultStatus.FatalErr);
+  });
+
   test('a final that races roster synchronization is revalidated in place after the player is appended', async () => {
     const addedName = 'Taylor Brown';
     const qbj = makeModaqQbjMatch({
@@ -432,6 +472,9 @@ describe('validation failures reaching the inbox', () => {
     expect(service.inbox[0].sessionId).toBe(session.sessionId);
     expect(service.inbox[0].importResult.status).not.toBe(ImportResultStatus.FatalErr);
     expect(tournament.getRoundObjByNumber(1)?.matches).toHaveLength(0);
+    expect(service.acceptSubmission(session.sessionId)).toBe(true);
+    expect(service.acceptSubmission(session.sessionId)).toBe(false);
+    expect(tournament.getRoundObjByNumber(1)?.matches).toHaveLength(1);
   });
 
   test('a game with errors requires an explicit override to accept', async () => {

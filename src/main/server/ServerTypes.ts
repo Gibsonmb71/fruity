@@ -88,8 +88,8 @@ export interface ITournamentSnapshot {
   teams: IRoomTeam[];
   /**
    * MODAQ game format derived from the tournament's scoring rules, or null if the rules can't be
-   * represented in MODAQ. When null, `gameFormatErrors` explains why and rooms must refuse to
-   * start a game.
+   * represented in MODAQ. When null, `gameFormatErrors` explains why and only the explicit legacy
+   * scorer must refuse to start; first-party readiness uses `scoringFormat` below.
    */
   gameFormat: IModaqGameFormat | null;
   gameFormatErrors: string[];
@@ -342,7 +342,7 @@ export enum RoomBlockedReason {
   FutureRound = 'futureRound',
   /** Already accepted or cancelled; handing it back out would let a room re-score it */
   AlreadyResolved = 'alreadyResolved',
-  /** The tournament's scoring rules can't be represented in MODAQ */
+  /** The selected scorer cannot use the tournament's scoring rules. */
   RulesUnusable = 'rulesUnusable',
   /** The room is disabled */
   RoomDisabled = 'roomDisabled',

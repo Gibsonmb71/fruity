@@ -119,6 +119,12 @@ test('a room-added player appends once, preserves player identity, and marks the
   expect(team.players.find((player) => player.name === 'Taylor Brown')).toBeInstanceOf(Player);
   expect(team.players[0]).toBe(existing);
   expect(mgr.unsavedData).toBe(true);
+  expect(
+    mgr.tournamentServerService
+      .buildTournamentSnapshot()
+      .teams.find((candidate) => candidate.name === team.name)
+      ?.players.map((player) => player.name),
+  ).toContain('Taylor Brown');
 
   expect(
     mgr.addPlayerFromRoom({
