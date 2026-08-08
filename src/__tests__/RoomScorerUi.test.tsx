@@ -35,7 +35,12 @@ function formatFor(mutate: (rules: ScoringRules) => void = () => {}): IScorekeep
 
 let gameCounter = 0;
 
-function renderScorer(format: IScorekeeperFormat, onSubmit = vi.fn().mockResolvedValue({ ok: true, message: 'Sent' })) {
+function renderScorer(
+  format: IScorekeeperFormat,
+  onSubmit?: ReturnType<typeof vi.fn>,
+  onRequestControl?: (category: any, message: string) => Promise<void>,
+) {
+  const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   render(
     <ScorerHost
@@ -47,10 +52,11 @@ function renderScorer(format: IScorekeeperFormat, onSubmit = vi.fn().mockResolve
       roundName="4"
       roomName="Room 204"
       connection={RoomConnectionState.Connected}
-      onSubmit={onSubmit}
+      onSubmit={submit}
+      onRequestControl={onRequestControl}
     />,
   );
-  return { onSubmit };
+  return { onSubmit: submit };
 }
 
 /** The scoring buttons on one player's row. */
@@ -313,6 +319,16 @@ describe('the recent rail', () => {
 });
 
 describe('the game menu', () => {
+  test('keeps operational tools behind the single Game menu', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByText('Game'));
+
+    expect(screen.getByText('Issue / tournament control')).toBeTruthy();
+    expect(screen.getByText('Full scoresheet review')).toBeTruthy();
+    expect(screen.getByText('Download QBJ backup')).toBeTruthy();
+    expect(screen.getByText('Recover from QBJ')).toBeTruthy();
+  });
+
   test('lightning is offered only when the format has lightning rounds', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByText('Game'));
@@ -363,6 +379,46 @@ describe('the game menu', () => {
 
     expect(screen.queryByText('Sarah Mitchell')).toBeNull();
     expect(screen.getByText('James Robinson')).toBeTruthy();
+  });
+
+  test('a player can be added during a game and the roster change is sent to control', async () => {
+    const requestControl = vi.fn().mockResolvedValue(undefined);
+    renderScorer(formatFor(), undefined, requestControl);
+    fireEvent.click(screen.getByText('Game'));
+    fireEvent.click(screen.getByText('Players'));
+
+    fireEvent.change(screen.getByLabelText('Add player during game', { selector: '#scorer-add-player-left' }), {
+      target: { value: 'Taylor Brooks' },
+    });
+    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByText('Add to bench'));
+
+    await vi.waitFor(() =>
+      expect(requestControl).toHaveBeenCalledWith('roster-change', expect.stringContaining('Taylor Brooks')),
+    );
+  });
+
+  test('reviewing the scoresheet can correct an earlier ruling', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+    fireEvent.click(screen.getByText('Game'));
+    fireEvent.click(screen.getByText('Full scoresheet review'));
+    fireEvent.click(screen.getByText('Edit'));
+
+    fireEvent.change(screen.getByLabelText('Ruling'), { target: { value: '0' } }); // +15
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(scoreOf('Ninety Six')).toBe('15');
+  });
+
+  test('a protest is saved and can request tournament control', async () => {
+    const requestControl = vi.fn().mockResolvedValue(undefined);
+    renderScorer(formatFor(), undefined, requestControl);
+    fireEvent.click(screen.getByText('Game'));
+    fireEvent.click(screen.getByText('Issue / tournament control'));
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The ruling was disputed.' } });
+    fireEvent.click(screen.getByText('Save and request control'));
+
+    await vi.waitFor(() => expect(requestControl).toHaveBeenCalledWith('protest', 'The ruling was disputed.'));
   });
 });
 

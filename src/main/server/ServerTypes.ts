@@ -472,6 +472,10 @@ export interface IRoomPresenceUpdateRequest {
 export type HelpRequestCategory =
   | 'wrong-matchup'
   | 'team-missing'
+  | 'protest'
+  | 'question-packet'
+  | 'roster-change'
+  | 'equipment-technical'
   | 'rules-question'
   | 'scoring-problem'
   | 'device-network'
@@ -482,6 +486,10 @@ export type HelpRequestState = 'open' | 'resolved' | 'cancelled';
 export const helpRequestCategoryLabels: Record<HelpRequestCategory, string> = {
   'wrong-matchup': 'Wrong matchup',
   'team-missing': "Team hasn't arrived",
+  protest: 'Protest / disputed ruling',
+  'question-packet': 'Question / packet issue',
+  'roster-change': 'Roster change',
+  'equipment-technical': 'Equipment / technical issue',
   'rules-question': 'Rules question',
   'scoring-problem': 'Scoring problem',
   'device-network': 'Device/network problem',
