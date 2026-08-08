@@ -120,11 +120,12 @@ describe('when the kit may be used', () => {
     expect(describeUnusableKit(null)).toContain('has not loaded tournament information');
   });
 
-  test('a kit without usable scoring rules is refused', () => {
+  test('a MODAQ-incompatible kit remains usable first-party and is refused by the legacy scorer', () => {
     const kit = buildScoringKit(source({ gameFormat: null }));
 
-    expect(isScoringKitUsable(kit)).toBe(false);
-    expect(describeUnusableKit(kit)).toContain('scoring rules');
+    expect(isScoringKitUsable(kit)).toBe(true);
+    expect(isScoringKitUsable(kit, new Date(), 'legacy')).toBe(false);
+    expect(describeUnusableKit(kit, new Date(), 'legacy')).toContain('scoring rules');
   });
 
   test('a kit from a previous tournament is too old to trust', () => {

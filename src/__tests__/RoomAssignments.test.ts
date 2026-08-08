@@ -14,6 +14,7 @@ import {
   IAssignmentDescriptor,
   IMatchSubmission,
   IRoomDescriptor,
+  IRoomPlayerAddRequest,
   ITournamentSnapshot,
   RoomBlockedReason,
   SessionStatus,
@@ -107,10 +108,12 @@ let baseUrl: string;
 let bundleDir: string;
 let submissions: IMatchSubmission[];
 let startedSessions: { sessionId: string; scheduledMatchId: string }[];
+let playerAdds: IRoomPlayerAddRequest[];
 
 beforeEach(async () => {
   submissions = [];
   startedSessions = [];
+  playerAdds = [];
   bundleDir = mkdtempSync(path.join(tmpdir(), 'yf-room-assign-'));
   writeFileSync(path.join(bundleDir, 'index.html'), '<!doctype html><title>Room</title>');
 
@@ -118,6 +121,7 @@ beforeEach(async () => {
     roomBundleDirectory: bundleDir,
     onFinalSubmission: (s) => submissions.push(s),
     onSessionStarted: (sessionId, scheduledMatchId) => startedSessions.push({ sessionId, scheduledMatchId }),
+    onRoomPlayerAdd: (request) => playerAdds.push(request),
   });
   server.setTournamentSnapshot(makeSnapshot());
   await server.start(0);
@@ -138,11 +142,30 @@ async function getAssignment(roomId: string, token: string) {
 }
 
 /** POST to start a room's assigned game */
-async function startMatch(roomId: string, token: string, scheduledMatchId: string) {
+async function startMatch(roomId: string, token: string, scheduledMatchId: string, scorer?: 'first-party' | 'legacy') {
   const res = await fetch(`${baseUrl}/api/v1/rooms/${roomId}/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', [roomTokenHeader]: token },
-    body: JSON.stringify({ scheduledMatchId }),
+    body: JSON.stringify({ scheduledMatchId, scorer }),
+  });
+  return { res, body: await res.json().catch(() => null) };
+}
+
+async function addPlayer(
+  roomId: string,
+  roomToken: string,
+  credentials: { sessionId: string; token: string },
+  teamName: string,
+  playerName: string,
+) {
+  const res = await fetch(`${baseUrl}/api/v1/rooms/${roomId}/players`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      [roomTokenHeader]: roomToken,
+      [sessionTokenHeader]: credentials.token,
+    },
+    body: JSON.stringify({ sessionId: credentials.sessionId, teamName, playerName }),
   });
   return { res, body: await res.json().catch(() => null) };
 }
@@ -466,15 +489,18 @@ describe('operational safeguards', () => {
     expect(res.status).toBe(201);
   });
 
-  test('unusable scoring rules block a room and explain why', async () => {
+  test('MODAQ-incompatible rules allow first-party scoring but still block the legacy scorer', async () => {
     server.setTournamentSnapshot(
       makeSnapshot({ gameFormat: null, gameFormatErrors: ['Lightning rounds cannot be scored.'] }),
     );
 
     const { body } = await getAssignment('room-101', 'token-for-101');
+    const legacy = await startMatch('room-101', 'token-for-101', 'sched-r1-101', 'legacy');
 
-    expect(body.blockedReason).toBe(RoomBlockedReason.RulesUnusable);
+    expect(body.blockedReason).toBeUndefined();
     expect(body.gameFormatErrors[0]).toContain('Lightning');
+    expect(legacy.res.status).toBe(409);
+    expect(legacy.body.blockedReason).toBe(RoomBlockedReason.RulesUnusable);
   });
 
   test('Hold blocks new sessions but an existing game can resume, snapshot, and submit', async () => {
@@ -533,9 +559,16 @@ describe('room presence and help', () => {
     const refused = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
-      body: JSON.stringify({ deviceId: 'device-c', ready: true }),
+      body: JSON.stringify({ deviceId: 'device-c', ready: true, scorer: 'first-party' }),
     });
-    expect(refused.status).toBe(409);
+    expect(refused.status).toBe(200);
+
+    const legacyRefused = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'device-d', ready: true, scorer: 'legacy' }),
+    });
+    expect(legacyRefused.status).toBe(409);
   });
 
   test('help requests carry room/operator/match context and never expose credentials', async () => {
@@ -617,6 +650,44 @@ describe('reconnection and duplicate prevention', () => {
     });
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe('room roster additions', () => {
+  async function beginPlaying() {
+    const { body } = await startMatch('room-101', 'token-for-101', 'sched-r1-101');
+    await fetch(`${baseUrl}/api/v1/sessions/${body.sessionId}/snapshot`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: body.token },
+      body: JSON.stringify(assignedMatchQbj()),
+    });
+    const assignments = makeAssignments();
+    assignments[0].status = ScheduledMatchStatus.Playing;
+    server.setTournamentSnapshot(makeSnapshot({ assignments }));
+    return { sessionId: body.sessionId as string, token: body.token as string };
+  }
+
+  test('the authenticated playing room can request a player for one of its two teams', async () => {
+    const credentials = await beginPlaying();
+    const { res } = await addPlayer('room-101', 'token-for-101', credentials, testTeamNames[0], 'Taylor Brown');
+
+    expect(res.status).toBe(202);
+    expect(playerAdds).toEqual([
+      expect.objectContaining({
+        roomId: 'room-101',
+        sessionId: credentials.sessionId,
+        teamName: testTeamNames[0],
+        playerName: 'Taylor Brown',
+      }),
+    ]);
+  });
+
+  test('a playing room cannot add a player to an unrelated team', async () => {
+    const credentials = await beginPlaying();
+    const { res } = await addPlayer('room-101', 'token-for-101', credentials, testTeamNames[2], 'Taylor Brown');
+
+    expect(res.status).toBe(403);
+    expect(playerAdds).toEqual([]);
   });
 });
 

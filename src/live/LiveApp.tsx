@@ -52,7 +52,12 @@ function usePublicSnapshot() {
           headers: { Accept: 'application/json' },
         });
         if (response.status === 404) {
-          if (!stopped) setConnection('disabled');
+          if (!stopped) {
+            // A director can turn the public view off while somebody is looking at it. Do not
+            // leave the last private/public snapshot on screen after that explicit refusal.
+            setSnapshot(null);
+            setConnection('disabled');
+          }
           return;
         }
         if (!response.ok) throw new Error(`Live snapshot request failed: ${response.status}`);
@@ -107,7 +112,10 @@ function usePublicPairingsSnapshot() {
       try {
         const response = await fetch('/api/v1/public/pairings', { cache: 'no-store' });
         if (response.status === 404) {
-          if (!stopped) setConnection('disabled');
+          if (!stopped) {
+            setSnapshot(null);
+            setConnection('disabled');
+          }
           return;
         }
         if (!response.ok) throw new Error(`Public pairings request failed: ${response.status}`);
@@ -171,12 +179,17 @@ function PublicPairingsApp() {
               <span>Find a team</span>
               <input
                 id="public-pairings-search"
+                type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Team name"
                 aria-label="Find a team"
               />
             </div>
+            <p className="live-pairings-count" aria-live="polite">
+              {assignments.length} {assignments.length === 1 ? 'pairing' : 'pairings'}
+              {normalizedQuery ? ` matching “${query.trim()}”` : ''}
+            </p>
             {assignments.length === 0 ? (
               <EmptyMessage message={pairingsEmptyMessage(Boolean(snapshot.round), normalizedQuery !== '')} />
             ) : (
@@ -233,6 +246,7 @@ function AudienceApp({ snapshot, connection }: { snapshot: IPublicLiveSnapshot |
                 className={activeView === view ? 'is-active' : ''}
                 key={view}
                 type="button"
+                aria-pressed={activeView === view}
                 onClick={() => setActiveView(view)}
               >
                 {label}
@@ -547,12 +561,18 @@ function DisplayApp({ snapshot, connection }: { snapshot: IPublicLiveSnapshot | 
   }, []);
 
   const activeSlide = slides[currentSlide];
+  let emptyMessage: string | undefined;
+  if (snapshot && connection === 'connected' && slides.length === 0) {
+    emptyMessage = fixedMode
+      ? 'This display view has no published data yet.'
+      : 'No display slides are enabled. Ask tournament control to enable at least one slide.';
+  }
   return (
     <div className="display-shell" data-theme={theme}>
       {activeSlide ? (
         <DisplaySlideView snapshot={snapshot as IPublicLiveSnapshot} slide={activeSlide} />
       ) : (
-        <DisplayEmpty snapshot={snapshot} connection={connection} />
+        <DisplayEmpty snapshot={snapshot} connection={connection} message={emptyMessage} />
       )}
       {snapshot && connection !== 'connected' && (
         <div className="display-connection-badge">
@@ -633,25 +653,30 @@ function DisplayTeams({
   rows: IPublicTeamStanding[];
   metricLabels: IPublicLiveSnapshot['metricLabels'];
 }) {
+  if (rows.length === 0) return <DisplayMessage message="Team standings are not available yet." />;
   return (
     <div className="display-table-wrap">
       <table className="display-table">
         <thead>
           <tr>
-            <th>Rank</th>
-            <th className="display-wide-cell">Team</th>
-            <th>Record</th>
-            <th>Pct</th>
-            <th>{metricLabels.teamPpg}</th>
-            {metricLabels.teamPpb && <th>{metricLabels.teamPpb}</th>}
-            <th>TUH</th>
+            <th scope="col">Rank</th>
+            <th scope="col" className="display-wide-cell">
+              Team
+            </th>
+            <th scope="col">Record</th>
+            <th scope="col">Pct</th>
+            <th scope="col">{metricLabels.teamPpg}</th>
+            {metricLabels.teamPpb && <th scope="col">{metricLabels.teamPpb}</th>}
+            <th scope="col">TUH</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={`${row.teamName}-${row.rank}`}>
               <td>{row.rank || '—'}</td>
-              <th className="display-wide-cell">{row.teamName}</th>
+              <th scope="row" className="display-wide-cell">
+                {row.teamName}
+              </th>
               <td>{row.record}</td>
               <td>{formatPct(row.winPct)}</td>
               <td>{formatNumber(row.ppg, 1)}</td>
@@ -674,19 +699,25 @@ function DisplayIndividuals({ rows, metricLabel }: { rows: IPublicIndividualStan
         <table className="display-table">
           <thead>
             <tr>
-              <th>Rank</th>
-              <th className="display-wide-cell">Player</th>
-              <th className="display-wide-cell">Team</th>
-              <th>GP</th>
-              <th>TUH</th>
-              <th>{metricLabel}</th>
+              <th scope="col">Rank</th>
+              <th scope="col" className="display-wide-cell">
+                Player
+              </th>
+              <th scope="col" className="display-wide-cell">
+                Team
+              </th>
+              <th scope="col">GP</th>
+              <th scope="col">TUH</th>
+              <th scope="col">{metricLabel}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={`${row.playerName}-${row.teamName}`}>
                 <td>{row.rank || '—'}</td>
-                <th className="display-wide-cell">{row.playerName}</th>
+                <th scope="row" className="display-wide-cell">
+                  {row.playerName}
+                </th>
                 <td className="display-wide-cell">{row.teamName}</td>
                 <td>{row.gamesPlayed.toFixed(1)}</td>
                 <td>{row.tossupsHeard}</td>
@@ -756,13 +787,28 @@ function DisplayAssignments({ assignments }: { assignments: IPublicNextRoundAssi
   );
 }
 
-function DisplayEmpty({ snapshot, connection }: { snapshot: IPublicLiveSnapshot | null; connection: ConnectionState }) {
+function DisplayEmpty({
+  snapshot,
+  connection,
+  message,
+}: {
+  snapshot: IPublicLiveSnapshot | null;
+  connection: ConnectionState;
+  message: string | undefined;
+}) {
   return (
     <main className="display-empty">
       <div className="display-empty-mark">YF</div>
       <p className="display-kicker">YellowFruit Live</p>
       <h1>{snapshot?.tournamentName ?? 'Live tournament display'}</h1>
-      <ConnectionPanel connection={connection} />
+      {message ? (
+        <div className="live-connection-panel">
+          <strong>{message}</strong>
+          <span>The live display is connected and will update when a view becomes available.</span>
+        </div>
+      ) : (
+        <ConnectionPanel connection={connection} />
+      )}
     </main>
   );
 }
@@ -805,7 +851,7 @@ function ConnectionStatus({ state }: { state: ConnectionState }) {
   else if (state === 'disabled') label = 'Unavailable';
   else if (state === 'reconnecting') label = 'Reconnecting';
   return (
-    <span className={`live-status live-status-${state}`}>
+    <span className={`live-status live-status-${state}`} role="status" aria-live="polite">
       <span className="live-status-dot" aria-hidden="true" />
       {label}
     </span>

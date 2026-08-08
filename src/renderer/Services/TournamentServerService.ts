@@ -21,6 +21,7 @@ import {
   IHelpRequest,
   INetworkAddress,
   IRoomPresence,
+  IRoomPlayerAddRequest,
   IServerStatus,
   ISessionSummary,
   SessionStatus,
@@ -48,6 +49,8 @@ export interface IInboxItem {
   finalFingerprint?: string;
   /** Result of running the submission through the shared QBJ importer */
   importResult: MatchImportResult;
+  /** Original durable final, retained so roster synchronization can re-run normal import validation. */
+  submission: IMatchSubmission;
 }
 
 /**
@@ -128,6 +131,9 @@ export default class TournamentServerService {
   /** Called when operational scheduling state changes outside of a result import. */
   onScheduleChanged: () => void;
 
+  /** Renderer-owned Tournament mutation supplied by TournamentManager. */
+  onRoomPlayerAdd: (request: IRoomPlayerAddRequest) => void;
+
   private tournament: Tournament;
 
   constructor(tournament: Tournament) {
@@ -135,6 +141,7 @@ export default class TournamentServerService {
     this.dataChangedReactCallback = () => {};
     this.onMatchAccepted = () => {};
     this.onScheduleChanged = () => {};
+    this.onRoomPlayerAdd = () => {};
   }
 
   private static readonly preferredNetworkAddressStorageKey = 'yellowfruit.preferred-network-address';
@@ -368,6 +375,11 @@ export default class TournamentServerService {
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerHelpRequestsChanged, (requests) => {
       this.helpRequests = (requests as IHelpRequest[]) ?? [];
       this.dataChangedReactCallback();
+    });
+    window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerRoomPlayerAddRequested, (payload) => {
+      const request = payload as IRoomPlayerAddRequest;
+      if (request.tournamentKey && request.tournamentKey !== this.recoveryKey()) return;
+      this.onRoomPlayerAdd(request);
     });
   }
 
@@ -1036,10 +1048,33 @@ export default class TournamentServerService {
         finalRevision: submission.finalRevision,
         finalFingerprint: submission.finalFingerprint,
         importResult,
+        submission,
       },
       ...this.inbox.filter((item) => item.sessionId !== submission.sessionId),
     ];
     this.dataChangedReactCallback();
+  }
+
+  /** Re-run the ordinary QBJ importer for pending finals affected by an authoritative roster append. */
+  revalidatePendingSubmissionsForTeam(teamName: string) {
+    const service = new MatchImportService(this.tournament);
+    let changed = false;
+    this.inbox = this.inbox.map((item) => {
+      if (item.leftTeam !== teamName && item.rightTeam !== teamName) return item;
+      const round = this.tournament.getRoundObjByNumber(item.roundNumber);
+      const { results, hadInvalidJson } = service.importMatches(
+        [{ filePath: item.importResult.filePath, fileContents: JSON.stringify(item.submission.qbj) }],
+        round,
+      );
+      let importResult: MatchImportResult;
+      if (hadInvalidJson || results.length === 0) {
+        importResult = new MatchImportResult(item.importResult.filePath);
+        importResult.markFatal("This room's submission could not be read as a QBJ match.");
+      } else [importResult] = results;
+      changed = true;
+      return { ...item, importResult };
+    });
+    if (changed) this.dataChangedReactCallback();
   }
 
   /**

@@ -3,8 +3,10 @@
  */
 import { describe, expect, test } from 'vitest';
 import { clearGame, gameSessionMaxAgeMs, gameSessionVersion, loadGame, saveGame } from '../room/scorer/GameSession';
-import { IGameSetup } from '../room/scoring/deriveGame';
+import deriveGame, { IGameSetup } from '../room/scoring/deriveGame';
 import { ScoreEvent } from '../room/scoring/ScoreEvents';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
+import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const store = { ...initial };
@@ -41,6 +43,37 @@ describe('saving and resuming', () => {
 
     expect(loaded?.events).toEqual(events);
     expect(loaded?.setup.left.name).toBe('Ninety Six');
+  });
+
+  test('an offline-added player survives reload with exact TUH and points', () => {
+    const storage = memoryStorage();
+    const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+    rules.maximumPlayersPerTeam = 1;
+    const format = scoringRulesToScorekeeperFormat(rules);
+    const ten = format.answerTypes.find((answerType) => answerType.value === 10)!.index;
+    const offlineEvents: ScoreEvent[] = [
+      { id: 'dead-1', type: 'tossup-dead', questionNumber: 1 },
+      { id: 'add-1', type: 'roster-add', questionNumber: 2, team: 'left', playerName: 'Taylor' },
+      { id: 'lineup-1', type: 'substitution', questionNumber: 2, team: 'left', activePlayers: ['Taylor'] },
+      {
+        id: 'buzz-2',
+        type: 'tossup-buzz',
+        questionNumber: 2,
+        team: 'left',
+        playerName: 'Taylor',
+        answerTypeIndex: ten,
+      },
+      { id: 'bonus-2', type: 'bonus', questionNumber: 2, team: 'left', controlledPoints: 20 },
+    ];
+    saveGame('session-offline', setup, offlineEvents, now, storage);
+
+    const loaded = loadGame('session-offline', now, storage)!;
+    const game = deriveGame(format, loaded.setup, loaded.events);
+    const taylor = game.left.players.find((player) => player.name === 'Taylor');
+
+    expect(taylor?.tossupsHeard).toBe(1);
+    expect(taylor?.points).toBe(10);
+    expect(game.left.points).toBe(30);
   });
 
   test('saving twice replaces rather than accumulating, so a reload does not duplicate the game', () => {
@@ -120,6 +153,29 @@ describe('what is refused', () => {
         gameKey: 'session-a',
         setup: {},
         events,
+        updatedAt: now.toISOString(),
+      }),
+    });
+
+    expect(loadGame('session-a', now, storage)).toBeNull();
+  });
+
+  test('a saved game with an individually malformed event is refused', () => {
+    const storage = memoryStorage({
+      'yellowfruit.room.game.v1.session-a': JSON.stringify({
+        version: gameSessionVersion,
+        gameKey: 'session-a',
+        setup,
+        events: [
+          {
+            id: 'bad-event',
+            type: 'tossup-buzz',
+            questionNumber: 'one',
+            team: 'left',
+            playerName: 'Sarah',
+            answerTypeIndex: 0,
+          },
+        ],
         updatedAt: now.toISOString(),
       }),
     });

@@ -8,13 +8,18 @@
  */
 import { ScheduledMatchStatus } from '../../renderer/DataModel/ScheduledMatch';
 import { IModaqGameFormat } from '../../renderer/Services/YellowFruitScoringRulesToModaq';
-import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
+import type { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 
 /** Default port for the local tournament server */
 export const defaultServerPort = 4732;
 
 /** Largest request body the server will accept, in bytes. Room submissions are small JSON. */
 export const maxRequestBodyBytes = 512 * 1024;
+
+/** Mirrors Player.nameMaxLength without importing renderer model objects into the main process. */
+export const roomPlayerNameMaxLength = 200;
+/** Mirrors Team.maxPlayers without importing renderer model objects into the main process. */
+export const roomTeamMaxPlayers = 100;
 
 /** Header a room client uses to prove it owns the session it's writing to */
 export const sessionTokenHeader = 'x-yf-session-token';
@@ -49,6 +54,15 @@ export interface IRoomPlayer {
   name: string;
 }
 
+/** Narrow, authenticated request forwarded from a playing room to the authoritative renderer. */
+export interface IRoomPlayerAddRequest {
+  roomId: string;
+  sessionId: string;
+  teamName: string;
+  playerName: string;
+  tournamentKey?: string;
+}
+
 /** One team a room is allowed to pick */
 export interface IRoomTeam {
   /** Team name, exactly as YellowFruit knows it. Used to match the match back on import. */
@@ -74,8 +88,8 @@ export interface ITournamentSnapshot {
   teams: IRoomTeam[];
   /**
    * MODAQ game format derived from the tournament's scoring rules, or null if the rules can't be
-   * represented in MODAQ. When null, `gameFormatErrors` explains why and rooms must refuse to
-   * start a game.
+   * represented in MODAQ. When null, `gameFormatErrors` explains why and only the explicit legacy
+   * scorer must refuse to start; first-party readiness uses `scoringFormat` below.
    */
   gameFormat: IModaqGameFormat | null;
   gameFormatErrors: string[];
@@ -289,10 +303,13 @@ export interface ISessionStateResponse {
 }
 
 /** Request body for creating a session */
+export type RoomScorerKind = 'first-party' | 'legacy';
+
 export interface ICreateSessionRequest {
   roundNumber: number;
   leftTeam: string;
   rightTeam: string;
+  scorer?: RoomScorerKind;
 }
 
 // #endregion
@@ -325,7 +342,7 @@ export enum RoomBlockedReason {
   FutureRound = 'futureRound',
   /** Already accepted or cancelled; handing it back out would let a room re-score it */
   AlreadyResolved = 'alreadyResolved',
-  /** The tournament's scoring rules can't be represented in MODAQ */
+  /** The selected scorer cannot use the tournament's scoring rules. */
   RulesUnusable = 'rulesUnusable',
   /** The room is disabled */
   RoomDisabled = 'roomDisabled',
@@ -409,6 +426,7 @@ export interface ISessionResumeInfo {
 export interface IStartAssignedMatchRequest {
   /** Which assignment the room believes it is starting, so a stale page can't start the wrong game */
   scheduledMatchId: string;
+  scorer?: RoomScorerKind;
 }
 
 /** A running score line derived from a QBJ snapshot, for the desktop live dashboard */
@@ -467,6 +485,7 @@ export interface IRoomPresenceUpdateRequest {
   deviceId?: string;
   operatorName?: string;
   ready?: boolean;
+  scorer?: RoomScorerKind;
 }
 
 export type HelpRequestCategory =

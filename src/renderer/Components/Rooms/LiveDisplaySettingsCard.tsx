@@ -29,7 +29,9 @@ export default function LiveDisplaySettingsCard() {
 
   if (!service) return null;
 
-  const address = service.status.addresses[0] ?? '';
+  // Use the same interface the room setup and QR sheets advertise. The first detected interface
+  // is not necessarily reachable by spectators when the laptop has Wi-Fi and Ethernet enabled.
+  const address = service.selectedAddress;
   const audienceUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live`;
   const displayUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live/display`;
   const pairingsUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live/pairings`;
@@ -96,7 +98,12 @@ export default function LiveDisplaySettingsCard() {
         </div>
         <div className="rooms-live-settings-body">
           <div className="rooms-live-setting-column">
-            <Typography variant="subtitle2">Slides enabled</Typography>
+            <Typography variant="subtitle2">{settings.enabled ? 'Slides enabled' : 'Display currently off'}</Typography>
+            {!settings.enabled && (
+              <Typography variant="body2" color="text.secondary">
+                These settings are saved for when you turn the live display on.
+              </Typography>
+            )}
             <Stack spacing={0.25}>
               <SlideCheckbox
                 label="Team standings"

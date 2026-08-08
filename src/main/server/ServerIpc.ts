@@ -14,6 +14,7 @@ import {
   IHelpRequest,
   IMatchSubmission,
   IRoomPresence,
+  IRoomPlayerAddRequest,
   IServerStatus,
   ISessionSummary,
   ISubmissionVerdict,
@@ -68,6 +69,10 @@ function handleHelpRequestsChanged(requests: IHelpRequest[]) {
   sendToRenderer(IpcMainToRend.TournamentServerHelpRequestsChanged, requests);
 }
 
+function handleRoomPlayerAdd(request: IRoomPlayerAddRequest) {
+  sendToRenderer(IpcMainToRend.TournamentServerRoomPlayerAddRequested, request);
+}
+
 function getServer(): TournamentServer {
   if (!server) {
     server = new TournamentServer({
@@ -78,6 +83,7 @@ function getServer(): TournamentServer {
       onSessionsChanged: handleSessionsChanged,
       onSessionStarted: handleSessionStarted,
       onHelpRequestsChanged: handleHelpRequestsChanged,
+      onRoomPlayerAdd: handleRoomPlayerAdd,
     });
   }
   return server;

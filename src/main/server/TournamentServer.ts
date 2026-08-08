@@ -14,6 +14,7 @@ import {
   IMatchSubmission,
   INetworkAddress,
   IRoomPresence,
+  IRoomPlayerAddRequest,
   IServerStatus,
   ISessionSummary,
   ISubmissionVerdict,
@@ -22,6 +23,7 @@ import {
   defaultServerPort,
   emptyTournamentSnapshot,
   staleRoomThresholdMs,
+  roomPlayerNameMaxLength,
 } from './ServerTypes';
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
 
@@ -65,6 +67,8 @@ export interface ITournamentServerOptions {
   onSessionStarted?: (sessionId: string, scheduledMatchId: string, tournamentKey?: string) => void;
   /** Called when a room creates or closes an operational help request. */
   onHelpRequestsChanged?: (requests: IHelpRequest[]) => void;
+  /** Called after the HTTP layer authenticates and scopes a room roster addition. */
+  onRoomPlayerAdd?: (request: IRoomPlayerAddRequest) => void;
   /** Small versioned JSON file in app-data used to restore active room sessions after a restart. */
   recoveryFilePath?: string;
 }
@@ -143,6 +147,7 @@ export default class TournamentServer {
       getHelpRequests: () => this.getHelpRequests(),
       createHelpRequest: (roomId, request) => this.createHelpRequest(roomId, request),
       updateHelpRequest: (id, status, note) => this.updateHelpRequest(id, status, note),
+      onRoomPlayerAdd: (request) => this.options.onRoomPlayerAdd?.(request),
       serveStatic: (req, res, pathname) => this.serveStatic(req, res, pathname),
     };
     this.router = new Router(host);
@@ -640,6 +645,30 @@ export default class TournamentServer {
       finalFingerprint: session.finalFingerprint,
     };
     try {
+      // `roster-add` is already the durable offline intent embedded by the first-party scorer.
+      // Forward it before the final so a reconnect cannot permanently strand that final in the
+      // inbox merely because result delivery won a race with the normal assignment-poll retry.
+      const recovery = (session.latestQbj as Record<string, unknown>)._yf_scorekeeper_recovery as
+        | { events?: unknown[] }
+        | undefined;
+      for (const candidate of recovery?.events ?? []) {
+        if (typeof candidate !== 'object' || candidate === null) continue;
+        const event = candidate as Record<string, unknown>;
+        if (event.type !== 'roster-add' || (event.team !== 'left' && event.team !== 'right')) continue;
+        const playerName = typeof event.playerName === 'string' ? event.playerName.trim() : '';
+        if (!playerName || playerName.length > roomPlayerNameMaxLength) continue;
+        this.options.onRoomPlayerAdd?.({
+          // Manual first-party sessions are not attached to a configured room, but their
+          // authenticated final carries the same authoritative roster intent. The renderer does
+          // not use roomId to select the team; keep the empty value as provenance instead of
+          // dropping an otherwise valid offline addition.
+          roomId: session.roomId ?? '',
+          sessionId: session.id,
+          teamName: event.team === 'left' ? session.leftTeam : session.rightTeam,
+          playerName,
+          tournamentKey: session.tournamentKey,
+        });
+      }
       this.options.onFinalSubmission(submission);
     } catch (error: unknown) {
       // The final is already durably retained in the recovery store. A renderer callback failure

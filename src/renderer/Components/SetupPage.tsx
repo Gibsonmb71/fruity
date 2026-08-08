@@ -279,7 +279,7 @@ function SetupPreflight({
           <PreflightRow
             label="Browser room scoring"
             status="unknown"
-            actionLabel="Optional"
+            actionLabel="Set up rooms"
             onAction={() => openTarget('control:rooms')}
           />
         )}

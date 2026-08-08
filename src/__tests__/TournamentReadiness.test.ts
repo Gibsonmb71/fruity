@@ -119,7 +119,14 @@ describe('resolveTournamentReadiness', () => {
     });
   });
 
-  test('reports an offline room as an actionable operational block', () => {
+  test('an offline room does not send the director to Match Plan', () => {
+    /*
+     * This used to assert the opposite: state 'schedule-blocked' and a primary action pointing at
+     * Match Plan to "Fix assignment". Both were wrong about a dropped browser. Nothing in
+     * checkCanStart or checkRoundRelease consults presence, so the round was never actually
+     * blocked, and there is no assignment to fix — the schedule is fine and a Chromebook went to
+     * sleep. It is a warning now, and the action that helps points at Rooms.
+     */
     const { tournament, room } = makeScheduledTournament();
 
     const readiness = resolveTournamentReadiness(
@@ -127,8 +134,9 @@ describe('resolveTournamentReadiness', () => {
       runningServer({ roomPresence: [{ roomId: room.id, connected: false }] }),
     );
 
-    expect(readiness.state).toBe('schedule-blocked');
-    expect(readiness.primaryAction?.target).toBe('control:match-plan');
+    expect(readiness.state).not.toBe('schedule-blocked');
+    expect(readiness.primaryAction?.target).not.toBe('control:match-plan');
+    expect(readiness.issues.find((candidate) => candidate.id === 'round-room-offline')?.target).toBe('control:rooms');
   });
 
   test('does not expose release as a command when the authoritative gate blocks it', () => {
@@ -162,5 +170,54 @@ describe('resolveTournamentReadiness', () => {
     expect(readiness.activeIssues.some((currentIssue) => /Match Plan|rooms|server/i.test(currentIssue.message))).toBe(
       false,
     );
+  });
+});
+
+describe('a room browser that drops mid-round', () => {
+  /** A round that is otherwise ready to go, with one room's browser having gone away. */
+  function withDroppedRoom() {
+    const { tournament, room } = makeScheduledTournament();
+    return resolveTournamentReadiness(
+      tournament,
+      runningServer({ roomPresence: [{ roomId: room.id, connected: false }] }),
+    );
+  }
+
+  test('does not block the round, because nothing downstream blocks on it', () => {
+    // checkCanStart and checkRoundRelease never consult presence, so a state of schedule-blocked
+    // told a director the round could not start while the Release button beside it stayed enabled.
+    const readiness = withDroppedRoom();
+
+    expect(readiness.state).not.toBe('schedule-blocked');
+  });
+
+  test('is reported as a warning that names the room', () => {
+    const readiness = withDroppedRoom();
+
+    const warning = readiness.issues.find((candidate) => candidate.id === 'round-room-offline');
+    expect(warning?.severity).toBe('warning');
+    expect(warning?.message).toContain('101');
+    expect(warning?.message).toContain('can still start');
+  });
+
+  test('a room that has never paired is not called dropped', () => {
+    // No presence entry at all is a Chromebook nobody has opened, which is a different problem with
+    // a different remedy. The rooms-not-connected warning covers that one.
+    const { tournament } = makeScheduledTournament();
+
+    const readiness = resolveTournamentReadiness(tournament, runningServer({ roomPresence: [] }));
+
+    expect(readiness.issues.find((candidate) => candidate.id === 'round-room-offline')).toBeUndefined();
+  });
+
+  test('a connected room raises nothing', () => {
+    const { tournament, room } = makeScheduledTournament();
+
+    const readiness = resolveTournamentReadiness(
+      tournament,
+      runningServer({ roomPresence: [{ roomId: room.id, connected: true }] }),
+    );
+
+    expect(readiness.issues.find((candidate) => candidate.id === 'round-room-offline')).toBeUndefined();
   });
 });
