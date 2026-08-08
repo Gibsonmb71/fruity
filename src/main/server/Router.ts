@@ -664,28 +664,24 @@ export default class Router {
         deviceId: typeof body.deviceId === 'string' ? body.deviceId : headerToken(req, deviceIdHeader),
         operatorName: typeof body.operatorName === 'string' ? body.operatorName : headerToken(req, operatorNameHeader),
         ready: typeof body.ready === 'boolean' ? body.ready : undefined,
-        scorer: body.scorer === undefined ? undefined : parseRequestedScorer(body.scorer, this.host.getSnapshot()),
+        scorer: parseRequestedScorer(body.scorer, this.host.getSnapshot()),
       };
     }
 
     const snapshot = this.host.getSnapshot();
-    const readyRulesUsable =
-      update.scorer === undefined
-        ? undefined
-        : update.scorer === 'legacy'
-          ? snapshot.gameFormat !== null
-          : snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
+    let readyRulesUsable: boolean | undefined;
+    if (update.scorer === 'legacy') readyRulesUsable = snapshot.gameFormat !== null;
+    else if (update.scorer === 'first-party')
+      readyRulesUsable =
+        snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
     if (update.ready === true && readyRulesUsable === false) {
       sendError(res, 409, 'This browser cannot be marked ready until usable scoring rules are loaded.');
       return;
     }
     const deviceId = update.deviceId ?? headerToken(req, deviceIdHeader) ?? 'unidentified';
-    this.host.onRoomCheckIn?.(
-      roomId,
-      deviceId,
-      update.operatorName ?? headerToken(req, operatorNameHeader),
-      readyRulesUsable === undefined ? undefined : readyRulesUsable ? update.ready : false,
-    );
+    let readiness: boolean | undefined;
+    if (hasBody) readiness = readyRulesUsable ? update.ready : false;
+    this.host.onRoomCheckIn?.(roomId, deviceId, update.operatorName ?? headerToken(req, operatorNameHeader), readiness);
     sendJson(res, 200, { presence: this.roomPresenceValue(roomId) });
   }
 
