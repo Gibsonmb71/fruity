@@ -31,6 +31,7 @@ jobs:
           start = text.index("          python - <<'PY'") + len("          python - <<'PY'\n")
           end = text.index("          PY\n", start)
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in text[start:end].splitlines())
+          script = script.replace("'src/room/PlayersDialog.tsx'", "'src/room/scorer/PlayersDialog.tsx'")
           Path('/tmp/apply-room-review-fixes.py').write_text(script)
           PY
           python /tmp/apply-room-review-fixes.py
