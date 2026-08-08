@@ -33,6 +33,22 @@ describe('first-party QBJ recovery layer', () => {
     expect(readScorerRecovery(qbj, { left: { name: 'Other' }, right: { name: 'Greenwood' } })).toBeNull();
   });
 
+  test.each([
+    ['a non-array starting lineup', { ...setup, left: { ...setup.left, startingLineup: 'Sarah' } }],
+    ['a blank starting-lineup player', { ...setup, left: { ...setup.left, startingLineup: ['Sarah', ' '] } }],
+    ['a duplicate starting-lineup player', { ...setup, left: { ...setup.left, startingLineup: ['Sarah', 'Sarah'] } }],
+    ['an unknown starting-lineup player', { ...setup, left: { ...setup.left, startingLineup: ['Sarah', 'Unknown'] } }],
+    [
+      'a duplicate right starting-lineup player',
+      { ...setup, right: { ...setup.right, startingLineup: ['Emma', 'Emma'] } },
+    ],
+  ])('refuses %s', (_description, malformedSetup) => {
+    const qbj = attachScorerRecovery({}, setup, events);
+    (qbj as any)[scorerRecoveryKey].setup = malformedSetup;
+
+    expect(readScorerRecovery(qbj, setup)).toBeNull();
+  });
+
   test('refuses unversioned QBJ rather than guessing from aggregates', () => {
     expect(readScorerRecovery({ [scorerRecoveryKey]: { setup, events } }, setup)).toBeNull();
   });
@@ -56,6 +72,14 @@ describe('first-party QBJ recovery layer', () => {
     [
       'a substitution lineup with a blank name',
       { id: 'bad', type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', ' '] },
+    ],
+    [
+      'a substitution lineup with duplicate names',
+      { id: 'bad', type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'Sarah'] },
+    ],
+    [
+      'a zero-point tossup with a blank player name',
+      { id: 'bad', type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: ' ' },
     ],
   ])('refuses %s', (_description, malformedEvent) => {
     const qbj = attachScorerRecovery({}, setup, events);
