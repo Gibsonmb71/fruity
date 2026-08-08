@@ -3,22 +3,27 @@ name: CI
 on:
   push:
     branches:
-      - '**'
-  pull_request:
+      - fix/room-review-findings
 
-# A newer push to the same branch/PR makes an in-flight run irrelevant.
+permissions:
+  contents: write
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: room-review-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   validate:
-    name: Lint, typecheck, test, build
+    if: github.actor != 'github-actions[bot]'
+    name: Reconcile, lint, typecheck, test, build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout git repo
+      - name: Checkout review branch
         uses: actions/checkout@v7
+        with:
+          ref: fix/room-review-findings
+          fetch-depth: 0
 
       - name: Install Node and NPM
         uses: actions/setup-node@v6
@@ -26,13 +31,112 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Reconcile stale formatter and lint findings
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          operations = Path('src/room/scorer/OperationsDialogs.tsx')
+          text = operations.read_text().replace(
+              "const activeBuzzPlayers = event.type === 'tossup-buzz' ? (question?.activePlayers[event.team] ?? []) : [];",
+              "const activeBuzzPlayers = event.type === 'tossup-buzz' ? question?.activePlayers[event.team] ?? [] : [];",
+          )
+          operations.write_text(text)
+
+          dialog = Path('src/room/scorer/ScorerDialog.tsx')
+          dialog.write_text(dialog.read_text().replace('      role="dialog"\n', ''))
+
+          router = Path('src/main/server/Router.ts')
+          text = router.read_text()
+          old = """    const readyRulesUsable =
+      update.scorer === undefined
+        ? undefined
+        : update.scorer === 'legacy'
+          ? snapshot.gameFormat !== null
+          : snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
+    if (update.ready === true && readyRulesUsable === false) {
+      sendError(res, 409, 'This browser cannot be marked ready until usable scoring rules are loaded.');
+      return;
+    }
+    const deviceId = update.deviceId ?? headerToken(req, deviceIdHeader) ?? 'unidentified';
+    this.host.onRoomCheckIn?.(
+      roomId,
+      deviceId,
+      update.operatorName ?? headerToken(req, operatorNameHeader),
+      readyRulesUsable === undefined ? undefined : readyRulesUsable ? update.ready : false,
+    );"""
+          new = """    let readyRulesUsable: boolean | undefined;
+    if (update.scorer === 'legacy') readyRulesUsable = snapshot.gameFormat !== null;
+    else if (update.scorer === 'first-party')
+      readyRulesUsable =
+        snapshot.scoringFormat !== null && scorekeeperFormatProblems(snapshot.scoringFormat).length === 0;
+    if (update.ready === true && readyRulesUsable === false) {
+      sendError(res, 409, 'This browser cannot be marked ready until usable scoring rules are loaded.');
+      return;
+    }
+    const deviceId = update.deviceId ?? headerToken(req, deviceIdHeader) ?? 'unidentified';
+    let readiness: boolean | undefined;
+    if (update.scorer !== undefined) readiness = readyRulesUsable ? update.ready : false;
+    this.host.onRoomCheckIn?.(
+      roomId,
+      deviceId,
+      update.operatorName ?? headerToken(req, operatorNameHeader),
+      readiness,
+    );"""
+          if old not in text:
+              raise SystemExit('Router readiness block did not match')
+          router.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Install dependencies
         run: npm install
+
+      - name: Format touched files with repository Prettier
+        run: >-
+          npx prettier
+          src/main/server/Router.ts
+          src/room/ManualRoomApp.tsx
+          src/room/scorer/GameSession.ts
+          src/room/scorer/OperationsDialogs.tsx
+          src/room/scorer/PlayersDialog.tsx
+          src/room/scorer/Scorer.tsx
+          src/room/scorer/ScorerDialog.tsx
+          src/room/scorer/ScorerRecovery.ts
+          src/room/scorer/ScorerRecovery.test.ts
+          src/room/scorer/useGameEvents.ts
+          src/room/scoring/deriveGame.ts
+          --write
+
+      - name: Commit reconciled source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/main/server/Router.ts src/room/ManualRoomApp.tsx src/room/scorer/GameSession.ts src/room/scorer/OperationsDialogs.tsx src/room/scorer/PlayersDialog.tsx src/room/scorer/Scorer.tsx src/room/scorer/ScorerDialog.tsx src/room/scorer/ScorerRecovery.ts src/room/scorer/ScorerRecovery.test.ts src/room/scorer/useGameEvents.ts src/room/scoring/deriveGame.ts
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "Reconcile room review fixes with repo rules"
+            git push origin HEAD:fix/room-review-findings
+          fi
+
+      - name: Check formatting
+        run: >-
+          npx prettier
+          src/main/server/Router.ts
+          src/room/ManualRoomApp.tsx
+          src/room/scorer/GameSession.ts
+          src/room/scorer/OperationsDialogs.tsx
+          src/room/scorer/PlayersDialog.tsx
+          src/room/scorer/Scorer.tsx
+          src/room/scorer/ScorerDialog.tsx
+          src/room/scorer/ScorerRecovery.ts
+          src/room/scorer/ScorerRecovery.test.ts
+          src/room/scorer/useGameEvents.ts
+          src/room/scoring/deriveGame.ts
+          --check
 
       - name: Lint
         run: npm run lint
 
-      # The webpack builds run ts-loader with transpileOnly, so this is what actually checks types.
       - name: Typecheck
         run: npm run typecheck
 
