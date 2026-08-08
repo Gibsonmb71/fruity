@@ -665,7 +665,7 @@ export default class Router {
         deviceId: typeof body.deviceId === 'string' ? body.deviceId : headerToken(req, deviceIdHeader),
         operatorName: typeof body.operatorName === 'string' ? body.operatorName : headerToken(req, operatorNameHeader),
         ready: typeof body.ready === 'boolean' ? body.ready : undefined,
-        scorer: parseRequestedScorer(body.scorer, this.host.getSnapshot()),
+        scorer: body.scorer === undefined ? undefined : parseRequestedScorer(body.scorer, this.host.getSnapshot()),
       };
     }
 
@@ -681,7 +681,7 @@ export default class Router {
     }
     const deviceId = update.deviceId ?? headerToken(req, deviceIdHeader) ?? 'unidentified';
     let readiness: boolean | undefined;
-    if (hasBody) readiness = readyRulesUsable ? update.ready : false;
+    if (hasBody && update.scorer !== undefined) readiness = readyRulesUsable ? update.ready : false;
     this.host.onRoomCheckIn?.(roomId, deviceId, update.operatorName ?? headerToken(req, operatorNameHeader), readiness);
     sendJson(res, 200, { presence: this.roomPresenceValue(roomId) });
   }

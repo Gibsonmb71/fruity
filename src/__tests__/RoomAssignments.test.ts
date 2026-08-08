@@ -141,6 +141,13 @@ async function getAssignment(roomId: string, token: string) {
   return { res, body: await res.json().catch(() => null) };
 }
 
+async function getPresence(roomId: string, token: string) {
+  const res = await fetch(`${baseUrl}/api/v1/rooms/${roomId}/presence`, {
+    headers: { [roomTokenHeader]: token },
+  });
+  return { res, body: await res.json().catch(() => null) };
+}
+
 /** POST to start a room's assigned game */
 async function startMatch(roomId: string, token: string, scheduledMatchId: string, scorer?: 'first-party' | 'legacy') {
   const res = await fetch(`${baseUrl}/api/v1/rooms/${roomId}/sessions`, {
@@ -543,7 +550,7 @@ describe('room presence and help', () => {
         [deviceIdHeader]: 'device-a',
         [operatorNameHeader]: 'Jordan',
       },
-      body: JSON.stringify({ ready: true }),
+      body: JSON.stringify({ ready: true, scorer: 'first-party' }),
     });
     expect(ready.status).toBe(200);
     expect((await ready.json()).presence.readyDeviceCount).toBe(1);
@@ -551,7 +558,7 @@ describe('room presence and help', () => {
     const second = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
-      body: JSON.stringify({ deviceId: 'device-b', operatorName: 'Alex', ready: false }),
+      body: JSON.stringify({ deviceId: 'device-b', operatorName: 'Alex', ready: false, scorer: 'first-party' }),
     });
     expect((await second.json()).presence.devices).toHaveLength(2);
 
@@ -569,6 +576,77 @@ describe('room presence and help', () => {
       body: JSON.stringify({ deviceId: 'device-d', ready: true, scorer: 'legacy' }),
     });
     expect(legacyRefused.status).toBe(409);
+  });
+
+  test('a presence heartbeat without a scorer preserves readiness', async () => {
+    const ready = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'device-a', ready: true, scorer: 'first-party' }),
+    });
+    expect(ready.status).toBe(200);
+
+    const heartbeat = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'device-a' }),
+    });
+    expect(heartbeat.status).toBe(200);
+    expect((await heartbeat.json()).presence.readyDeviceCount).toBe(1);
+  });
+
+  test('assignment polling never changes readiness when the rules projection changes', async () => {
+    const ready = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'device-a', ready: true, scorer: 'first-party' }),
+    });
+    expect(ready.status).toBe(200);
+
+    // A GET assignment does not know whether this device is using the first-party or legacy scorer.
+    server.setTournamentSnapshot(makeSnapshot({ scoringFormat: null }));
+    const assignment = await fetch(`${baseUrl}/api/v1/rooms/room-101/assignment`, {
+      headers: { [roomTokenHeader]: 'token-for-101', [deviceIdHeader]: 'device-a' },
+    });
+    expect(assignment.status).toBe(200);
+
+    const presence = await getPresence('room-101', 'token-for-101');
+    expect(
+      presence.body.presence.devices.find((device: { deviceId: string }) => device.deviceId === 'device-a').ready,
+    ).toBe(true);
+  });
+
+  test('first-party and legacy readiness use their own rules projections', async () => {
+    server.setTournamentSnapshot(makeSnapshot({ gameFormat: null }));
+
+    const firstParty = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'first-party-device', ready: true, scorer: 'first-party' }),
+    });
+    expect(firstParty.status).toBe(200);
+
+    const legacy = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'legacy-device', ready: true, scorer: 'legacy' }),
+    });
+    expect(legacy.status).toBe(409);
+
+    server.setTournamentSnapshot(makeSnapshot({ scoringFormat: null }));
+    const legacyWithoutFirstPartyRules = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'legacy-device', ready: true, scorer: 'legacy' }),
+    });
+    expect(legacyWithoutFirstPartyRules.status).toBe(200);
+
+    const firstPartyWithoutRules = await fetch(`${baseUrl}/api/v1/rooms/room-101/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [roomTokenHeader]: 'token-for-101' },
+      body: JSON.stringify({ deviceId: 'second-first-party-device', ready: true, scorer: 'first-party' }),
+    });
+    expect(firstPartyWithoutRules.status).toBe(409);
   });
 
   test('help requests carry room/operator/match context and never expose credentials', async () => {

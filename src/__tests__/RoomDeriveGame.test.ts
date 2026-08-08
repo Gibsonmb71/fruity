@@ -365,6 +365,25 @@ describe('substitutions', () => {
     expect(lineupChangeEffectiveQuestion(deriveGame(format, setup, bonusEvents), bonusEvents)).toBe(2);
   });
 
+  test('a zero-point wrong answer also makes the lineup change apply to the next tossup', () => {
+    const format = formatFor((rules) => {
+      rules.maximumPlayersPerTeam = 1;
+    });
+    const lineupSetup: IGameSetup = {
+      left: { name: 'Ninety Six', players: ['Sarah', 'Alex'], startingLineup: ['Sarah'] },
+      right: { name: 'Greenwood', players: ['Emma'], startingLineup: ['Emma'] },
+    };
+    const events = [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'substitution', questionNumber: 2, team: 'left', activePlayers: ['Alex'] }),
+    ];
+    const game = deriveGame(format, lineupSetup, events);
+
+    expect(lineupChangeEffectiveQuestion(game, events)).toBe(2);
+    expect(game.questions[0].activePlayers.left).toEqual(['Sarah']);
+    expect(game.left.activePlayers).toEqual(['Alex']);
+  });
+
   test('moving a lineup boundary recalculates TUH from the corrected tossup', () => {
     const format = formatFor((rules) => {
       rules.maximumPlayersPerTeam = 1;
