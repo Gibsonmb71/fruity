@@ -81,7 +81,7 @@ describe('holding more than one result', () => {
       outbox
         .list()
         .map((entry) => entry.roundNumber)
-        .sort(),
+        .sort((left, right) => (left ?? 0) - (right ?? 0)),
     ).toEqual([4, 5]);
   });
 
@@ -293,6 +293,10 @@ describe('retrying', () => {
     expect(classifyDeliveryFailure(404, 'no such session').kind).toBe('permanent');
     expect(classifyDeliveryFailure(403, 'not authorized').kind).toBe('permanent');
     expect(classifyDeliveryFailure(409, 'already resolved').kind).toBe('permanent');
+    // A session the server has explicitly finished with, and a refusal of these particular bytes:
+    // both decide whether the room retries forever or hands the file to a person.
+    expect(classifyDeliveryFailure(410, 'session closed').kind).toBe('permanent');
+    expect(classifyDeliveryFailure(422, 'that payload is not valid').kind).toBe('permanent');
   });
 
   test('an entry is not retried before its backoff has elapsed', async () => {
@@ -702,6 +706,31 @@ describe('a result nothing will ever manage to send', () => {
     // But it is still here, and still downloadable.
     expect(outbox.list()).toHaveLength(1);
     expect(describeDeliveryState(entry)).toBe('Handed to tournament control');
+  });
+
+  test('a correction of a handed-over result is delivered like any other', async () => {
+    const { outbox } = makeOutbox();
+    const enqueued = await outbox.enqueue({ ...draft('Ninety Six A', 'Greenwood', 4), scheduledMatchId: 'sched-a' });
+    await outbox.markHandedOver(enqueued.entry.id);
+    await outbox.markNeedsCorrection(enqueued.entry.id, 'Bonus 12 was scored twice.');
+
+    // The scorekeeper fixes the game and submits again. The handover was about the bytes control
+    // sent back, not about these — leaving the claim on would strand the correction: nothing
+    // retries a handed-over entry and nothing on screen says one is waiting.
+    const corrected = await outbox.enqueue({
+      ...draft('Ninety Six A', 'Greenwood', 4),
+      scheduledMatchId: 'sched-a',
+      qbj: qbjFor('Ninety Six A', 'Greenwood'),
+    });
+
+    expect(corrected.supersededCorrection).toBe(true);
+    const entry = outbox.find(corrected.entry.id) as IRoomResultOutboxEntry;
+    expect(entry.handedOver).toBeUndefined();
+    expect(entry.deliveryState).toBe('queued');
+    expect(needsAction(entry)).toBe(true);
+    expect(awaitsAutomaticDelivery(entry)).toBe(true);
+    expect(isDueForRetry(entry, Date.parse('2026-08-07T23:00:00.000Z'))).toBe(true);
+    expect(outbox.list()).toHaveLength(1);
   });
 
   test('a handed-over result that tournament control sends back still needs the room', async () => {
