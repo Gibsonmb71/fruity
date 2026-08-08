@@ -2100,7 +2100,11 @@ export class TournamentManager {
     if (!team) return { ok: false, reason: 'That team is not part of the open tournament.' };
     const name = request.playerName.trim();
     const duplicate = team.players.find((player) => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-    if (duplicate) return { ok: true, added: false };
+    if (duplicate) {
+      this.tournamentServerService.revalidatePendingSubmissionsForTeam(team.name);
+      this.tournamentServerService.pushTournamentSnapshot();
+      return { ok: true, added: false };
+    }
     if (team.players.length >= Team.maxPlayers) {
       return { ok: false, reason: `A team cannot have more than ${Team.maxPlayers} players.` };
     }

@@ -122,6 +122,18 @@ export interface ITournamentReadiness {
   rebracketNextPhase: Phase | null;
 }
 
+/**
+ * "Room 204", "Room 204 and Room 207", "Room 204, Room 207 and Room 211".
+ *
+ * Read aloud across a room more often than it is read on screen, so it gets the conjunction rather
+ * than a bare comma-separated list.
+ */
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 function issue(
   id: string,
   severity: ReadinessIssueSeverity,
@@ -371,18 +383,28 @@ function currentRoundMatches(scheduledMatches: ScheduledMatch[], roundNumber: nu
   return roundNumber === null ? [] : scheduledMatches.filter((match) => match.roundNumber === roundNumber);
 }
 
-function hasRoomOfflineForRound(
+/**
+ * Rooms in this round whose browser was connected and is not any more, by name.
+ *
+ * Names rather than a count, because "Room 204 and Room 207" sends somebody to two doors while "2
+ * rooms" sends them round the building. A room with no presence entry at all has simply never
+ * paired and is not reported here — that is a different situation with a different remedy, and
+ * saying "dropped" about a Chromebook nobody has opened yet would be wrong.
+ */
+function roomsOfflineForRound(
   matches: ScheduledMatch[],
   rooms: TournamentRoom[],
   server: IReadinessServerState | undefined,
-): boolean {
-  if (!server?.running) return false;
+): string[] {
+  if (!server?.running) return [];
   const presence = new Map((server.roomPresence ?? []).map((room) => [room.roomId, room.connected]));
-  return matches.some((match) => {
-    if (!match.roomId || match.isResolved()) return false;
+  const names = new Set<string>();
+  for (const match of matches) {
+    if (!match.roomId || match.isResolved()) continue;
     const room = rooms.find((candidate) => candidate.id === match.roomId);
-    return !!room && room.enabled && presence.has(room.id) && presence.get(room.id) === false;
-  });
+    if (room && room.enabled && presence.get(room.id) === false) names.add(room.name);
+  }
+  return Array.from(names);
 }
 
 function nextRoundNumber(scheduledMatches: ScheduledMatch[], currentRoundNumber: number | null): number | null {
@@ -597,7 +619,23 @@ export function resolveTournamentReadiness(
         /not assigned|unassigned/i.test(scheduleIssue.message),
     )
     .flatMap((scheduleIssue) => scheduleIssue.scheduledMatchIds);
-  const roomOffline = hasRoomOfflineForRound(currentMatches, rooms, server);
+  const offlineRoomNames = roomsOfflineForRound(currentMatches, rooms, server);
+
+  if (roomOperationsEnabled && offlineRoomNames.length > 0) {
+    issues.push(
+      issue(
+        'round-room-offline',
+        'warning',
+        offlineRoomNames.length === 1 ? 'A room has gone offline' : 'Rooms have gone offline',
+        `${listNames(offlineRoomNames)} ${
+          offlineRoomNames.length === 1 ? 'was connected and is not now' : 'were connected and are not now'
+        }. The round can still start; a room that comes back keeps the game it was scoring.`,
+        'control:rooms',
+        'Open Rooms',
+        { roundNumber: currentRoundNumber ?? undefined },
+      ),
+    );
+  }
   const currentAssignmentsValid = !scheduleIssues.some((scheduleIssue) => {
     if (scheduleIssue.severity === ScheduleIssueSeverity.Error) return true;
     return currentMatches.some((match) => scheduleIssue.scheduledMatchIds.includes(match.id));
@@ -637,7 +675,16 @@ export function resolveTournamentReadiness(
       focus: 'result-inbox',
       scheduledMatchId: server?.inboxScheduledMatchIds?.[0],
     });
-  } else if (conflictIds.length > 0 || roomOffline) {
+  } else if (conflictIds.length > 0) {
+    /*
+     * Only a real assignment conflict blocks a round.
+     *
+     * A room whose browser has dropped used to land here too, which told a director "this round
+     * cannot start" about something that stops nothing: neither `checkCanStart` nor
+     * `checkRoundRelease` consults presence, so the round was releasable the whole time and the
+     * Release button stayed enabled underneath the warning. It is surfaced as a warning below
+     * instead, which is what it is.
+     */
     state = 'schedule-blocked';
     primaryAction = readinessAction('navigate', 'Fix assignment', 'control:match-plan', {
       focus: 'scheduled-match',

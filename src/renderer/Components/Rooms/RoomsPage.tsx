@@ -1474,8 +1474,20 @@ function operationMessage(readiness: ReturnType<typeof resolveTournamentReadines
       return 'Add the physical rooms that will host the scheduled matches.';
     case 'match-plan-missing':
       return 'Generate or enter the concrete team-versus-team matches for the tournament.';
-    case 'schedule-blocked':
-      return firstIssue?.message ?? 'Fix the room or match assignment before releasing this round.';
+    case 'schedule-blocked': {
+      /*
+       * The reason for the state, not whatever warning happens to sort first.
+       *
+       * This read `activeIssues[0]`, so a round blocked by an assignment conflict could be
+       * explained by an unrelated warning sitting above it — a director was shown "this round
+       * cannot start" beside a note about room browsers not being paired, which blocks nothing.
+       * Two true sentences that do not belong together are harder to act on than one.
+       */
+      const conflict = readiness.activeIssues.find(
+        (candidate) => candidate.severity === 'error' || /assign|conflict/i.test(candidate.title),
+      );
+      return conflict?.message ?? 'Fix the room or match assignment before releasing this round.';
+    }
     case 'results-awaiting-review':
       return 'Submitted results are never accepted automatically. Review them before advancing.';
     case 'rebracket-required':

@@ -29,7 +29,9 @@ export default function LiveDisplaySettingsCard() {
 
   if (!service) return null;
 
-  const address = service.status.addresses[0] ?? '';
+  // Use the same interface the room setup and QR sheets advertise. The first detected interface
+  // is not necessarily reachable by spectators when the laptop has Wi-Fi and Ethernet enabled.
+  const address = service.selectedAddress;
   const audienceUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live`;
   const displayUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live/display`;
   const pairingsUrl = address === '' ? '' : `${address.replace(/\/+$/, '')}/live/pairings`;

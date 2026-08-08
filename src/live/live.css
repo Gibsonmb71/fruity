@@ -207,6 +207,12 @@ button {
   margin: 0;
 }
 
+.live-pairings-count {
+  margin: -6px 0 12px;
+  color: var(--live-ink-faint);
+  font-size: 0.78rem;
+}
+
 .live-table-wrap {
   overflow-x: auto;
   background: var(--live-surface);

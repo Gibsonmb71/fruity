@@ -18,6 +18,8 @@ export const maxRequestBodyBytes = 512 * 1024;
 
 /** Mirrors Player.nameMaxLength without importing renderer model objects into the main process. */
 export const roomPlayerNameMaxLength = 200;
+/** Mirrors Team.maxPlayers without importing renderer model objects into the main process. */
+export const roomTeamMaxPlayers = 100;
 
 /** Header a room client uses to prove it owns the session it's writing to */
 export const sessionTokenHeader = 'x-yf-session-token';

@@ -52,7 +52,12 @@ function usePublicSnapshot() {
           headers: { Accept: 'application/json' },
         });
         if (response.status === 404) {
-          if (!stopped) setConnection('disabled');
+          if (!stopped) {
+            // A director can turn the public view off while somebody is looking at it. Do not
+            // leave the last private/public snapshot on screen after that explicit refusal.
+            setSnapshot(null);
+            setConnection('disabled');
+          }
           return;
         }
         if (!response.ok) throw new Error(`Live snapshot request failed: ${response.status}`);
@@ -107,7 +112,10 @@ function usePublicPairingsSnapshot() {
       try {
         const response = await fetch('/api/v1/public/pairings', { cache: 'no-store' });
         if (response.status === 404) {
-          if (!stopped) setConnection('disabled');
+          if (!stopped) {
+            setSnapshot(null);
+            setConnection('disabled');
+          }
           return;
         }
         if (!response.ok) throw new Error(`Public pairings request failed: ${response.status}`);
@@ -178,6 +186,10 @@ function PublicPairingsApp() {
                 aria-label="Find a team"
               />
             </div>
+            <p className="live-pairings-count" aria-live="polite">
+              {assignments.length} {assignments.length === 1 ? 'pairing' : 'pairings'}
+              {normalizedQuery ? ` matching “${query.trim()}”` : ''}
+            </p>
             {assignments.length === 0 ? (
               <EmptyMessage message={pairingsEmptyMessage(Boolean(snapshot.round), normalizedQuery !== '')} />
             ) : (
@@ -549,12 +561,18 @@ function DisplayApp({ snapshot, connection }: { snapshot: IPublicLiveSnapshot | 
   }, []);
 
   const activeSlide = slides[currentSlide];
+  let emptyMessage: string | undefined;
+  if (snapshot && slides.length === 0) {
+    emptyMessage = fixedMode
+      ? 'This display view has no published data yet.'
+      : 'No display slides are enabled. Ask tournament control to enable at least one slide.';
+  }
   return (
     <div className="display-shell" data-theme={theme}>
       {activeSlide ? (
         <DisplaySlideView snapshot={snapshot as IPublicLiveSnapshot} slide={activeSlide} />
       ) : (
-        <DisplayEmpty snapshot={snapshot} connection={connection} />
+        <DisplayEmpty snapshot={snapshot} connection={connection} message={emptyMessage} />
       )}
       {snapshot && connection !== 'connected' && (
         <div className="display-connection-badge">
@@ -758,13 +776,28 @@ function DisplayAssignments({ assignments }: { assignments: IPublicNextRoundAssi
   );
 }
 
-function DisplayEmpty({ snapshot, connection }: { snapshot: IPublicLiveSnapshot | null; connection: ConnectionState }) {
+function DisplayEmpty({
+  snapshot,
+  connection,
+  message,
+}: {
+  snapshot: IPublicLiveSnapshot | null;
+  connection: ConnectionState;
+  message: string | undefined;
+}) {
   return (
     <main className="display-empty">
       <div className="display-empty-mark">YF</div>
       <p className="display-kicker">YellowFruit Live</p>
       <h1>{snapshot?.tournamentName ?? 'Live tournament display'}</h1>
-      <ConnectionPanel connection={connection} />
+      {message ? (
+        <div className="live-connection-panel">
+          <strong>{message}</strong>
+          <span>The live display is connected and will update when a view becomes available.</span>
+        </div>
+      ) : (
+        <ConnectionPanel connection={connection} />
+      )}
     </main>
   );
 }
@@ -807,7 +840,7 @@ function ConnectionStatus({ state }: { state: ConnectionState }) {
   else if (state === 'disabled') label = 'Unavailable';
   else if (state === 'reconnecting') label = 'Reconnecting';
   return (
-    <span className={`live-status live-status-${state}`}>
+    <span className={`live-status live-status-${state}`} role="status" aria-live="polite">
       <span className="live-status-dot" aria-hidden="true" />
       {label}
     </span>

@@ -33,6 +33,7 @@ import {
   operatorNameHeader,
   roomTokenHeader,
   roomPlayerNameMaxLength,
+  roomTeamMaxPlayers,
   RoomBlockedReason,
   RoomScorerKind,
   sessionTokenHeader,
@@ -962,6 +963,14 @@ export default class Router {
       return;
     }
     const snapshot = this.host.getSnapshot();
+    const team = snapshot.teams.find((candidate) => candidate.name === teamName);
+    const duplicate = team?.players.some(
+      (player) => player.name.toLocaleLowerCase() === playerName.toLocaleLowerCase(),
+    );
+    if (!team || (!duplicate && team.players.length >= roomTeamMaxPlayers)) {
+      sendError(res, 409, 'That team cannot accept another player. Request tournament control.');
+      return;
+    }
     const assignment = session.scheduledMatchId
       ? findAssignmentForRoom(snapshot, roomId, session.scheduledMatchId)
       : undefined;
