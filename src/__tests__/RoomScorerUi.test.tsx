@@ -132,7 +132,9 @@ function editReviewEvent(description: string) {
     (candidate) => candidate.textContent?.includes(description),
   );
   if (!row) throw new Error(`No scoresheet entry reading "${description}"`);
-  fireEvent.click(screen.getByText('Edit question'));
+  const questionRow = row.closest('.scorer-review-list > li');
+  if (!questionRow) throw new Error(`No question row for scoresheet entry reading "${description}"`);
+  fireEvent.click(within(questionRow as HTMLElement).getByRole('button', { name: 'Edit question' }));
 }
 
 /** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
@@ -484,7 +486,7 @@ describe('the recent rail', () => {
 });
 
 describe('the game menu', () => {
-  test('Flag opens the existing protest and issue workflows', () => {
+  test('Flag opens the existing protest workflow', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
 
@@ -636,6 +638,30 @@ describe('the game menu', () => {
     );
   });
 
+  test('a restricted substitution window adds a player to the bench without changing the lineup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 3;
+      }),
+      undefined,
+      undefined,
+      { version: 2, halves: false, timeoutsPerTeam: 0, substitutionPolicy: 'breaks-timeouts-overtime' },
+    );
+    pressControl('Players');
+    const panel = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(panel).getByText('Add missing player\u2026'));
+    // The panel says where they are going before anything is written.
+    expect(within(panel).getByText(/come on at the next allowed substitution/)).toBeTruthy();
+    fireEvent.change(within(panel).getByLabelText('Player name'), { target: { value: 'Taylor Brooks' } });
+    fireEvent.click(within(panel).getByText('Add to roster'));
+
+    pressControl('Players');
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    const lists = lineup.querySelectorAll('.scorer-lineup-list');
+    expect(lists[0].textContent).not.toContain('Taylor Brooks');
+    expect(lists[1].textContent).toContain('Taylor Brooks');
+  });
+
   test('reviewing the scoresheet can correct an earlier ruling', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
@@ -691,6 +717,51 @@ describe('the game menu', () => {
 
     expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
     expect(screen.getByText('Save correction')).toBeTruthy();
+  });
+
+  test('bonus correction drafts can be cleared without entering zero', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.minimumPartsPerBonus = 1;
+        rules.maximumPartsPerBonus = 5;
+        rules.pointsPerBonusPart = 0;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.change(screen.getByLabelText(/Bonus points/), { target: { value: '20' } });
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Record'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const points = screen.getByLabelText('Points') as HTMLInputElement;
+    fireEvent.change(points, { target: { value: '' } });
+    expect(points.value).toBe('');
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(screen.getByText('Enter a valid number for controlled.')).toBeTruthy();
+  });
+
+  test('the order of two attempts is changed by one unambiguous control', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // a neg for Ninety Six
+    fireEvent.click(buttonsFor('Emma Turner')[1]); // Greenwood answers second
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const teamOf = (attempt: number) =>
+      (screen.getByLabelText(`Question 1 attempt ${attempt} team`) as HTMLSelectElement).value;
+    expect([teamOf(1), teamOf(2)]).toEqual(['left', 'right']);
+
+    /*
+     * A two-row list has exactly one other order, so an Up and a Down on every row were four
+     * controls for one decision — and two buttons per row sharing a name is what made them need
+     * row-specific labels to be usable at all.
+     */
+    fireEvent.click(screen.getByRole('button', { name: 'Swap order' }));
+
+    expect([teamOf(1), teamOf(2)]).toEqual(['right', 'left']);
+    expect(screen.queryByRole('button', { name: /Move attempt/ })).toBeNull();
   });
 
   test('the question editor can remove an attempt and replace it atomically', () => {
@@ -866,7 +937,7 @@ describe('a wrong answer that costs nothing', () => {
   test("the zero ends this team's chance and leaves the other team eligible", () => {
     renderScorer(formatFor());
 
-    fireEvent.click(screen.getByLabelText('Sarah Mitchell wrong, no penalty'));
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
 
     expect(scoreOf('Ninety Six')).toBe('0');
     expect(screen.getByText(/Greenwood may still answer/)).toBeTruthy();

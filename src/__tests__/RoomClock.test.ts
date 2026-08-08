@@ -8,6 +8,8 @@ import {
   normalizeRoomClock,
   pauseRoomClock,
   remainingRoomClock,
+  resetRoomClock,
+  roomClockSegment,
   resumeRoomClock,
   saveRoomClock,
   startRoomClock,
@@ -23,6 +25,13 @@ function storage() {
 }
 
 describe('timestamp-based room clock', () => {
+  test('uses a fresh identity for each half and overtime segment', () => {
+    expect(roomClockSegment(true, 0, false, false)).toBe('half-1');
+    expect(roomClockSegment(true, 1, true, false)).toBe('half-1');
+    expect(roomClockSegment(true, 1, false, false)).toBe('half-2');
+    expect(roomClockSegment(true, 1, false, true)).toBe('overtime');
+  });
+
   test('elapsed time comes from timestamps, not tick count', () => {
     const started = startRoomClock(idleRoomClock(60_000), 1_000);
 
@@ -52,13 +61,44 @@ describe('timestamp-based room clock', () => {
     const durable = storage();
     const running = startRoomClock(idleRoomClock(60_000), 1_000);
 
-    expect(saveRoomClock('game-1', running, durable)).toBe(true);
-    expect(loadRoomClock('game-1', 60_000, durable)).toEqual(running);
-    expect(loadRoomClock('game-1', 90_000, durable)).toEqual(idleRoomClock(90_000));
+    expect(saveRoomClock('game-1', running, durable, 'half-1')).toBe(true);
+    expect(loadRoomClock('game-1', 60_000, durable, 'half-1')).toEqual(running);
+    expect(loadRoomClock('game-1', 60_000, durable, 'half-2')).toEqual(idleRoomClock(60_000));
+    expect(loadRoomClock('game-1', 90_000, durable, 'half-1')).toEqual(idleRoomClock(90_000));
   });
 
   test('malformed running state recovers to a safe idle clock', () => {
-    expect(normalizeRoomClock({ version: 1, durationMs: 60_000, status: 'running', accumulatedMs: 0 }, 60_000)).toEqual(
+    expect(normalizeRoomClock({ version: 2, durationMs: 60_000, status: 'running', accumulatedMs: 0 }, 60_000)).toEqual(
+      idleRoomClock(60_000),
+    );
+  });
+
+  test.each([
+    [{ version: 2, durationMs: 60_000, status: 'idle', accumulatedMs: 60_000 }, 'expired'],
+    [{ version: 2, durationMs: 60_000, status: 'expired', accumulatedMs: 0 }, 'expired'],
+    [{ version: 2, durationMs: 60_000, status: 'paused', accumulatedMs: 60_000, runningSince: 10 }, 'expired'],
+  ])('canonicalizes invalid terminal state %#', (raw, status) => {
+    expect(normalizeRoomClock(raw, 60_000)).toMatchObject({ status, accumulatedMs: 60_000 });
+    expect(normalizeRoomClock(raw, 60_000)).not.toHaveProperty('runningSince');
+  });
+
+  test('preserves only valid paused and running state fields', () => {
+    expect(
+      normalizeRoomClock(
+        { version: 2, durationMs: 60_000, status: 'paused', accumulatedMs: 5_000, runningSince: 10 },
+        60_000,
+      ),
+    ).toEqual({ version: 2, durationMs: 60_000, status: 'paused', accumulatedMs: 5_000 });
+    expect(
+      normalizeRoomClock(
+        { version: 2, durationMs: 60_000, status: 'running', accumulatedMs: 5_000, runningSince: 10 },
+        60_000,
+      ),
+    ).toEqual({ version: 2, durationMs: 60_000, status: 'running', accumulatedMs: 5_000, runningSince: 10 });
+  });
+
+  test('reset returns an expired segment to a fresh idle clock', () => {
+    expect(resetRoomClock({ version: 2, durationMs: 60_000, status: 'expired', accumulatedMs: 60_000 })).toEqual(
       idleRoomClock(60_000),
     );
   });

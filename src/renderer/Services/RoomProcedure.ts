@@ -76,6 +76,38 @@ export function substitutionPolicy(procedure: IRoomProcedure | undefined): Subst
   return procedure?.substitutionPolicy ?? 'any-boundary';
 }
 
+/** Whether an open protest must stop the named checkpoint before play can continue. */
+export function protestBlocksCheckpoint(
+  policy: ProtestCheckpointPolicy,
+  checkpoint: 'overtime' | 'sudden-death',
+): boolean {
+  return policy === 'phase-boundaries' || (policy === 'strict-overtime' && checkpoint === 'sudden-death');
+}
+
+/** Whether an unresolved protest blocks the next sudden-death tossup. */
+export function protestBlocksSuddenDeathTossup(
+  policy: ProtestCheckpointPolicy,
+  suddenDeathStarted: boolean,
+  hasOpenProtest: boolean,
+): boolean {
+  return suddenDeathStarted && hasOpenProtest && policy === 'strict-overtime';
+}
+
+/** Procedure-level lineup boundary, shared by the scorer UI and event guard. */
+export function lineupChangeAllowedAtPhase(
+  policy: SubstitutionPolicy,
+  phase: 'lineup' | 'tossup' | 'bonus' | 'score-check' | 'checkpoint' | 'timeout' | 'complete',
+): boolean {
+  return (
+    phase !== 'complete' &&
+    (policy === 'any-boundary' ||
+      phase === 'lineup' ||
+      phase === 'score-check' ||
+      phase === 'checkpoint' ||
+      phase === 'timeout')
+  );
+}
+
 /** Whether this is a procedure shape this build knows how to interpret. */
 export function isKnownRoomProcedureVersion(version: unknown): boolean {
   return version === roomProcedureVersion || version === legacyRoomProcedureVersion;
@@ -88,8 +120,8 @@ export function roomProcedureIsActive(procedure: IRoomProcedure | undefined): pr
     procedure.halves ||
     procedure.timeoutsPerTeam > 0 ||
     procedure.halfLengthMinutes !== undefined ||
-    procedure.protestCheckpoints !== undefined ||
-    procedure.substitutionPolicy !== undefined
+    (procedure.protestCheckpoints !== undefined && procedure.protestCheckpoints !== 'none') ||
+    (procedure.substitutionPolicy !== undefined && procedure.substitutionPolicy !== 'any-boundary')
   );
 }
 
