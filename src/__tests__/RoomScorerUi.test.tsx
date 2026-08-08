@@ -49,7 +49,7 @@ function renderScorer(
       leftTeam={leftTeam}
       rightTeam={rightTeam}
       tournamentName="Ninety Six Invitational"
-      roundName="4"
+      roundName="Round 4"
       roomName="Room 204"
       connection={RoomConnectionState.Connected}
       onSubmit={submit}
@@ -159,6 +159,14 @@ describe('what the header says', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Ninety Six Invitational');
     expect(screen.getByText(/Round 4/).textContent).toContain('Room 204');
     expect(document.body.textContent).not.toMatch(/YellowFruit|MODAQ|Fruity/);
+  });
+
+  // The round arrives already named, from Round.displayName(). A header that adds "Round" itself
+  // reads "Round Round 4" for every numbered round, and renames "Finals" to "Round Finals".
+  test('it shows the round name as it was given, without prefixing it again', () => {
+    renderScorer(formatFor());
+
+    expect(screen.getByText(/Round 4/).textContent).not.toMatch(/Round Round/);
   });
 
   test('it shows the connection state and how far the game has got', () => {
@@ -640,7 +648,7 @@ describe('recovering a game', () => {
           leftTeam={leftTeam}
           rightTeam={rightTeam}
           tournamentName="Ninety Six Invitational"
-          roundName="4"
+          roundName="Round 4"
           connection={RoomConnectionState.Connected}
           onSubmit={submit}
         />,

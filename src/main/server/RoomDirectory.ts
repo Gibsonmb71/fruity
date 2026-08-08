@@ -210,7 +210,7 @@ export function checkCanStart(
   if (releasedRound === null || assignment.roundNumber > releasedRound) {
     return {
       reason: RoomBlockedReason.FutureRound,
-      message: `Round ${assignment.roundName} has not started yet. This page will update when tournament control opens the round.`,
+      message: `${assignment.roundName} has not started yet. This page will update when tournament control opens the round.`,
     };
   }
 
