@@ -1,0 +1,110 @@
+import { describe, expect, test } from 'vitest';
+import scoringRulesToScorekeeperFormat, { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
+import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
+import deriveGame, { IGameSetup } from '../room/scoring/deriveGame';
+import validateScoresheet, { validateCorrectedHistory } from '../room/scoring/validateScoresheet';
+import { ScoreEvent } from '../room/scoring/ScoreEvents';
+import { event } from './RoomScoreEventFixtures';
+
+const setup: IGameSetup = {
+  left: { name: 'Ninety Six', players: ['Sarah', 'James'] },
+  right: { name: 'Greenwood', players: ['Emma', 'Jordan'] },
+};
+
+function formatFor(): IScorekeeperFormat {
+  const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+  rules.maximumPlayersPerTeam = 2;
+  return scoringRulesToScorekeeperFormat(rules);
+}
+
+function completedGame(): ScoreEvent[] {
+  return [
+    event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+    event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
+    ...Array.from({ length: 19 }, (_, index) => event({ type: 'tossup-dead', questionNumber: index + 2 })),
+  ];
+}
+
+describe('whole-scoresheet validation', () => {
+  test('a complete ordinary scoresheet has no blockers', () => {
+    const validation = validateScoresheet(formatFor(), setup, completedGame());
+
+    expect(validation.valid).toBe(true);
+    expect(validation.blockers).toEqual([]);
+  });
+
+  test('duplicate opportunities and dead-plus-attempts are blockers', () => {
+    const format = formatFor();
+    const validation = validateScoresheet(format, setup, [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'tossup-dead', questionNumber: 1 }),
+    ]);
+
+    expect(validation.blockers.map((problem) => problem.code)).toEqual(
+      expect.arrayContaining(['integrity', 'dead-attempt']),
+    );
+  });
+
+  test('a missing bonus blocks submission but is allowed while correcting the current question', () => {
+    const format = formatFor();
+    const events = [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+    ];
+    const validation = validateScoresheet(format, setup, events);
+    const corrected = validateCorrectedHistory(format, setup, events);
+
+    expect(validation.blockers.map((problem) => problem.code)).toEqual(
+      expect.arrayContaining(['missing-bonus', 'game-not-complete']),
+    );
+    expect(corrected.blockers.map((problem) => problem.code)).not.toContain('missing-bonus');
+    expect(deriveGame(format, setup, events).phase.kind).toBe('bonus');
+  });
+
+  test('open protests are warnings by default and blockers under strict procedure', () => {
+    const events = [
+      ...completedGame(),
+      event({
+        type: 'protest',
+        questionNumber: 1,
+        team: 'right',
+        subject: 'tossup-answer',
+        description: 'The answer was disputed.',
+        status: 'open',
+      }),
+    ];
+    const format = formatFor();
+    const permissive = validateScoresheet(format, setup, events);
+    const strict = validateScoresheet(format, setup, events, {
+      version: 2,
+      halves: false,
+      timeoutsPerTeam: 0,
+      protestCheckpoints: 'strict-overtime',
+    });
+
+    expect(permissive.warnings.map((problem) => problem.code)).toContain('open-protest');
+    expect(permissive.blockers.map((problem) => problem.code)).not.toContain('open-protest');
+    expect(strict.blockers.map((problem) => problem.code)).toContain('open-protest');
+  });
+
+  test('malformed scoring records become blockers instead of crashing validation', () => {
+    const malformed = {
+      id: 'malformed-bonus',
+      type: 'bonus',
+      questionNumber: 1,
+      team: 'not-a-team',
+      parts: { controlledPoints: 20 },
+    } as unknown as ScoreEvent;
+
+    expect(() => validateScoresheet(formatFor(), setup, [malformed])).not.toThrow();
+    expect(validateScoresheet(formatFor(), setup, [malformed]).blockers.map((problem) => problem.code)).toContain(
+      'malformed-event',
+    );
+  });
+
+  test('explicit overtime transitions must match the derived checkpoint', () => {
+    const validation = validateScoresheet(formatFor(), setup, [event({ type: 'begin-overtime', questionNumber: 1 })]);
+
+    expect(validation.blockers.map((problem) => problem.code)).toContain('invalid-procedure-transition');
+  });
+});

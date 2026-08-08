@@ -1099,7 +1099,10 @@ export class TournamentManager {
     if (
       current.halves === next.halves &&
       current.halfLengthMinutes === next.halfLengthMinutes &&
-      current.timeoutsPerTeam === next.timeoutsPerTeam
+      current.timeoutsPerTeam === next.timeoutsPerTeam &&
+      current.timeoutDurationSeconds === next.timeoutDurationSeconds &&
+      current.protestCheckpoints === next.protestCheckpoints &&
+      current.substitutionPolicy === next.substitutionPolicy
     ) {
       return;
     }

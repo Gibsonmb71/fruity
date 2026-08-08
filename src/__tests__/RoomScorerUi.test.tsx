@@ -132,7 +132,7 @@ function editReviewEvent(description: string) {
     (candidate) => candidate.textContent?.includes(description),
   );
   if (!row) throw new Error(`No scoresheet entry reading "${description}"`);
-  fireEvent.click(within(row as HTMLElement).getByText('Edit'));
+  fireEvent.click(screen.getByText('Edit question'));
 }
 
 function chooseStarters(names: string[]) {
@@ -224,7 +224,7 @@ describe('scoring buttons come from the format', () => {
    * be — a fabricated 0-point AnswerType would appear in every player's P/TU/I line — so it is
    * checked as the constant it is rather than mixed into the format's own values.
    */
-  const wrong = '0';
+  const wrong = '0 after readout';
 
   test('mACF gives each player +15 / +10 / -5', () => {
     renderScorer(formatFor());
@@ -476,6 +476,15 @@ describe('the recent rail', () => {
 });
 
 describe('the game menu', () => {
+  test('Flag opens the existing protest and issue workflows', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
+
+    expect(screen.getByRole('dialog', { name: 'Flag' })).toBeTruthy();
+    fireEvent.click(screen.getByText('Protest / disputed ruling'));
+    expect(screen.getByText('Record protest and keep playing')).toBeTruthy();
+  });
+
   test('keeps operational tools behind the single Game menu', () => {
     renderScorer(formatFor());
     const controls = availableControls();
@@ -610,7 +619,7 @@ describe('the game menu', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
     pressControl('Full scoresheet review');
-    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.click(screen.getByText('Edit question'));
 
     fireEvent.change(screen.getByLabelText('Ruling'), { target: { value: '0' } }); // +15
     fireEvent.click(screen.getByText('Save correction'));
@@ -640,7 +649,7 @@ describe('the game menu', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
     pressControl('Full scoresheet review');
-    fireEvent.click(screen.getAllByText('Edit')[1]);
+    fireEvent.click(screen.getByText('Edit question'));
 
     fireEvent.change(screen.getByLabelText('Points'), { target: { value: '40' } });
     fireEvent.click(screen.getByText('Save correction'));
@@ -649,17 +658,36 @@ describe('the game menu', () => {
     expect(screen.getByText('Save correction')).toBeTruthy();
   });
 
-  test('removing a scoresheet event requires confirmation', () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  test('the question editor can remove an attempt and replace it atomically', () => {
     renderScorer(formatFor());
-    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     pressControl('Full scoresheet review');
 
+    fireEvent.click(screen.getByText('Edit question'));
     fireEvent.click(screen.getByText('Remove'));
+    fireEvent.click(screen.getByLabelText('No buzz / tossup dead'));
+    fireEvent.click(screen.getByText('Save correction'));
 
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(scoreOf('Ninety Six')).toBe('0');
     expect(screen.getByText('No buzz', { selector: '.scorer-review-event > span' })).toBeTruthy();
-    confirm.mockRestore();
+  });
+
+  test('the focused question editor can open the existing replacement workflow', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+    fireEvent.click(screen.getByText('Replace question…'));
+
+    const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
+    expect(replacementDialog).toBeTruthy();
+    fireEvent.change(within(replacementDialog).getByLabelText('What went wrong?'), {
+      target: { value: 'Wrong packet' },
+    });
+    fireEvent.click(within(replacementDialog).getByRole('button', { name: 'Whole cycle' }));
+    fireEvent.click(within(replacementDialog).getByRole('button', { name: 'Replace question 1' }));
+
+    expect(screen.getByText(/Question 1 was cleared/)).toBeTruthy();
   });
 
   test('an operational issue is saved and can request tournament control', async () => {
@@ -734,13 +762,16 @@ describe('finishing', () => {
     expect(onSubmit.mock.calls[0][0]).toHaveProperty('match_teams');
   });
 
-  test('a tied regulation goes to overtime rather than ending', () => {
+  test('a tied regulation pauses at the overtime checkpoint', () => {
     renderScorer(formatFor());
     for (let question = 1; question <= 20; question += 1) {
       fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
     }
 
-    // Still tied, so the game has not ended: it has gone to overtime.
+    expect(screen.getByLabelText('overtime checkpoint')).toBeTruthy();
+    fireEvent.click(screen.getByText('Begin overtime'));
+
+    // Still tied, so the game has not ended: it can now play overtime.
     expect(screen.getByText(/Overtime tossup 1/)).toBeTruthy();
   });
 
@@ -939,15 +970,15 @@ describe('the header identifies the packet when the tournament named one', () =>
 });
 
 describe('the Recent rail is a way back into the scoresheet', () => {
-  test('clicking a question opens the review at it', () => {
+  test('clicking a question opens its editor', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
 
     fireEvent.click(screen.getByLabelText('Review question 1'));
 
-    expect(screen.getByText('Full scoresheet review')).toBeTruthy();
-    expect(document.querySelector('.scorer-review-list > li.is-focused')).toBeTruthy();
+    expect(screen.getByText('Question 1 editor')).toBeTruthy();
+    expect(screen.getByLabelText('Ruling')).toBeTruthy();
   });
 
   test('it carries the score as it stood after each question', () => {

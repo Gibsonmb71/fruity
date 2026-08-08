@@ -21,8 +21,12 @@
  * fills in when they want the room to show a clock, and is simply absent otherwise.
  */
 
-/** Bumped when the shape changes. An unrecognized version is treated as no procedure at all. */
-export const roomProcedureVersion = 1;
+/** Bumped when the shape changes. Older versions are migrated by `readRoomProcedure`. */
+export const roomProcedureVersion = 2;
+export const legacyRoomProcedureVersion = 1;
+
+export type ProtestCheckpointPolicy = 'none' | 'phase-boundaries' | 'strict-overtime';
+export type SubstitutionPolicy = 'any-boundary' | 'breaks-timeouts-overtime';
 
 export interface IRoomProcedure {
   version: number;
@@ -42,6 +46,12 @@ export interface IRoomProcedure {
   halfLengthMinutes?: number;
   /** Timeouts each team may take. Zero means the room does not track timeouts. */
   timeoutsPerTeam: number;
+  /** Optional length of a timeout. Missing means the room records the timeout but does not count it down. */
+  timeoutDurationSeconds?: number;
+  /** When an open protest must be resolved before the room advances. */
+  protestCheckpoints?: ProtestCheckpointPolicy;
+  /** When the room may change the active lineup. Missing preserves the original permissive behavior. */
+  substitutionPolicy?: SubstitutionPolicy;
 }
 
 /** A room with nothing configured: no halves, no clock, no timeout tracking. */
@@ -55,10 +65,32 @@ export const maximumHalfLengthMinutes = 240;
 /** The most timeouts per team the room will track. Well above any real rule set. */
 export const maximumTimeoutsPerTeam = 9;
 
+/** A timeout longer than ten minutes is almost certainly a configuration error. */
+export const maximumTimeoutDurationSeconds = 10 * 60;
+
+export function protestCheckpointPolicy(procedure: IRoomProcedure | undefined): ProtestCheckpointPolicy {
+  return procedure?.protestCheckpoints ?? 'none';
+}
+
+export function substitutionPolicy(procedure: IRoomProcedure | undefined): SubstitutionPolicy {
+  return procedure?.substitutionPolicy ?? 'any-boundary';
+}
+
+/** Whether this is a procedure shape this build knows how to interpret. */
+export function isKnownRoomProcedureVersion(version: unknown): boolean {
+  return version === roomProcedureVersion || version === legacyRoomProcedureVersion;
+}
+
 /** Does this procedure ask the room to do anything at all? */
 export function roomProcedureIsActive(procedure: IRoomProcedure | undefined): procedure is IRoomProcedure {
-  if (!procedure || procedure.version !== roomProcedureVersion) return false;
-  return procedure.halves || procedure.timeoutsPerTeam > 0;
+  if (!procedure || !isKnownRoomProcedureVersion(procedure.version)) return false;
+  return (
+    procedure.halves ||
+    procedure.timeoutsPerTeam > 0 ||
+    procedure.halfLengthMinutes !== undefined ||
+    procedure.protestCheckpoints !== undefined ||
+    procedure.substitutionPolicy !== undefined
+  );
 }
 
 /**
@@ -71,7 +103,7 @@ export function roomProcedureIsActive(procedure: IRoomProcedure | undefined): pr
 export function readRoomProcedure(value: unknown): IRoomProcedure {
   if (typeof value !== 'object' || value === null) return defaultRoomProcedure();
   const raw = value as Partial<IRoomProcedure>;
-  if (raw.version !== roomProcedureVersion) return defaultRoomProcedure();
+  if (!isKnownRoomProcedureVersion(raw.version)) return defaultRoomProcedure();
 
   const timeouts =
     typeof raw.timeoutsPerTeam === 'number' && Number.isInteger(raw.timeoutsPerTeam)
@@ -85,11 +117,36 @@ export function readRoomProcedure(value: unknown): IRoomProcedure {
       ? raw.halfLengthMinutes
       : undefined;
 
-  return {
+  const timeoutDurationSeconds =
+    typeof raw.timeoutDurationSeconds === 'number' &&
+    Number.isInteger(raw.timeoutDurationSeconds) &&
+    raw.timeoutDurationSeconds > 0 &&
+    raw.timeoutDurationSeconds <= maximumTimeoutDurationSeconds
+      ? raw.timeoutDurationSeconds
+      : undefined;
+
+  const protestCheckpoints: ProtestCheckpointPolicy | undefined =
+    raw.protestCheckpoints === 'none' ||
+    raw.protestCheckpoints === 'phase-boundaries' ||
+    raw.protestCheckpoints === 'strict-overtime'
+      ? raw.protestCheckpoints
+      : undefined;
+
+  const configuredSubstitutionPolicy: SubstitutionPolicy | undefined =
+    raw.substitutionPolicy === 'any-boundary' || raw.substitutionPolicy === 'breaks-timeouts-overtime'
+      ? raw.substitutionPolicy
+      : undefined;
+
+  const normalized: IRoomProcedure = {
     version: roomProcedureVersion,
     halves: raw.halves === true,
     // A clock length with no halves to apply it to is not a rule anybody stated.
     halfLengthMinutes: raw.halves === true ? halfLength : undefined,
     timeoutsPerTeam: timeouts,
   };
+
+  if (timeoutDurationSeconds !== undefined) normalized.timeoutDurationSeconds = timeoutDurationSeconds;
+  if (protestCheckpoints !== undefined) normalized.protestCheckpoints = protestCheckpoints;
+  if (configuredSubstitutionPolicy !== undefined) normalized.substitutionPolicy = configuredSubstitutionPolicy;
+  return normalized;
 }

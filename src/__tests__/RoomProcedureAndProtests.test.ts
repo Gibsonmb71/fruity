@@ -11,6 +11,7 @@ import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules
 import {
   defaultRoomProcedure,
   maximumHalfLengthMinutes,
+  maximumTimeoutDurationSeconds,
   readRoomProcedure,
   roomProcedureIsActive,
   roomProcedureVersion,
@@ -70,6 +71,27 @@ describe('a procedure nobody configured does nothing', () => {
   test('a configured procedure is recognized as worth sending to a room', () => {
     expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: true, timeoutsPerTeam: 0 })).toBe(true);
     expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: false, timeoutsPerTeam: 1 })).toBe(true);
+  });
+
+  test('new procedure fields migrate and clamp without losing legacy settings', () => {
+    const procedure = readRoomProcedure({
+      version: 1,
+      halves: true,
+      halfLengthMinutes: 12,
+      timeoutsPerTeam: 2,
+      timeoutDurationSeconds: maximumTimeoutDurationSeconds + 1,
+      protestCheckpoints: 'strict-overtime',
+      substitutionPolicy: 'breaks-timeouts-overtime',
+    });
+
+    expect(procedure).toEqual({
+      version: roomProcedureVersion,
+      halves: true,
+      halfLengthMinutes: 12,
+      timeoutsPerTeam: 2,
+      protestCheckpoints: 'strict-overtime',
+      substitutionPolicy: 'breaks-timeouts-overtime',
+    });
   });
 });
 
