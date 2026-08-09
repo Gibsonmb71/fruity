@@ -570,10 +570,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   useEffect(() => {
     if (kitTournamentName === undefined || kitRoomId === undefined) return;
     const previous = verifiedTournamentContextRef.current;
-    if (
-      previous !== null &&
-      (previous.tournamentName !== kitTournamentName || previous.roomId !== kitRoomId)
-    ) {
+    if (previous !== null && (previous.tournamentName !== kitTournamentName || previous.roomId !== kitRoomId)) {
       verifiedTournamentKeyRef.current = undefined;
     }
     verifiedTournamentContextRef.current = { tournamentName: kitTournamentName, roomId: kitRoomId };
