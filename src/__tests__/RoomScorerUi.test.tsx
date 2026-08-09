@@ -879,6 +879,9 @@ describe('recovering a game', () => {
 
     expect(scoreOf('Ninety Six')).toBe('45');
     expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Connection: Connected/ }));
+    expect(screen.getByText('Game saved locally').parentElement?.textContent).toContain('just now');
   });
 });
 

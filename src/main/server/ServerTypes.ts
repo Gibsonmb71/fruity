@@ -546,6 +546,18 @@ export interface IRoomPresence {
   readyDeviceCount?: number;
 }
 
+/** Renderer-only presence response, scoped so a restarted control window cannot adopt another event. */
+export interface ITournamentServerPresencePayload {
+  tournamentKey?: string;
+  presence: IRoomPresence[];
+}
+
+/** Renderer-only live-session response, scoped even when the session list is empty. */
+export interface ITournamentServerSessionsPayload {
+  tournamentKey?: string;
+  sessions: ISessionSummary[];
+}
+
 /** A single browser/device check-in. Device ids are labels, not credentials. */
 export interface IRoomDevicePresence {
   roomId: string;
@@ -615,6 +627,12 @@ export interface IHelpRequest {
   operatorName?: string;
   currentMatchup?: IHelpMatchupContext;
   resolutionNote?: string;
+}
+
+/** Renderer-only help queue response, scoped so a restarted control window cannot adopt another event. */
+export interface ITournamentServerHelpRequestsPayload {
+  tournamentKey?: string;
+  requests: IHelpRequest[];
 }
 
 export interface ICreateHelpRequest {

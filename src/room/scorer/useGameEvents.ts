@@ -91,6 +91,7 @@ export default function useGameEvents(
   setup: IGameSetup,
   initialEvents: ScoreEvent[] = [],
   procedure: IRoomProcedure | undefined = undefined,
+  initialSavedAt: number | null = null,
 ): IGameEventsApi {
   const [events, setEvents] = useState<ScoreEvent[]>(initialEvents);
   const [saved, setSaved] = useState(true);
@@ -100,7 +101,7 @@ export default function useGameEvents(
    * Kept so the connection detail can say "saved just now" as a fact rather than as a reassurance:
    * a scorekeeper deciding whether it is safe to reload deserves a timestamp we can prove.
    */
-  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(initialSavedAt);
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [rejection, setRejection] = useState('');
   /** The authority. State follows it; it never follows state. See the note at the top of the file. */

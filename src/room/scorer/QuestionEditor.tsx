@@ -33,6 +33,7 @@ import {
   IEditableBonus,
   IEditableQuestion,
   conversion,
+  maximumEditableAttempts,
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
 import { bouncebackOptions, regularBonusTotals } from './bonusOptions';
@@ -100,7 +101,8 @@ function clampBounceback(format: IScorekeeperFormat, bonus: IEditableBonus): IEd
   if (!format.bonus.bounceBack) return bonus;
   const options = bouncebackOptions(format.bonus, bonus.controlledPoints);
   if (options.includes(bonus.bouncebackPoints)) return bonus;
-  return { ...bonus, bouncebackPoints: options[0] ?? 0 };
+  const valid = options.filter((points) => points <= bonus.bouncebackPoints);
+  return { ...bonus, bouncebackPoints: valid[valid.length - 1] ?? options[0] ?? 0 };
 }
 
 /** Which team, if any, this proposed cycle says converted the tossup. */
@@ -141,6 +143,7 @@ export default function QuestionEditor(props: {
   const teamPlayers = useMemo(() => ({ left: active.left, right: active.right }), [active.left, active.right]);
   const teamName = (team: 'left' | 'right') => (team === 'left' ? game.left.name : game.right.name);
   const quickTotals = regularBonusTotals(format.bonus);
+  const maximumAttempts = maximumEditableAttempts();
 
   const updateAttempt = (index: number, next: Partial<IEditableAttempt>) => {
     setModel((current) => ({
@@ -150,6 +153,9 @@ export default function QuestionEditor(props: {
         const updated = { ...attempt, ...next };
         if (next.team !== undefined && !teamPlayers[next.team].includes(updated.playerName ?? '')) {
           updated.playerName = teamPlayers[next.team][0] ?? '';
+        }
+        if (next.kind === 'buzz' && !updated.playerName) {
+          updated.playerName = teamPlayers[updated.team][0] ?? firstActive(game, updated.team);
         }
         return updated;
       }),
@@ -298,6 +304,7 @@ export default function QuestionEditor(props: {
               <button
                 type="button"
                 className="scorer-text-action is-destructive"
+                aria-label={`Remove question ${model.questionNumber} attempt ${index + 1}`}
                 onClick={() =>
                   setModel((current) => ({
                     ...current,
@@ -311,7 +318,12 @@ export default function QuestionEditor(props: {
           ))}
         </ol>
         <div className="scorer-question-actions">
-          <button type="button" className="scorer-action" onClick={addAttempt} disabled={model.attempts.length >= 2}>
+          <button
+            type="button"
+            className="scorer-action"
+            onClick={addAttempt}
+            disabled={model.attempts.length >= maximumAttempts}
+          >
             + Add attempt
           </button>
           {/*
@@ -319,7 +331,7 @@ export default function QuestionEditor(props: {
             team negged and which one answered afterwards — but with two attempts there is exactly
             one other order.
           */}
-          {model.attempts.length === 2 && (
+          {model.attempts.length === maximumAttempts && (
             <button
               type="button"
               className="scorer-text-action"

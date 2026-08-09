@@ -446,10 +446,11 @@ export default class TournamentServerService {
       this.dataChangedReactCallback();
     });
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerSessionsChanged, (sessions) => {
-      const incoming = (sessions as ISessionSummary[]) ?? [];
-      this.sessions = incoming.filter(
-        (session) => !session.tournamentKey || session.tournamentKey === this.recoveryKey(),
-      );
+      const payload = (sessions ?? {}) as { tournamentKey?: unknown; sessions?: unknown };
+      if (typeof payload.tournamentKey !== 'string' || payload.tournamentKey !== this.recoveryKey()) return;
+      const incoming = Array.isArray(payload.sessions) ? (payload.sessions as ISessionSummary[]) : [];
+      if (incoming.some((session) => session.tournamentKey !== this.recoveryKey())) return;
+      this.sessions = incoming;
       this.dataChangedReactCallback();
     });
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerMatchSubmitted, (submission) => {
@@ -466,12 +467,14 @@ export default class TournamentServerService {
       if (scheduledMatchId) this.handleSessionStarted(scheduledMatchId);
     });
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerHelpRequestsChanged, (requests) => {
-      this.helpRequests = (requests as IHelpRequest[]) ?? [];
+      const payload = (requests ?? {}) as { tournamentKey?: unknown; requests?: unknown };
+      if (typeof payload.tournamentKey !== 'string' || payload.tournamentKey !== this.recoveryKey()) return;
+      this.helpRequests = Array.isArray(payload.requests) ? (payload.requests as IHelpRequest[]) : [];
       this.dataChangedReactCallback();
     });
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerRoomPlayerAddRequested, (payload) => {
       const request = payload as IRoomPlayerAddRequest;
-      if (request.tournamentKey && request.tournamentKey !== this.recoveryKey()) return;
+      if (!request.tournamentKey || request.tournamentKey !== this.recoveryKey()) return;
       this.onRoomPlayerAdd(request);
     });
   }
@@ -930,14 +933,15 @@ export default class TournamentServerService {
     if (!this.status.running) return;
     const generation = this.beginPoll('sessions');
     try {
-      const sessions =
-        ((await window.electron.ipcRenderer.invoke(
-          IpcBidirectional.TournamentServerGetSessions,
-        )) as ISessionSummary[]) ?? [];
+      const payload = (await window.electron.ipcRenderer.invoke(IpcBidirectional.TournamentServerGetSessions)) as {
+        tournamentKey?: unknown;
+        sessions?: unknown;
+      };
       if (generation !== this.currentPoll('sessions')) return;
-      this.sessions = sessions.filter(
-        (session) => !session.tournamentKey || session.tournamentKey === this.recoveryKey(),
-      );
+      if (typeof payload?.tournamentKey !== 'string' || payload.tournamentKey !== this.recoveryKey()) return;
+      const sessions = Array.isArray(payload.sessions) ? (payload.sessions as ISessionSummary[]) : [];
+      if (sessions.some((session) => session.tournamentKey !== this.recoveryKey())) return;
+      this.sessions = sessions;
       this.dataChangedReactCallback();
     } catch (error: unknown) {
       if (generation !== this.currentPoll('sessions')) return;
@@ -950,12 +954,13 @@ export default class TournamentServerService {
     const generation = this.beginPoll('presence');
     if (typeof window === 'undefined' || !window.electron) return;
     try {
-      const presence =
-        ((await window.electron.ipcRenderer.invoke(
-          IpcBidirectional.TournamentServerGetRoomPresence,
-        )) as IRoomPresence[]) ?? [];
+      const payload = (await window.electron.ipcRenderer.invoke(IpcBidirectional.TournamentServerGetRoomPresence)) as {
+        tournamentKey?: unknown;
+        presence?: unknown;
+      };
       if (generation !== this.currentPoll('presence')) return;
-      this.roomPresence = presence;
+      if (typeof payload?.tournamentKey !== 'string' || payload.tournamentKey !== this.recoveryKey()) return;
+      this.roomPresence = Array.isArray(payload.presence) ? (payload.presence as IRoomPresence[]) : [];
       this.dataChangedReactCallback();
     } catch (error: unknown) {
       if (generation !== this.currentPoll('presence')) return;
@@ -968,12 +973,13 @@ export default class TournamentServerService {
     const generation = this.beginPoll('help');
     if (typeof window === 'undefined' || !window.electron) return;
     try {
-      const requests =
-        ((await window.electron.ipcRenderer.invoke(
-          IpcBidirectional.TournamentServerGetHelpRequests,
-        )) as IHelpRequest[]) ?? [];
+      const payload = (await window.electron.ipcRenderer.invoke(IpcBidirectional.TournamentServerGetHelpRequests)) as {
+        tournamentKey?: unknown;
+        requests?: unknown;
+      };
       if (generation !== this.currentPoll('help')) return;
-      this.helpRequests = requests;
+      if (typeof payload?.tournamentKey !== 'string' || payload.tournamentKey !== this.recoveryKey()) return;
+      this.helpRequests = Array.isArray(payload.requests) ? (payload.requests as IHelpRequest[]) : [];
       this.dataChangedReactCallback();
     } catch (error: unknown) {
       if (generation !== this.currentPoll('help')) return;

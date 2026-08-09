@@ -187,7 +187,6 @@ function sendConnectionPage(req: IncomingMessage, res: ServerResponse, tournamen
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
     'X-Content-Type-Options': 'nosniff',
   });
   if ((req.method ?? 'GET') === 'HEAD') res.end();

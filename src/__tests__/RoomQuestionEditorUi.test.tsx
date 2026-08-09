@@ -83,6 +83,8 @@ describe('what the editor leads with', () => {
     expect(screen.getByText('Question 1')).toBeTruthy();
     expect(screen.getByText('Score before')).toBeTruthy();
     expect(screen.getByText('Score after')).toBeTruthy();
+    expect(screen.getByText('Ninety Six 0 · Greenwood 0')).toBeTruthy();
+    expect(screen.getByText('Ninety Six 35 · Greenwood 0')).toBeTruthy();
   });
 
   test('the lineup and the technical explanation wait behind More', () => {
@@ -150,21 +152,35 @@ describe('the ruling is one control', () => {
 });
 
 describe('two attempts', () => {
-  test('a neg then a conversion is edited as two numbered lines with one order control', () => {
+  test('two attempts can be swapped and saved with their values and scores intact', () => {
     renderScorer(formatFor());
-    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5 for Ninety Six
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
     fireEvent.click(buttonsFor('Emma Turner')[1]); // +10 for Greenwood
     fireEvent.click(screen.getByText('30'));
-    expect(scoreOf('Ninety Six')).toBe('-5');
+    expect(scoreOf('Ninety Six')).toBe('0');
     expect(scoreOf('Greenwood')).toBe('40');
 
     openEditor();
-    expect(screen.getByLabelText('Question 1 attempt 1 ruling')).toBeTruthy();
-    expect(screen.getByLabelText('Question 1 attempt 2 ruling')).toBeTruthy();
+    const teamOf = (attempt: number) =>
+      (screen.getByLabelText(`Question 1 attempt ${attempt} team`) as HTMLSelectElement).value;
+    const rulingOf = (attempt: number) => {
+      const select = screen.getByLabelText(`Question 1 attempt ${attempt} ruling`) as HTMLSelectElement;
+      return select.selectedOptions[0]?.textContent;
+    };
+    expect([teamOf(1), teamOf(2)]).toEqual(['left', 'right']);
+    expect([rulingOf(1), rulingOf(2)]).toEqual(['Wrong · 0', '+10']);
     // One control for order, rather than an Up and a Down on every row of a two-row list.
     expect(screen.getByText('Swap order')).toBeTruthy();
     expect(screen.queryByText('Up')).toBeNull();
     expect(screen.queryByText('Down')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Swap order' }));
+    expect([teamOf(1), teamOf(2)]).toEqual(['right', 'left']);
+    expect([rulingOf(1), rulingOf(2)]).toEqual(['+10', 'Wrong · 0']);
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(scoreOf('Ninety Six')).toBe('0');
+    expect(scoreOf('Greenwood')).toBe('40');
   });
 });
 
@@ -196,14 +212,15 @@ describe('the bonus', () => {
     expect(totals.map((button) => button.textContent)).toEqual(['0', '5', '10', '15', '20']);
   });
 
-  test('bouncebacks appear only when the format has them', () => {
+  test('bouncebacks are absent when the format has none', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(screen.getByText('20'));
     openEditor();
     expect(screen.queryByLabelText('Bonus bounceback points')).toBeNull();
-    cleanup();
+  });
 
+  test('bouncebacks appear when the format has them', () => {
     renderScorer(
       formatFor((rules) => {
         rules.bonusesBounceBack = true;
@@ -215,6 +232,30 @@ describe('the bonus', () => {
     fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText('10'));
     openEditor();
     expect(screen.getByLabelText('Bonus bounceback points')).toBeTruthy();
+  });
+
+  test('enumerable bonus parts recalculate the total while hiding total-only controls', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumBonusScore = 20;
+        rules.pointsPerBonusPart = 5;
+        rules.bonusDivisor = 5;
+        rules.minimumPartsPerBonus = 4;
+        rules.maximumPartsPerBonus = 4;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('10'));
+    openEditor();
+
+    fireEvent.click(screen.getByText('Enter parts…'));
+    const points = screen.getByLabelText('Points') as HTMLInputElement;
+    expect(points.disabled).toBe(true);
+    expect(screen.queryByRole('group', { name: 'Bonus points' })).toBeNull();
+    expect(screen.queryByLabelText('Bonus bounceback points')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Bonus part 1 controlled points'), { target: { value: '5' } });
+    expect(points.value).toBe('5');
   });
 
   test('an irregular bonus asks for a number, because its parts are not enumerable', () => {

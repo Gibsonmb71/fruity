@@ -229,6 +229,17 @@ describe('health endpoint', () => {
 });
 
 describe('QBSheet CORS', () => {
+  test('the connection page uses the exact approved origin rather than a wildcard', async () => {
+    server.setAllowedQbsheetOrigins(['https://qbsheet.com']);
+
+    const res = await fetch(`${baseUrl}/connect`, {
+      headers: { Origin: 'https://qbsheet.com' },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://qbsheet.com');
+  });
+
   test('an approved static origin receives an exact allow-origin header', async () => {
     server.setAllowedQbsheetOrigins(['https://scores.example/']);
 

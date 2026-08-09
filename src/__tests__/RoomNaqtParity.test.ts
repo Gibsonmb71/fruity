@@ -39,8 +39,14 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
   return found.index;
 }
 
-function buzz(questionNumber: number, team: 'left' | 'right', playerName: string, value: number): ScoreEvent {
-  return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex: typeIndex(naqt, value) });
+function buzz(
+  questionNumber: number,
+  team: 'left' | 'right',
+  playerName: string,
+  value: number,
+  format: IScorekeeperFormat,
+): ScoreEvent {
+  return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex: typeIndex(format, value) });
 }
 
 function bonus(questionNumber: number, team: 'left' | 'right', controlledPoints: number): ScoreEvent {
@@ -73,7 +79,7 @@ function playedGame(): ScoreEvent[] {
   // Q1-Q10: Sarah powers five, Emma takes five, each converting 20 of the bonus.
   for (let questionNumber = 1; questionNumber <= 10; questionNumber += 1) {
     const left = questionNumber % 2 === 1;
-    events.push(buzz(questionNumber, left ? 'left' : 'right', left ? 'Sarah' : 'Emma', left ? 15 : 10));
+    events.push(buzz(questionNumber, left ? 'left' : 'right', left ? 'Sarah' : 'Emma', left ? 15 : 10, naqt));
     events.push(bonus(questionNumber, left ? 'left' : 'right', 20));
   }
   // 5 × (15 + 20) = 175 for Ninety Six, 5 × (10 + 20) = 150 for Greenwood.
@@ -89,13 +95,13 @@ function playedGame(): ScoreEvent[] {
   );
 
   // Q11: a neg from Ninety Six, then Greenwood converts and takes 30.
-  events.push(buzz(11, 'left', 'Jordan', -5));
-  events.push(buzz(11, 'right', 'Morgan', 10));
+  events.push(buzz(11, 'left', 'Jordan', -5, naqt));
+  events.push(buzz(11, 'right', 'Morgan', 10, naqt));
   events.push(bonus(11, 'right', 30));
   // Ninety Six 170, Greenwood 190.
 
   // Q12: Ninety Six converts and takes 10 of the bonus, which levels it at 190-190.
-  events.push(buzz(12, 'left', 'Jordan', 10));
+  events.push(buzz(12, 'left', 'Jordan', 10, naqt));
   events.push(bonus(12, 'left', 10));
 
   // Q13-Q20: dead tossups. Everyone still hears them.
@@ -107,29 +113,56 @@ function playedGame(): ScoreEvent[] {
   // stopped at — after tossup 20 — which is what `validateScoresheet` insists on.
   events.push(event({ type: 'begin-overtime', questionNumber: 20 }));
   events.push(event({ type: 'tossup-dead', questionNumber: 21 }));
-  events.push(buzz(22, 'left', 'Sarah', 10));
-  events.push(buzz(23, 'right', 'Emma', 10));
+  events.push(buzz(22, 'left', 'Sarah', 10, naqt));
+  events.push(buzz(23, 'right', 'Emma', 10, naqt));
   // 200-200 after the initial overtime: still tied, so sudden death.
   events.push(event({ type: 'begin-sudden-death', questionNumber: 23 }));
-  events.push(buzz(24, 'left', 'James', 10));
+  events.push(buzz(24, 'left', 'James', 10, naqt));
 
   return events;
 }
 
 const events = playedGame();
 
-function playerLine(match: any, teamName: string, playerName: string) {
-  const matchTeam = match.match_teams.find((candidate: any) => candidate.team.name === teamName);
-  return matchTeam.match_players.find((candidate: any) => candidate.player.name === playerName);
+interface IQbjAnswerCount {
+  answer_type: { value: number };
+  number: number;
 }
 
-function answerCount(line: any, value: number): number {
-  return line.answer_counts.find((count: any) => count.answer_type.value === value)?.number ?? 0;
+interface IQbjMatchPlayer {
+  player: { name: string };
+  tossups_heard: number;
+  answer_counts: IQbjAnswerCount[];
+}
+
+interface IQbjMatchTeam {
+  team: { name: string };
+  match_players: IQbjMatchPlayer[];
+  points: number;
+}
+
+interface IQbjMatchQuestion {
+  bonus_points?: number;
+}
+
+interface IQbjMatch {
+  tossups_read: number;
+  match_teams: IQbjMatchTeam[];
+  match_questions: IQbjMatchQuestion[];
+}
+
+function playerLine(match: IQbjMatch, teamName: string, playerName: string): IQbjMatchPlayer | undefined {
+  const matchTeam = match.match_teams.find((candidate) => candidate.team.name === teamName);
+  return matchTeam?.match_players.find((candidate) => candidate.player.name === playerName);
+}
+
+function answerCount(line: IQbjMatchPlayer | undefined, value: number): number {
+  return line?.answer_counts.find((count) => count.answer_type.value === value)?.number ?? 0;
 }
 
 describe('a NAQT-style game, from the rules alone', () => {
   const game = deriveGame(naqt, setup, events);
-  const match = toQbjMatch(naqt, game) as any;
+  const match = toQbjMatch(naqt, game) as unknown as IQbjMatch;
 
   test('regulation runs to the configured tossup count and then to overtime', () => {
     expect(naqt.regulation.tossupCount).toBe(20);
@@ -159,11 +192,11 @@ describe('a NAQT-style game, from the rules alone', () => {
 
   test('tossups heard follows the lineup, not the roster', () => {
     // On the floor for all 24.
-    expect(playerLine(match, 'Ninety Six', 'Sarah').tossups_heard).toBe(24);
+    expect(playerLine(match, 'Ninety Six', 'Sarah')?.tossups_heard).toBe(24);
     // Came off after Q10.
-    expect(playerLine(match, 'Ninety Six', 'Taylor').tossups_heard).toBe(10);
+    expect(playerLine(match, 'Ninety Six', 'Taylor')?.tossups_heard).toBe(10);
     // Came on for Q11.
-    expect(playerLine(match, 'Ninety Six', 'Jordan').tossups_heard).toBe(14);
+    expect(playerLine(match, 'Ninety Six', 'Jordan')?.tossups_heard).toBe(14);
     // Never left the bench, and is therefore not in the export at all.
     expect(playerLine(match, 'Greenwood', 'Riley')).toBeUndefined();
   });
@@ -184,12 +217,12 @@ describe('a NAQT-style game, from the rules alone', () => {
   test('bonus points are carried on the cycle that earned them, and add up', () => {
     // A bonus belongs to the question in QBJ; which team it was is the conversion on that cycle.
     const bonusTotal = match.match_questions.reduce(
-      (total: number, question: any) => total + (question.bonus_points ?? 0),
+      (total: number, question) => total + (question.bonus_points ?? 0),
       0,
     );
     expect(bonusTotal).toBe(240); // ten 20s, plus the 30 on Q11 and the 10 on Q12
-    expect(match.match_teams.find((team: any) => team.team.name === 'Ninety Six').points).toBe(210);
-    expect(match.match_teams.find((team: any) => team.team.name === 'Greenwood').points).toBe(200);
+    expect(match.match_teams.find((team) => team.team.name === 'Ninety Six')?.points).toBe(210);
+    expect(match.match_teams.find((team) => team.team.name === 'Greenwood')?.points).toBe(200);
   });
 
   test('the scoresheet has nothing blocking submission', () => {
@@ -236,7 +269,7 @@ describe('the same history under different rules', () => {
         team: 'right',
         activePlayers: ['Emma', 'Morgan', 'Casey', 'Quinn'],
       }),
-      buzz(1, 'left', 'Sarah', 10),
+      buzz(1, 'left', 'Sarah', 10, timed),
       bonus(1, 'left', 20),
       event({ type: 'end-regulation', questionNumber: 2, lastRegulationQuestion: 1 }),
     ]);

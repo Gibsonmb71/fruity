@@ -184,6 +184,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const [emergencyGameId, setEmergencyGameId] = useState<string | null>(null);
   const [submitMessage, setSubmitMessage] = useState('');
   const [lastSnapshotError, setLastSnapshotError] = useState('');
+  const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null);
   const [questionsPlayed, setQuestionsPlayed] = useState(0);
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [persistFailure, setPersistFailure] = useState(false);
@@ -341,6 +342,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       setActiveResultId(null);
       setDeliveryFailed(false);
       setPersistFailure(false);
+      setLastSnapshotAt(null);
       setSetup({ round, leftTeam, rightTeam });
       setPhase('scoring');
       return;
@@ -363,6 +365,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
     setActiveResultId(null);
     setDeliveryFailed(false);
     setPersistFailure(false);
+    setLastSnapshotAt(null);
     setSetup({ round, leftTeam, rightTeam });
     setPhase('scoring');
   };
@@ -501,6 +504,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
     if (!activeCredentials || emergencyRef.current) return;
     const result = await putSnapshot(activeCredentials, qbj);
     setLastSnapshotError(result.ok ? '' : result.error);
+    if (result.ok) setLastSnapshotAt(Date.now());
   }, []);
 
   const modaqPlayers = useMemo(() => (setup ? toModaqPlayers(setup.leftTeam, setup.rightTeam) : []), [setup]);
@@ -587,6 +591,8 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
              * file.
              */
             automaticDelivery: !emergency && credentials !== null,
+            serverSnapshotAt: lastSnapshotAt,
+            snapshotError: lastSnapshotError,
           }}
           qbjMeta={{ round: setup.round.number, location: emergency ? kit?.roomName : undefined }}
         />

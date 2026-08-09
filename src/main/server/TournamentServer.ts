@@ -71,14 +71,14 @@ export interface ITournamentServerOptions {
   /** Called when a room submits a final result that needs the statskeeper's decision */
   onFinalSubmission: (submission: IMatchSubmission) => void;
   /** Called when any session changes, so the desktop dashboard can refresh */
-  onSessionsChanged?: (sessions: ISessionSummary[]) => void;
+  onSessionsChanged?: (sessions: ISessionSummary[], tournamentKey?: string) => void;
   /**
    * Called when a room starts its assigned game, so the desktop can move that scheduled match to
    * playing.
    */
   onSessionStarted?: (sessionId: string, scheduledMatchId: string, tournamentKey?: string) => void;
   /** Called when a room creates or closes an operational help request. */
-  onHelpRequestsChanged?: (requests: IHelpRequest[]) => void;
+  onHelpRequestsChanged?: (requests: IHelpRequest[], tournamentKey?: string) => void;
   /** Called after the HTTP layer authenticates and scopes a room roster addition. */
   onRoomPlayerAdd?: (request: IRoomPlayerAddRequest) => void;
   /** Small versioned JSON file in app-data used to restore active room sessions after a restart. */
@@ -419,7 +419,10 @@ export default class TournamentServer {
   }
 
   getSessionSummaries(): ISessionSummary[] {
-    return this.sessions.summarize();
+    return this.sessions.summarize().map((session) => ({
+      ...session,
+      tournamentKey: this.recoveryKey ?? session.tournamentKey,
+    }));
   }
 
   /** Finals that survived an application restart and still need a renderer-side decision. */
@@ -557,7 +560,7 @@ export default class TournamentServer {
 
   private notifySessionsChanged() {
     this.persistRecovery();
-    this.options.onSessionsChanged?.(this.getSessionSummaries());
+    this.options.onSessionsChanged?.(this.getSessionSummaries(), this.recoveryKey);
   }
 
   /** A server Accepted verdict is durable only when the current tournament projection proves its link. */
@@ -598,7 +601,7 @@ export default class TournamentServer {
   }
 
   private notifyHelpRequestsChanged() {
-    this.options.onHelpRequestsChanged?.(this.getHelpRequests());
+    this.options.onHelpRequestsChanged?.(this.getHelpRequests(), this.recoveryKey);
   }
 
   /** Load a corrupt or missing recovery file as an empty store rather than failing startup. */

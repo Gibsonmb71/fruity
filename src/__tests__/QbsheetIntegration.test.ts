@@ -12,7 +12,7 @@ import {
 import { makeTestTournament, testTeamNames } from './TestFixtures';
 import { event } from './RoomScoreEventFixtures';
 import { roundAssignmentRevision } from '../shared/RoundAssignmentRevision';
-import { normalizeQbsheetOrigin } from '../shared/QbsheetOrigin';
+import { defaultQbsheetOrigin, normalizeQbsheetOrigin } from '../shared/QbsheetOrigin';
 
 describe('QBSheet integration boundaries', () => {
   test('assignment revisions are stable for ordering and lifecycle changes', () => {
@@ -50,6 +50,8 @@ describe('QBSheet integration boundaries', () => {
   });
 
   test('configured QBSheet origins accept only a bare HTTP(S) origin', () => {
+    expect(defaultQbsheetOrigin).toBe('https://qbsheet.com');
+    expect(normalizeQbsheetOrigin(defaultQbsheetOrigin)).toBe(defaultQbsheetOrigin);
     expect(normalizeQbsheetOrigin('https://example.github.io/')).toBe('https://example.github.io');
     expect(normalizeQbsheetOrigin('http://127.0.0.1:4173')).toBe('http://127.0.0.1:4173');
     expect(normalizeQbsheetOrigin('https://example.github.io/qbsheet/')).toBeNull();
