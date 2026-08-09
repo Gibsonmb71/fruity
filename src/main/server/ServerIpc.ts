@@ -23,6 +23,8 @@ import {
 } from './ServerTypes';
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
 import { IpcBidirectional, IpcMainToRend, IpcRendToMain } from '../../IPCChannels';
+import { readAppPreferences, updateAppPreferences } from '../AppPreferences';
+import { normalizeQbsheetOrigin } from '../../shared/QbsheetOrigin';
 
 let server: TournamentServer | null = null;
 let ownerWindow: BrowserWindow | null = null;
@@ -84,6 +86,10 @@ function getServer(): TournamentServer {
       onSessionStarted: handleSessionStarted,
       onHelpRequestsChanged: handleHelpRequestsChanged,
       onRoomPlayerAdd: handleRoomPlayerAdd,
+      allowedQbsheetOrigins: (() => {
+        const origin = normalizeQbsheetOrigin(readAppPreferences().qbsheetOrigin);
+        return origin ? [origin] : [];
+      })(),
     });
   }
   return server;
@@ -129,6 +135,21 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
 
   ipcMain.handle(IpcBidirectional.TournamentServerGetHelpRequests, () =>
     server ? server.getHelpRequests() : ([] as IHelpRequest[]),
+  );
+
+  ipcMain.handle(IpcBidirectional.TournamentServerGetQbsheetOrigin, () => readAppPreferences().qbsheetOrigin ?? '');
+
+  ipcMain.handle(
+    IpcBidirectional.TournamentServerSetQbsheetOrigin,
+    async (_event: IpcMainInvokeEvent, value?: unknown) => {
+      const origin = value === undefined || value === '' ? undefined : normalizeQbsheetOrigin(value);
+      if (value !== undefined && value !== '' && origin === null) {
+        return { ok: false, error: 'Enter an http:// or https:// origin with no path.' };
+      }
+      const saved = await updateAppPreferences({ qbsheetOrigin: origin ?? undefined });
+      if (saved.ok) getServer().setAllowedQbsheetOrigins(origin ? [origin] : []);
+      return saved;
+    },
   );
 
   ipcMain.handle(

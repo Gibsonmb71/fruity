@@ -31,6 +31,14 @@ import {
   defaultServerPort,
 } from '../../main/server/ServerTypes';
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
+import { roundAssignmentRevision } from '../../shared/RoundAssignmentRevision';
+import { normalizeQbsheetOrigin } from '../../shared/QbsheetOrigin';
+import { readQbsheetSourceMetadata } from './QbsheetQbjMetadata';
+import {
+  exportQbsheetGamePackages as buildQbsheetGamePackages,
+  qbsheetGamePackageFileName,
+  qbsheetGamePackageFolderName,
+} from './QbsheetGamePackage';
 
 /** One remote submission waiting on the statskeeper's decision */
 export interface IInboxItem {
@@ -77,6 +85,24 @@ export interface IMatchSubmissionConflict {
 export default class TournamentServerService {
   status: IServerStatus = { running: false, port: defaultServerPort, addresses: [], networkAddresses: [] };
 
+  /**
+   * A running server in the main process that belongs to a tournament this renderer has not opened.
+   *
+   * Normally impossible, and normally exactly one thing: the renderer restarted — a reload, a crash
+   * recovery, a hot rebuild in development — underneath a server that survived it. The new renderer
+   * starts on a blank document with its own random operationalId, so every status message the main
+   * process sends carries a key that does not match, and the desktop used to discard all of them
+   * and render "Stopped" over a server that was still serving live rooms.
+   *
+   * Discarding is still right for the status *field*: adopting another tournament's port, addresses
+   * and sessions is the isolation failure this whole key check exists to prevent. What was wrong was
+   * saying nothing. So the status is kept here instead, where Control can say the true thing — the
+   * server is up, reopen the file — and where a later matching key can reattach to it.
+   *
+   * Null whenever the main process and this renderer agree, which is almost always.
+   */
+  survivingServer: IServerStatus | null = null;
+
   private preferredNetworkAddress: string | null = TournamentServerService.readPreferredNetworkAddress();
 
   /** Optional friendlier origin for room sheets and QR codes. Raw input is retained so host-only values can follow the active port. */
@@ -87,6 +113,9 @@ export default class TournamentServerService {
 
   /** Port the user wants to use next time they start the server */
   requestedPort: number = defaultServerPort;
+
+  /** Origin allowed to call the local server from the static QBSheet site. */
+  qbsheetOrigin = '';
 
   sessions: ISessionSummary[] = [];
 
@@ -101,6 +130,9 @@ export default class TournamentServerService {
 
   /** Set when starting the server fails, so the Rooms page can show why */
   lastError: string = '';
+
+  /** Problems reported for the most recent partial room-package export, if any. */
+  lastExportWarning: string = '';
 
   /**
    * Round the director has explicitly opened, overriding the automatic choice.
@@ -307,6 +339,9 @@ export default class TournamentServerService {
     this.helpRequests = [];
     this.pendingDurableAcceptances.clear();
     this.pendingDurableVerdicts.clear();
+    // Opening a document is the only thing that can turn a surviving server's foreign key into this
+    // renderer's own. Checked before the push, so a reattach is not mistaken for a switch.
+    this.reattachSurvivingServer();
     // Push even while stopped so the main process can scope any recovery data before the next
     // start. This does not bind a port or make the optional server visible on the LAN.
     return this.pushTournamentSnapshot();
@@ -344,13 +379,70 @@ export default class TournamentServerService {
     return { ok: true };
   }
 
+  /**
+   * Take one status report from the main process, and decide what it is about.
+   *
+   * Three outcomes, and keeping them apart is the whole job:
+   *
+   * - It is about the tournament this renderer has open, or it names no tournament at all. Adopt it.
+   * - It is about a *different* tournament and that server is running. Do not adopt it — but do not
+   *   pretend it does not exist either. It goes to `survivingServer`, which is what lets Control
+   *   say "still running, reopen the file" instead of "Stopped".
+   * - It is about a different tournament and that server is stopped. Nothing to say; drop it.
+   *
+   * @returns whether anything the UI renders changed.
+   */
+  private acceptStatus(next: IServerStatus): boolean {
+    if (next.tournamentKey && next.tournamentKey !== this.recoveryKey()) {
+      const previous = this.survivingServer;
+      this.survivingServer = next.running ? next : null;
+      return (previous?.running ?? false) !== (this.survivingServer?.running ?? false);
+    }
+    // The main process is talking about this document again, so there is nothing surviving to
+    // reattach to: whatever is in `status` from here on *is* this tournament's server.
+    this.survivingServer = null;
+    this.status = next;
+    this.lastError = next.errorMessage ?? '';
+    return true;
+  }
+
+  /**
+   * Reattach to a server that outlived the renderer, once the matching tournament has been opened.
+   *
+   * Called after the document changes, because that is the only thing that can turn a foreign key
+   * into a matching one. Reopening the .yft the server is already serving restores the same
+   * operationalId, which is the server's recovery key, so from here everything — sessions,
+   * presence, the help queue, pending submissions — comes back through the ordinary refresh path
+   * rather than through anything special.
+   *
+   * A genuinely different tournament never matches and never reattaches, which is the point.
+   */
+  private reattachSurvivingServer() {
+    const surviving = this.survivingServer;
+    if (!surviving || surviving.tournamentKey !== this.recoveryKey()) return;
+    this.survivingServer = null;
+    this.status = surviving;
+    this.lastError = surviving.errorMessage ?? '';
+    this.refreshStatus().catch(() => undefined);
+    this.refreshSessions().catch(() => undefined);
+  }
+
+  /**
+   * What Control should say while a server for another tournament is still up.
+   *
+   * Empty in every ordinary case. Deliberately an instruction rather than a diagnosis: the fix is
+   * one action — open the file the server is serving — and nothing else the director could do here
+   * would be safe.
+   */
+  get survivingServerNotice(): string {
+    if (!this.survivingServer) return '';
+    return 'The Tournament Server is still running and rooms are still being served. Reopen the tournament file to reconnect tournament control.';
+  }
+
   /** Subscribe to the main process's tournament-server messages */
   addIpcListeners() {
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerStatusChanged, (status) => {
-      const next = status as IServerStatus;
-      if (next.tournamentKey && next.tournamentKey !== this.recoveryKey()) return;
-      this.status = next;
-      this.lastError = this.status.errorMessage ?? '';
+      if (!this.acceptStatus(status as IServerStatus)) return;
       this.dataChangedReactCallback();
     });
     window.electron.ipcRenderer.on(IpcMainToRend.TournamentServerSessionsChanged, (sessions) => {
@@ -403,6 +495,17 @@ export default class TournamentServerService {
         if (round.packet.name !== '') packetNames.set(round.number, round.packet.name);
       }
     }
+    const revisionEntries = this.tournament.scheduledMatches.map((match) => ({
+      scheduledMatchId: match.id,
+      roundNumber: match.roundNumber,
+      leftTeam: match.leftTeamName,
+      rightTeam: match.rightTeamName,
+      roomId: match.roomId,
+      status: match.status,
+    }));
+    const roundRevisions = new Map(
+      rounds.map((round) => [round.number, roundAssignmentRevision(revisionEntries, round.number)]),
+    );
 
     return {
       name: this.tournament.name || 'Untitled tournament',
@@ -431,6 +534,7 @@ export default class TournamentServerService {
           roomId: match.roomId as string,
           roundNumber: match.roundNumber,
           roundName: roundNames.get(match.roundNumber) ?? String(match.roundNumber),
+          roundRevision: roundRevisions.get(match.roundNumber),
           packetName: packetNames.get(match.roundNumber),
           leftTeam: match.leftTeamName,
           rightTeam: match.rightTeamName,
@@ -442,6 +546,7 @@ export default class TournamentServerService {
       releasedRoundNumber: this.tournament.releasedRoundNumber,
       holdNewRoomStarts: this.tournament.holdNewRoomStarts,
       holdMessage: this.tournament.holdMessage || undefined,
+      resultHandoffInstruction: this.tournament.resultHandoffInstruction || undefined,
       recoveryKey: this.recoveryKey(),
     };
   }
@@ -796,8 +901,13 @@ export default class TournamentServerService {
         IpcBidirectional.TournamentServerGetStatus,
       )) as IServerStatus;
       if (generation !== this.currentPoll('status')) return;
-      if (nextStatus.tournamentKey && nextStatus.tournamentKey !== this.recoveryKey()) return;
-      this.status = nextStatus;
+      if (nextStatus.tournamentKey && nextStatus.tournamentKey !== this.recoveryKey()) {
+        // Somebody else's server. Record that it is up so Control can say so, and read nothing
+        // else from it: sessions, submissions and presence all belong to that tournament.
+        if (this.acceptStatus(nextStatus)) this.dataChangedReactCallback();
+        return;
+      }
+      this.acceptStatus(nextStatus);
       const pending = (await window.electron.ipcRenderer.invoke(
         IpcBidirectional.TournamentServerGetPendingSubmissions,
       )) as IMatchSubmission[];
@@ -924,6 +1034,98 @@ export default class TournamentServerService {
     this.dataChangedReactCallback();
   }
 
+  /** Refresh the persisted cross-origin allowlist setting when the settings dialog opens. */
+  async refreshQbsheetOrigin(): Promise<string> {
+    if (typeof window === 'undefined' || !window.electron) return this.qbsheetOrigin;
+    try {
+      const value = (await window.electron.ipcRenderer.invoke(
+        IpcBidirectional.TournamentServerGetQbsheetOrigin,
+      )) as unknown;
+      this.qbsheetOrigin = typeof value === 'string' ? value : '';
+      this.dataChangedReactCallback();
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+    }
+    return this.qbsheetOrigin;
+  }
+
+  /** Persist and apply the approved static scorekeeper origin. */
+  async setQbsheetOrigin(value: string): Promise<boolean> {
+    const trimmed = value.trim();
+    if (trimmed !== '' && normalizeQbsheetOrigin(trimmed) === null) {
+      this.lastError = 'Use an http:// or https:// origin with no path, for example https://example.github.io.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    if (typeof window === 'undefined' || !window.electron) {
+      this.lastError = 'The desktop server bridge is unavailable.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    try {
+      const result = (await window.electron.ipcRenderer.invoke(
+        IpcBidirectional.TournamentServerSetQbsheetOrigin,
+        trimmed,
+      )) as { ok?: boolean; error?: string; preferences?: { qbsheetOrigin?: string } };
+      if (!result?.ok) {
+        this.lastError = result?.error ?? 'The QBSheet origin could not be saved.';
+        this.dataChangedReactCallback();
+        return false;
+      }
+      this.qbsheetOrigin = result.preferences?.qbsheetOrigin ?? '';
+      this.lastError = '';
+      this.dataChangedReactCallback();
+      return true;
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+      return false;
+    }
+  }
+
+  /** Export the currently released/selected round as a folder of per-room portable game packages. */
+  async exportQbsheetGamePackages(selectedRoundNumber?: number): Promise<boolean> {
+    this.lastExportWarning = '';
+    const built = buildQbsheetGamePackages(this.tournament, selectedRoundNumber);
+    if (!built.ok) {
+      this.lastError = built.error;
+      this.dataChangedReactCallback();
+      return false;
+    }
+    if (typeof window === 'undefined' || !window.electron) {
+      this.lastError = 'The desktop server bridge is unavailable.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    try {
+      const result = (await window.electron.ipcRenderer.invoke(IpcBidirectional.ExportQbsheetGamePackages, {
+        folderName: qbsheetGamePackageFolderName(built.roundName),
+        files: built.packages.map((packageValue) => ({
+          directory: packageValue.room?.name ?? 'Unassigned room',
+          filename: qbsheetGamePackageFileName(packageValue),
+          contents: JSON.stringify(packageValue, null, 2),
+        })),
+      })) as { ok?: boolean; cancelled?: boolean; error?: string; count?: number };
+      if (result?.cancelled) return false;
+      if (!result?.ok) {
+        this.lastError = result?.error ?? 'The room scoring files could not be exported.';
+        this.dataChangedReactCallback();
+        return false;
+      }
+      if (built.problems.length > 0) {
+        this.lastExportWarning = `Some games were skipped: ${built.problems.join(' ')}`;
+      }
+      this.lastError = '';
+      this.dataChangedReactCallback();
+      return true;
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+      return false;
+    }
+  }
+
   /**
    * Validate a remote submission and put it in the Match Inbox.
    *
@@ -933,6 +1135,7 @@ export default class TournamentServerService {
   handleSubmission(submission: IMatchSubmission) {
     if (submission.tournamentKey && submission.tournamentKey !== this.recoveryKey()) return;
     const scheduled = this.findScheduledMatch(submission.scheduledMatchId);
+    const sourceMetadata = readQbsheetSourceMetadata(submission.qbj);
 
     // A result that names a scheduled game is never allowed to fall back to the generic/manual
     // import path when that game has been deleted or replaced. Keep it visible as a fatal inbox
@@ -949,6 +1152,23 @@ export default class TournamentServerService {
     // payloads and surface the collision instead: two results for one game means something went
     // wrong in the room and a human has to decide which is right.
     if (scheduled?.isAccepted()) {
+      const incomingFingerprint = sourceMetadata?.resultFingerprint;
+      if (
+        incomingFingerprint !== undefined &&
+        scheduled.resultFingerprint !== undefined &&
+        incomingFingerprint !== scheduled.resultFingerprint
+      ) {
+        this.conflicts = [
+          {
+            submission,
+            existingMatchId: scheduled.resultMatchId ?? '(unknown)',
+            noticedAt: new Date().toISOString(),
+          },
+          ...this.conflicts.filter((c) => c.submission.sessionId !== submission.sessionId),
+        ];
+        this.dataChangedReactCallback();
+        return;
+      }
       // A Submitted recovery record can be replayed after the YFT commit raced the server's
       // recovery write. The accepted scheduled link is proof that this exact session's result is
       // already durable in the tournament; acknowledge it without creating a second inbox item.
@@ -1203,6 +1423,7 @@ export default class TournamentServerService {
       ? {
           status: scheduled.status,
           resultMatchId: scheduled.resultMatchId,
+          resultFingerprint: scheduled.resultFingerprint,
           roomNameAtPlay: scheduled.roomNameAtPlay,
           quarantined: scheduled.quarantined,
           operationalIssue: scheduled.operationalIssue,
@@ -1214,6 +1435,9 @@ export default class TournamentServerService {
       // indistinguishable from a manually imported one.
       if (status === ImportResultStatus.ErrNonFatal) match.statsValidity = StatsValidity.omit;
       match.importedFile = importResult.filePath;
+      if (scheduled) {
+        scheduled.resultFingerprint = importResult.sourceMetadata?.resultFingerprint ?? importResult.resultFingerprint;
+      }
       Tournament.validateHaveTeamsPlayedInRound(match, round, phase, false);
       if (scheduled) {
         scheduled.resultMatchId = match.id;
@@ -1236,6 +1460,7 @@ export default class TournamentServerService {
       if (scheduled && previousScheduled) {
         scheduled.status = previousScheduled.status;
         scheduled.resultMatchId = previousScheduled.resultMatchId;
+        scheduled.resultFingerprint = previousScheduled.resultFingerprint;
         scheduled.roomNameAtPlay = previousScheduled.roomNameAtPlay;
         scheduled.quarantined = previousScheduled.quarantined;
         scheduled.operationalIssue = previousScheduled.operationalIssue;

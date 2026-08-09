@@ -83,6 +83,8 @@ export interface ITournamentServerOptions {
   onRoomPlayerAdd?: (request: IRoomPlayerAddRequest) => void;
   /** Small versioned JSON file in app-data used to restore active room sessions after a restart. */
   recoveryFilePath?: string;
+  /** Origins permitted to call the browser room API from the static QBSheet site. */
+  allowedQbsheetOrigins?: string[];
 }
 
 type TournamentServerLifecycle = 'stopped' | 'starting' | 'running' | 'stopping';
@@ -168,7 +170,12 @@ export default class TournamentServer {
       onRoomPlayerAdd: (request) => this.options.onRoomPlayerAdd?.(request),
       serveStatic: (req, res, pathname) => this.serveStatic(req, res, pathname),
     };
-    this.router = new Router(host);
+    this.router = new Router(host, options.allowedQbsheetOrigins ?? []);
+  }
+
+  /** Change the static scorekeeper CORS allowlist without restarting the local server. */
+  setAllowedQbsheetOrigins(origins: readonly string[]) {
+    this.router.setAllowedQbsheetOrigins(origins);
   }
 
   /** Replace the read-only tournament projection served to rooms */

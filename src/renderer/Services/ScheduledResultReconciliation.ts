@@ -24,6 +24,8 @@ import { getFileNameFromPath } from '../Utils/GeneralUtils';
 import { StatsValidity } from '../DataModel/Match';
 import { ScheduledMatch, ScheduledMatchStatus, transitionScheduledMatch } from '../DataModel/ScheduledMatch';
 import Tournament from '../DataModel/Tournament';
+import { IQbsheetQbjSourceMetadata } from './QbsheetQbjMetadata';
+import { roundAssignmentRevision } from '../../shared/RoundAssignmentRevision';
 
 /**
  * Statuses a manually imported result may resolve.
@@ -61,7 +63,13 @@ export type ScheduledLinkOutcome =
   /** More than one fits. Never guess: the director has to say which. */
   | { kind: 'ambiguous'; count: number }
   /** The tournament already has an official result for this pairing. It cannot be replaced here. */
-  | { kind: 'accepted'; scheduledMatchId: string };
+  | { kind: 'accepted'; scheduledMatchId: string }
+  /** The QBJ is the same result already accepted through the server; keep it as backup evidence. */
+  | { kind: 'backup'; scheduledMatchId: string }
+  /** The QBJ names an accepted game but its result differs from the server copy. */
+  | { kind: 'conflict'; scheduledMatchId: string }
+  /** The package was created against an older assignment revision. */
+  | { kind: 'stale'; scheduledMatchId?: string; sourceRevision: number; currentRevision: number };
 
 /** The authoritative facts a result carries, once the ordinary importer has resolved them. */
 export interface IImportedResultIdentity {
@@ -70,6 +78,7 @@ export interface IImportedResultIdentity {
   rightTeam: string;
   /** Only used to break a tie, and only when the source genuinely supplied it. */
   roomId?: string;
+  sourceMetadata?: IQbsheetQbjSourceMetadata;
 }
 
 /**
@@ -84,7 +93,74 @@ export function identityOfImportResult(result: MatchImportResult): IImportedResu
   const left = result.match?.leftTeam.team?.name;
   const right = result.match?.rightTeam.team?.name;
   if (!round || typeof left !== 'string' || typeof right !== 'string' || left === '' || right === '') return null;
-  return { roundNumber: round.number, leftTeam: left, rightTeam: right };
+  return {
+    roundNumber: round.number,
+    leftTeam: left,
+    rightTeam: right,
+    sourceMetadata: result.sourceMetadata,
+  };
+}
+
+function currentRoundRevision(tournament: Tournament, roundNumber: number): number {
+  return roundAssignmentRevision(
+    tournament.scheduledMatches.map((scheduled) => ({
+      scheduledMatchId: scheduled.id,
+      roundNumber: scheduled.roundNumber,
+      leftTeam: scheduled.leftTeamName,
+      rightTeam: scheduled.rightTeamName,
+      roomId: scheduled.roomId,
+      status: scheduled.status,
+    })),
+    roundNumber,
+  );
+}
+
+/** Metadata is the strongest identity available; never fall through to a weaker guess when it is contradictory. */
+function exactMetadataOutcome(tournament: Tournament, identity: IImportedResultIdentity): ScheduledLinkOutcome | null {
+  const source = identity.sourceMetadata;
+  if (!source) return null;
+  if (source.gamePackageVersion !== 1) return { kind: 'none' };
+  if (source.tournamentId !== undefined && source.tournamentId !== tournament.operationalId) return { kind: 'none' };
+  if (source.roundNumber !== identity.roundNumber) return { kind: 'none' };
+
+  if (source.scheduledMatchId !== undefined) {
+    const scheduled = tournament.scheduledMatches.find((candidate) => candidate.id === source.scheduledMatchId);
+    if (!scheduled || !scheduled.matchesTeams(identity.leftTeam, identity.rightTeam)) return { kind: 'none' };
+    if (scheduled.isAccepted()) {
+      if (
+        source.resultFingerprint !== undefined &&
+        scheduled.resultFingerprint !== undefined &&
+        source.resultFingerprint === scheduled.resultFingerprint
+      ) {
+        return { kind: 'backup', scheduledMatchId: scheduled.id };
+      }
+      if (
+        source.resultFingerprint !== undefined &&
+        scheduled.resultFingerprint !== undefined &&
+        source.resultFingerprint !== scheduled.resultFingerprint
+      ) {
+        return { kind: 'conflict', scheduledMatchId: scheduled.id };
+      }
+      return { kind: 'accepted', scheduledMatchId: scheduled.id };
+    }
+    if (scheduled.status === ScheduledMatchStatus.Cancelled || scheduled.quarantined) return { kind: 'none' };
+    const currentRevision = currentRoundRevision(tournament, identity.roundNumber);
+    if (source.roundRevision !== currentRevision) {
+      return {
+        kind: 'stale',
+        scheduledMatchId: scheduled.id,
+        sourceRevision: source.roundRevision,
+        currentRevision,
+      };
+    }
+    return { kind: 'candidate', suggestion: describeCandidate(tournament, scheduled) };
+  }
+
+  const currentRevision = currentRoundRevision(tournament, identity.roundNumber);
+  if (source.roundRevision !== currentRevision) {
+    return { kind: 'stale', sourceRevision: source.roundRevision, currentRevision };
+  }
+  return null;
 }
 
 /** Every scheduled game in this round with these two teams, whatever its status. */
@@ -156,6 +232,9 @@ export function suggestScheduledMatch(
   identity: IImportedResultIdentity | null,
 ): ScheduledLinkOutcome {
   if (!identity) return { kind: 'none' };
+
+  const exact = exactMetadataOutcome(tournament, identity);
+  if (exact !== null) return exact;
 
   const forPairing = scheduledForPairing(tournament, identity);
   const candidates = forPairing.filter(
@@ -284,6 +363,7 @@ export function commitScheduledResult(
   const previousScheduled = {
     status: scheduled.status,
     resultMatchId: scheduled.resultMatchId,
+    resultFingerprint: scheduled.resultFingerprint,
     roomNameAtPlay: scheduled.roomNameAtPlay,
   };
   let matchAdded = false;
@@ -292,6 +372,7 @@ export function commitScheduledResult(
     // The bare filename, matching what an ordinary import stores, so a recovered game is
     // indistinguishable from a manually imported one everywhere downstream.
     match.importedFile = getFileNameFromPath(result.filePath);
+    scheduled.resultFingerprint = result.sourceMetadata?.resultFingerprint ?? result.resultFingerprint;
     Tournament.validateHaveTeamsPlayedInRound(match, round, phase, false);
 
     // The ordinary transitions, walked in order. A game that was never started still has to pass
@@ -315,6 +396,7 @@ export function commitScheduledResult(
     match.modalBottomValidation.copyFromOther(previousValidation);
     scheduled.status = previousScheduled.status;
     scheduled.resultMatchId = previousScheduled.resultMatchId;
+    scheduled.resultFingerprint = previousScheduled.resultFingerprint;
     scheduled.roomNameAtPlay = previousScheduled.roomNameAtPlay;
     return { ok: false, reason: error instanceof Error && error.message ? error.message : 'The import failed.' };
   }

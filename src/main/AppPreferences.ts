@@ -18,6 +18,8 @@ import { writeFileAtomically } from './AtomicFile';
 export interface IAppPreferences {
   /** Where redundant .yft copies are written, or undefined when the feature is off. */
   secondaryBackupFolder?: string;
+  /** Static QBSheet origin allowed to call the local tournament API. */
+  qbsheetOrigin?: string;
 }
 
 export type AppPreferencesUpdateResult =
@@ -43,6 +45,12 @@ export function readAppPreferences(): IAppPreferences {
     if (typeof parsed?.secondaryBackupFolder === 'string' && parsed.secondaryBackupFolder !== '') {
       value = { secondaryBackupFolder: parsed.secondaryBackupFolder };
     }
+    const legacyOrigin = (parsed as Partial<IAppPreferences> & { standaloneScorekeeperOrigin?: unknown })
+      ?.standaloneScorekeeperOrigin;
+    const origin = typeof parsed?.qbsheetOrigin === 'string' ? parsed.qbsheetOrigin : legacyOrigin;
+    if (typeof origin === 'string' && origin !== '') {
+      value.qbsheetOrigin = origin;
+    }
   } catch {
     // Nothing here is worth failing startup over. A director who has lost the backup folder setting
     // is told the feature is off, and can set it again in one click.
@@ -62,6 +70,9 @@ export async function updateAppPreferences(change: Partial<IAppPreferences>): Pr
   const next: IAppPreferences = { ...readAppPreferences(), ...change };
   if (next.secondaryBackupFolder === undefined || next.secondaryBackupFolder === '') {
     delete next.secondaryBackupFolder;
+  }
+  if (next.qbsheetOrigin === undefined || next.qbsheetOrigin === '') {
+    delete next.qbsheetOrigin;
   }
   // The setting still takes effect for this session even if persistence fails. Callers get the
   // failure explicitly so the renderer can tell the director it will not survive a restart.

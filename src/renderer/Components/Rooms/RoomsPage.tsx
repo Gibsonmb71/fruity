@@ -178,6 +178,18 @@ interface IRoomsPageProps {
   onNavigationHandled: () => void;
 }
 
+/**
+ * The one word Control uses for the server, including the state that has no button.
+ *
+ * "Running — reconnect" is a server the main process is still hosting for a tournament this window
+ * has not opened. It is neither running (for this document) nor offline, and calling it either one
+ * sends the director somewhere wrong: "offline" invites a restart that would drop live rooms.
+ */
+function describeServerState(service: TournamentServerContextValue): string {
+  if (service.status.running) return 'running';
+  return service.survivingServer ? 'running — reconnect' : 'offline';
+}
+
 export default function RoomsPage({
   activeTab: controlledTab,
   onTabChange,
@@ -686,10 +698,21 @@ export default function RoomsPage({
             <Chip
               size="small"
               color={service.status.running ? 'success' : 'default'}
-              label={service.status.running ? 'Server running' : 'Server offline'}
+              label={`Server ${describeServerState(service)}`}
             />
           }
         />
+
+        {/*
+          The desktop restarted underneath a server that did not. Saying "offline" here would be a
+          lie the director would act on — stopping and restarting a server that is currently serving
+          live games — so this says what is actually true and what actually fixes it.
+        */}
+        {service.survivingServerNotice !== '' && (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            {service.survivingServerNotice}
+          </Alert>
+        )}
 
         <Box className="control-tabs" sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
           <Tabs
@@ -734,8 +757,8 @@ export default function RoomsPage({
           />
         ) : (
           <div className="rooms-server-compact" aria-label="Tournament Server status">
-            <span className={service.status.running ? 'is-running' : 'is-offline'}>
-              Tournament Server {service.status.running ? 'running' : 'offline'}
+            <span className={service.status.running || service.survivingServer ? 'is-running' : 'is-offline'}>
+              Tournament Server {describeServerState(service)}
             </span>
             <Button size="small" startIcon={<Settings />} onClick={() => setServerSettingsOpen(true)}>
               Settings
@@ -1081,6 +1104,32 @@ export default function RoomsPage({
                 </Button>
                 <Button size="small" variant="contained" onClick={() => setGeneratorOpen(true)}>
                   Generate Match Plan
+                </Button>
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    try {
+                      const exported = await service.exportQbsheetGamePackages(
+                        tournament.releasedRoundNumber ?? undefined,
+                      );
+                      if (exported) {
+                        manager.makeToast(
+                          service.lastExportWarning || 'Room scoring files exported.',
+                          service.lastExportWarning ? 'warning' : 'success',
+                        );
+                      } else {
+                        manager.makeToast(
+                          service.lastError || 'The room scoring files could not be exported.',
+                          'error',
+                        );
+                      }
+                    } catch {
+                      manager.makeToast('The room scoring files could not be exported.', 'error');
+                    }
+                  }}
+                  disabled={tournament.releasedRoundNumber === null}
+                >
+                  Export room scoring files
                 </Button>
               </div>
             </div>
@@ -2001,6 +2050,8 @@ function ServerSettingsDialog({
   const [portText, setPortText] = useState(String(service.requestedPort));
   const [roomUrlText, setRoomUrlText] = useState(service.preferredRoomUrl ?? '');
   const [roomUrlError, setRoomUrlError] = useState('');
+  const [qbsheetOriginText, setQbsheetOriginText] = useState(service.qbsheetOrigin);
+  const [qbsheetOriginError, setQbsheetOriginError] = useState('');
   const [busy, setBusy] = useState(false);
   const [stopConfirmationOpen, setStopConfirmationOpen] = useState(false);
   useEffect(() => {
@@ -2008,10 +2059,18 @@ function ServerSettingsDialog({
       setPortText(String(service.requestedPort));
       setRoomUrlText(service.preferredRoomUrl ?? '');
       setRoomUrlError('');
+      setQbsheetOriginError('');
+      service
+        .refreshQbsheetOrigin()
+        .then((origin) => setQbsheetOriginText(origin))
+        .catch(() => undefined);
     }
-  }, [open, service.requestedPort, service.preferredRoomUrl]);
+  }, [open, service, service.requestedPort, service.preferredRoomUrl]);
   const applyRoomUrl = () => {
     setRoomUrlError(service.setPreferredRoomUrl(roomUrlText) ? '' : service.lastError);
+  };
+  const applyQbsheetOrigin = async () => {
+    setQbsheetOriginError((await service.setQbsheetOrigin(qbsheetOriginText)) ? '' : service.lastError);
   };
   const port = Number.parseInt(portText, 10);
   const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
@@ -2108,6 +2167,24 @@ function ServerSettingsDialog({
               roomUrlError !== ''
                 ? roomUrlError
                 : 'Used for room sheets, QR codes and room links. The numeric address stays visible as a fallback. YellowFruit does not set this name up for you.'
+            }
+          />
+          <TextField
+            fullWidth
+            size="small"
+            sx={{ mt: 2 }}
+            label="QBSheet origin (optional)"
+            placeholder="https://example.github.io"
+            value={qbsheetOriginText}
+            onChange={(event) => setQbsheetOriginText(event.target.value)}
+            onBlur={() => {
+              applyQbsheetOrigin().catch(() => undefined);
+            }}
+            error={qbsheetOriginError !== ''}
+            helperText={
+              qbsheetOriginError !== ''
+                ? qbsheetOriginError
+                : 'Allows this static site to call the local server. Enter the origin only, without a GitHub Pages repository path.'
             }
           />
           {service.lastError !== '' && (

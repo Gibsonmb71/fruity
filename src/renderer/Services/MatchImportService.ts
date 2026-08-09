@@ -9,6 +9,7 @@ import FileParser from '../DataModel/FileParsing';
 import { collectRefTargets } from '../DataModel/QbjUtils2';
 import { qbjFileValidVersion } from '../DataModel/QbjUtils';
 import { snakeCaseToCamelCase } from '../DataModel/CaseConversion';
+import { readQbsheetSourceMetadata, qbsheetResultFingerprint } from './QbsheetQbjMetadata';
 
 /** One unit of QBJ text to import, plus a label describing where it came from */
 export interface IMatchImportSource {
@@ -92,13 +93,21 @@ export default class MatchImportService {
         return { results: [], hadInvalidJson: true };
       }
 
+      const sourceMetadata = readQbsheetSourceMetadata(objFromFile);
+      const resultFingerprint = sourceMetadata?.resultFingerprint ?? qbsheetResultFingerprint(objFromFile);
+      const resultStart = results.length;
       snakeCaseToCamelCase(objFromFile);
+      const wholeQbj = Boolean((objFromFile as IQbjWholeFile).objects);
 
-      if ((objFromFile as IQbjWholeFile).objects) {
+      if (wholeQbj) {
         results = results.concat(this.importMatchesFromWholeQbj(objFromFile as IQbjWholeFile, filePath, phase, round));
       } else {
         const oneResult = this.importSingleMatchFile(objFromFile as IModaqMatch, filePath, phase, round);
         results.push(oneResult);
+      }
+      for (const result of results.slice(resultStart)) {
+        if (sourceMetadata) result.sourceMetadata = sourceMetadata;
+        if (!wholeQbj || result.resultFingerprint === undefined) result.resultFingerprint = resultFingerprint;
       }
     }
 
@@ -181,6 +190,7 @@ export default class MatchImportService {
         continue; // just ignore this match; this isn't plausible and I don't know how I would explain it to a user
       }
       this.importSingleMatchObj(matchAndRound.match, phaseToUse, roundToUse, singleResult, parser);
+      singleResult.resultFingerprint = qbsheetResultFingerprint(matchAndRound.match);
       importResults.push(singleResult);
     }
     return importResults;

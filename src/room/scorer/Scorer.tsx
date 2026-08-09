@@ -40,7 +40,7 @@ import BonusPrompt from './BonusPrompt';
 import RecentRail from './RecentRail';
 import GameMenu, { IGameMenuItem } from './GameMenu';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
-import StartingLineupPrompt from './StartingLineupPrompt';
+import StartingLineupPrompt, { restrictiveSubstitutionWindows } from './StartingLineupPrompt';
 import PreSubmitReview, { HalftimeCheck } from './PreSubmitReview';
 import { AdjustDialog, ForfeitDialog, LightningDialog, NotesDialog } from './GameDialogs';
 import {
@@ -55,8 +55,18 @@ import { FlagDialog, IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from 
 import { attachScorerRecovery } from './ScorerRecovery';
 import { downloadCurrentQbj } from '../QbjBackup';
 import useRoomClock from './useRoomClock';
+import usePlayerSeating from './usePlayerSeating';
 import useScreenWakeLock from './useScreenWakeLock';
 import { formatClock, roomClockSegment } from './RoomClock';
+import ScorerBanners, {
+  ConnectionDetailDialog,
+  IScorerAlert,
+  IScorerRecoveryStatus,
+  connectionClass,
+  connectionLabel,
+} from './ConnectionStatus';
+
+export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
 export interface IScorerSubmitResult {
   ok: boolean;
@@ -115,6 +125,21 @@ export interface IScorerProps {
   /** The event list was restored automatically from local storage. */
   // eslint-disable-next-line react/require-default-props
   recovered?: boolean;
+  /** Something the host wants said about recovery, e.g. where a restored game came from. */
+  // eslint-disable-next-line react/require-default-props
+  recoveryNotice?: string;
+  /**
+   * Room-level warnings about the connection, the credentials, or the assignment.
+   *
+   * Owned by the room rather than by the scorer because the scorer has no view of the tournament:
+   * whether tournament control can still authenticate this browser, and what repairing that would
+   * mean, are questions only the page holding the room identity can answer.
+   */
+  // eslint-disable-next-line react/require-default-props
+  alerts?: IScorerAlert[];
+  /** Where this game currently exists, for the connection detail. Facts only. */
+  // eslint-disable-next-line react/require-default-props
+  recovery?: IScorerRecoveryStatus;
   /** Latest server rosters confirm durable tournament synchronization; they never replace setup. */
   // eslint-disable-next-line react/require-default-props
   authoritativeRosters?: Record<LeftOrRight, string[]>;
@@ -141,22 +166,11 @@ type OpenDialog =
   | 'replace'
   | 'end-early'
   | 'details'
+  | 'connection'
   | null;
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
-
-function connectionLabel(connection: RoomConnectionState): string {
-  if (connection === RoomConnectionState.Connected) return 'Connected';
-  if (connection === RoomConnectionState.Offline) return 'Offline';
-  return 'Connection issue';
-}
-
-function connectionClass(connection: RoomConnectionState): string {
-  if (connection === RoomConnectionState.Connected) return 'scorer-conn is-ok';
-  if (connection === RoomConnectionState.Offline) return 'scorer-conn is-offline';
-  return 'scorer-conn is-degraded';
-}
 
 export default function Scorer(props: IScorerProps) {
   const {
@@ -180,9 +194,14 @@ export default function Scorer(props: IScorerProps) {
     onRequestControl,
     controlRequestPending = false,
     recovered = false,
+    recoveryNotice,
+    alerts,
+    recovery,
     authoritativeRosters,
     onSyncRosterPlayer,
   } = props;
+
+  const recoveryStatus: IScorerRecoveryStatus = recovery ?? { localSaveOk: saved !== false };
 
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -190,6 +209,8 @@ export default function Scorer(props: IScorerProps) {
   const [operationNotice, setOperationNotice] = useState(
     recovered ? 'Recovered the in-progress game saved on this device.' : '',
   );
+  /** Only for the connection detail's relative times, so it ticks nowhere else. */
+  const [detailNow, setDetailNow] = useState(() => Date.now());
   const [rejectedRosterSyncs, setRejectedRosterSyncs] = useState<Record<string, true>>({});
   const rosterSyncAttempts = useRef(new Map<string, { attempts: number; lastAt: number }>());
   /** Which question the scoresheet review should open at, when it was opened from somewhere specific. */
@@ -198,6 +219,15 @@ export default function Scorer(props: IScorerProps) {
   const [issueCategory, setIssueCategory] = useState<HelpRequestCategory>('question-packet');
   const [moderatorName, setModeratorName] = useState(qbjMeta?.moderator ?? '');
   const [timeoutNow, setTimeoutNow] = useState(() => Date.now());
+  /**
+   * What order the two rosters are in on screen.
+   *
+   * Local to this device and this game, and read by nothing that scores — a room arranging its
+   * rows to match the table must not be able to write anything into the scoresheet. See
+   * `PlayerSeating`.
+   */
+  const seating = usePlayerSeating(gameKey);
+
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
   const clockSegment = roomClockSegment(
     procedure?.halves,
@@ -522,7 +552,7 @@ export default function Scorer(props: IScorerProps) {
   const lineupChangeReason =
     phase.kind === 'complete'
       ? 'This game is complete. Use scoresheet review to correct historical lineup information.'
-      : 'This procedure allows lineup changes at halftime, timeouts, and phase checkpoints.';
+      : `This procedure allows lineup changes ${restrictiveSubstitutionWindows}.`;
 
   const timeoutDurationMs = (procedure?.timeoutDurationSeconds ?? 0) * 1000;
   const timeoutRemainingMs =
@@ -716,20 +746,29 @@ export default function Scorer(props: IScorerProps) {
               )}
             </span>
           )}
-          <span className={connectionClass(connection)}>
+          <button
+            type="button"
+            className={connectionClass(connection)}
+            aria-label={`Connection: ${connectionLabel(connection)}. Show connection detail`}
+            onClick={() => {
+              setDetailNow(Date.now());
+              setDialog('connection');
+            }}
+          >
             <span className="scorer-dot" aria-hidden="true" />
             {connectionLabel(connection)}
-          </span>
+          </button>
         </div>
       </header>
 
-      {degradedMessage && <p className="scorer-banner is-warning">{degradedMessage}</p>}
-      {saved === false && (
-        <p className="scorer-banner is-error">
-          This device could not save the game locally. Do not reload the page &mdash; the questions scored so far exist
-          only on this screen.
-        </p>
-      )}
+      <ScorerBanners
+        connection={connection}
+        recovery={recoveryStatus}
+        alerts={alerts ?? []}
+        degradedMessage={degradedMessage}
+        onDownload={() => downloadQbj()}
+      />
+      {recoveryNotice && <p className="scorer-banner is-info">{recoveryNotice}</p>}
       {operationNotice && <p className="scorer-banner is-info">{operationNotice}</p>}
       {/*
         A refused action is never silent. The engine rejecting a second buzz on the same tossup is
@@ -751,6 +790,7 @@ export default function Scorer(props: IScorerProps) {
           right={game.right}
           maximumActive={format.players.maximumActive}
           needed={phase.teams}
+          procedure={procedure}
           onConfirm={(lineups) => {
             const chosen = (Object.keys(lineups) as LeftOrRight[]).map((side) => ({
               id: newEventId(),
@@ -771,6 +811,7 @@ export default function Scorer(props: IScorerProps) {
               <TeamPanel
                 format={format}
                 team={game.left}
+                seatOrder={seating.seating.left}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('left')}
                 negsAvailable={negsAvailable}
@@ -781,6 +822,7 @@ export default function Scorer(props: IScorerProps) {
               <TeamPanel
                 format={format}
                 team={game.right}
+                seatOrder={seating.seating.right}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('right')}
                 negsAvailable={negsAvailable}
@@ -935,9 +977,23 @@ export default function Scorer(props: IScorerProps) {
                     onReview={() => openReviewAt(undefined)}
                   />
                   {submitResult && (
-                    <p className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
-                      {submitResult.message}
-                    </p>
+                    <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
+                      {/*
+                        A finished game that could not be handed over is the one moment where the
+                        difference between "wait" and "carry this file to the director" decides
+                        whether the game reaches the standings. Both are said, and which one is
+                        said depends on whether there is a delivery path at all.
+                      */}
+                      {!submitResult.ok && connection === RoomConnectionState.Offline && (
+                        <strong>Result saved on this device</strong>
+                      )}
+                      <p>{submitResult.message}</p>
+                      {!submitResult.ok && (
+                        <button type="button" className="scorer-action" onClick={downloadQbj}>
+                          Download QBJ backup
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -979,32 +1035,64 @@ export default function Scorer(props: IScorerProps) {
           lineupChangeAllowed={lineupChangeAllowed}
           rosterAdditionAllowed={rosterAdditionAllowed}
           lineupChangeReason={lineupChangeReason}
+          seating={seating.seating}
+          onMovePlayer={(team, visibleNames, playerName, direction) =>
+            seating.move(
+              team,
+              (team === 'left' ? game.left : game.right).players.map((player) => player.name),
+              visibleNames,
+              playerName,
+              direction,
+            )
+          }
+          onSeatSubstitute={(team, outgoing, incoming) =>
+            seating.substitute(
+              team,
+              (team === 'left' ? game.left : game.right).players.map((player) => player.name),
+              outgoing,
+              incoming,
+            )
+          }
           onSubstitute={(team, activePlayers) => {
             record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
             setDialog(null);
           }}
           onAddPlayer={(team, playerName, activePlayers) => {
             const teamName = team === 'left' ? game.left.name : game.right.name;
-            const activeLineup = team === 'left' ? game.left.activePlayers : game.right.activePlayers;
-            const activatesPlayer =
-              activePlayers.length !== activeLineup.length ||
-              activePlayers.some((name, index) => name !== activeLineup[index]);
-            record(
+            const current = team === 'left' ? game.left.activePlayers : game.right.activePlayers;
+            /*
+             * Joining the roster and going on the floor are two different things, and a player
+             * added to a full team does only the first. Writing a substitution event that changes
+             * nothing would be a lineup change in the history that nobody made — and lineup events
+             * are what tossups heard are computed from.
+             *
+             * Compared as a set rather than position by position, because the order of a lineup is
+             * a seating preference and not a fact about the game: two arrangements of the same four
+             * players are the same lineup, and rearranging the rows must not write an event.
+             */
+            const lineupChanged =
+              activePlayers.length !== current.length || activePlayers.some((name) => !current.includes(name));
+            const added: ScoreEvent[] = [
               { id: newEventId(), type: 'roster-add', questionNumber: lineupQuestion, team, playerName },
-              ...(activatesPlayer
-                ? [
-                    {
-                      id: newEventId(),
-                      type: 'substitution' as const,
-                      questionNumber: lineupQuestion,
-                      team,
-                      activePlayers,
-                    },
-                  ]
-                : []),
-            );
+            ];
+            if (lineupChanged) {
+              added.push({
+                id: newEventId(),
+                type: 'substitution',
+                questionNumber: lineupQuestion,
+                team,
+                activePlayers,
+              });
+            }
+            record(...added);
             setDialog(null);
-            if (!activatesPlayer) {
+            /*
+             * A player who joined the bench and one who walked onto the floor need different
+             * sentences: the first is waiting for a substitution window, the second is already
+             * hearing tossups, and telling a scorekeeper the wrong one leaves them either watching
+             * for a change that already happened or expecting one that has not.
+             */
+            if (!lineupChanged) {
               if (onRequestControl) {
                 setOperationNotice(`Added ${playerName} to the bench; requesting tournament control.`);
                 Promise.resolve()
@@ -1219,6 +1307,7 @@ export default function Scorer(props: IScorerProps) {
             (reviewFocus === undefined && (phase.kind === 'bonus' || currentCycleHasBonus))
           }
           onReplace={(scope, reason) => {
+            // Resolved once: the note, the void and the message must all be about one question.
             const questionNumber = reviewFocus ?? currentQuestion;
             /*
              * The void and the note go together as one action: a cycle removed from the scoresheet
@@ -1276,6 +1365,15 @@ export default function Scorer(props: IScorerProps) {
           moderator={moderatorName}
           scorekeeper={operatorName ?? ''}
           onSave={setModeratorName}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'connection' && (
+        <ConnectionDetailDialog
+          connection={connection}
+          recovery={recoveryStatus}
+          now={detailNow}
+          onDownload={downloadQbj}
           onClose={() => setDialog(null)}
         />
       )}

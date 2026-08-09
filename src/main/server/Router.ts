@@ -41,6 +41,7 @@ import {
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
 import { selectRoomAssignments } from '../../shared/RoomAssignmentState';
 import { scorekeeperFormatProblems } from '../../renderer/Services/ScorekeeperFormat';
+import { normalizeQbsheetOrigin } from '../../shared/QbsheetOrigin';
 
 /** A parsed request body, or the reason it was refused */
 type BodyResult = { ok: true; body: unknown } | { ok: false; status: number; message: string };
@@ -328,10 +329,46 @@ function looksLikeQbjMatch(body: unknown): body is object {
 export default class Router {
   private host: IRouterHost;
 
+  private allowedQbsheetOrigins = new Set<string>();
+
   private pairingAttempts = new PairingAttemptLimiter();
 
-  constructor(host: IRouterHost) {
+  constructor(host: IRouterHost, allowedQbsheetOrigins: readonly string[] = []) {
     this.host = host;
+    this.setAllowedQbsheetOrigins(allowedQbsheetOrigins);
+  }
+
+  setAllowedQbsheetOrigins(origins: readonly string[]) {
+    this.allowedQbsheetOrigins = new Set(
+      origins.map((origin) => normalizeQbsheetOrigin(origin)).filter((origin): origin is string => origin !== null),
+    );
+  }
+
+  private applyCors(req: IncomingMessage, res: ServerResponse): { origin: string | undefined; allowed: boolean } {
+    const rawOrigin = req.headers.origin;
+    const origin = typeof rawOrigin === 'string' ? normalizeQbsheetOrigin(rawOrigin) ?? rawOrigin : undefined;
+    const allowed = origin !== undefined && this.allowedQbsheetOrigins.has(origin);
+    if (!allowed || origin === undefined) return { origin, allowed: false };
+
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      [
+        'Content-Type',
+        'x-yf-room-token',
+        'x-yf-session-token',
+        'x-yf-device-id',
+        'x-yf-operator-name',
+        'Access-Control-Request-Private-Network',
+      ].join(', '),
+    );
+    res.setHeader('Access-Control-Max-Age', '600');
+    if (req.headers['access-control-request-private-network'] === 'true') {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
+    return { origin, allowed: true };
   }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -360,6 +397,17 @@ export default class Router {
     }
 
     const method = req.method ?? 'GET';
+
+    const cors = this.applyCors(req, res);
+    if (method === 'OPTIONS' && pathname.startsWith(apiPrefix)) {
+      if (cors.origin !== undefined && !cors.allowed) {
+        sendError(res, 403, 'This browser origin is not approved for QBSheet.');
+        return;
+      }
+      res.writeHead(204, { 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
 
     // A deliberately credential-free endpoint for the desktop to test the selected LAN address.
     if (pathname === '/connect') {
@@ -552,6 +600,29 @@ export default class Router {
           return;
         }
         sendJson(res, 200, SessionStore.toStateResponse(result.session));
+        return;
+      }
+
+      /*
+       * GET /api/v1/sessions/:sessionId/recovery
+       *
+       * The second recovery source, for a browser whose own local copy of its own game is missing
+       * or unreadable. Authorized by the same session capability token every other write to this
+       * session needs, so a room can only ever recover the game it is already holding credentials
+       * for — there is no room-wide or server-wide session read here, and no way to reach another
+       * session's payload by changing the id.
+       */
+      if (segments.length === 3 && segments[2] === 'recovery') {
+        if (method !== 'GET') {
+          sendError(res, 405, `${method} is not allowed for this endpoint.`);
+          return;
+        }
+        const result = this.host.sessions.read(sessionId, tokenFrom(req));
+        if (!result.ok) {
+          sendSessionWriteError(res, result);
+          return;
+        }
+        sendJson(res, 200, SessionStore.toRecoveryResponse(result.session));
         return;
       }
 

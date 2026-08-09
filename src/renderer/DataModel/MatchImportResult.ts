@@ -2,6 +2,7 @@ import { Match } from './Match';
 import { Phase } from './Phase';
 import { Round } from './Round';
 import { Team } from './Team';
+import { IQbsheetQbjSourceMetadata } from '../Services/QbsheetQbjMetadata';
 
 export enum ImportResultStatus {
   Success,
@@ -25,6 +26,12 @@ class MatchImportResult {
   status: ImportResultStatus;
 
   messages: string[] = [];
+
+  /** Optional non-secret source identity carried by the QBSheet extension. */
+  sourceMetadata?: IQbsheetQbjSourceMetadata;
+
+  /** Portable statistical fingerprint captured before QBJ case conversion. */
+  resultFingerprint?: string;
 
   /** Whether the user wants to continue importing this match */
   proceedWithImport: boolean = false;
