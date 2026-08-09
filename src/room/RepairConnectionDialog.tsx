@@ -31,11 +31,13 @@ export interface IRepairConnectionDialogProps {
   gameInProgress: boolean;
   onRepaired: (identity: IRoomIdentity) => void;
   onDownloadBackup: () => void;
+  // eslint-disable-next-line react/require-default-props
+  downloadError?: string;
   onClose: () => void;
 }
 
 export default function RepairConnectionDialog(props: IRepairConnectionDialogProps) {
-  const { roomId, gameInProgress, onRepaired, onDownloadBackup, onClose } = props;
+  const { roomId, gameInProgress, onRepaired, onDownloadBackup, downloadError, onClose } = props;
   const [rooms, setRooms] = useState<IRoomJoinDescriptor[]>([]);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -136,6 +138,7 @@ export default function RepairConnectionDialog(props: IRepairConnectionDialogPro
             : 'Enter the pairing code for '}
           <strong>{thisRoom?.name ?? 'this room'}</strong> from the room sheet or from tournament control.
         </p>
+        {downloadError && <div className="room-banner room-banner-error">{downloadError}</div>}
         {mismatch === null ? (
           <form className="room-join-form" onSubmit={submit}>
             <label className="room-field-label" htmlFor="room-repair-code">

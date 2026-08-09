@@ -272,6 +272,8 @@ function TeamLineup(props: {
   const confirmSubstitution = (out: string | undefined, incoming: string) => {
     if (out !== undefined && onSeatSubstitute) onSeatSubstitute(side, out, incoming);
     onSubstitute(side, lineupAfter(out, incoming));
+    setMode({ kind: 'idle' });
+    setNewPlayer('');
   };
 
   const playerRow = (player: IDerivedTeam['players'][number], active: boolean, seat: number) => {
@@ -469,6 +471,8 @@ function TeamLineup(props: {
              */
             const goesOn = lineupChangeAllowed && !atCapacity;
             onAddPlayer(side, cleanNewPlayer, goesOn ? team.activePlayers.concat(cleanNewPlayer) : team.activePlayers);
+            setMode({ kind: 'idle' });
+            setNewPlayer('');
           }}
         >
           <p className="scorer-lineup-step-title">Add missing player</p>

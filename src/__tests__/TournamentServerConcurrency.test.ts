@@ -20,7 +20,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function sessionSummary(sessionId: string): ISessionSummary {
+function sessionSummary(sessionId: string, tournamentKey: string): ISessionSummary {
   const timestamp = new Date(0).toISOString();
   return {
     sessionId,
@@ -33,13 +33,14 @@ function sessionSummary(sessionId: string): ISessionSummary {
     lastSeenAt: timestamp,
     msSinceLastSeen: 0,
     score: null,
+    tournamentKey,
   };
 }
 
 describe('renderer server polling races', () => {
   test('an older sessions response cannot overwrite a newer response', async () => {
-    const older = deferred<ISessionSummary[]>();
-    const newer = deferred<ISessionSummary[]>();
+    const older = deferred<{ tournamentKey: string; sessions: ISessionSummary[] }>();
+    const newer = deferred<{ tournamentKey: string; sessions: ISessionSummary[] }>();
     const invoke = vi
       .fn()
       .mockImplementationOnce(() => older.promise)
@@ -48,30 +49,43 @@ describe('renderer server polling races', () => {
       electron: { ipcRenderer: { invoke, sendMessage: () => undefined } },
     };
 
-    const service = new TournamentServerService(makeTestTournament());
-    service.status = { running: true, port: 4732, addresses: [] } as IServerStatus;
+    const tournament = makeTestTournament();
+    const service = new TournamentServerService(tournament);
+    service.status = {
+      running: true,
+      port: 4732,
+      addresses: [],
+      tournamentKey: tournament.operationalId,
+    } as IServerStatus;
     const firstRefresh = service.refreshSessions();
     const secondRefresh = service.refreshSessions();
 
-    newer.resolve([sessionSummary('newer')]);
+    newer.resolve({
+      tournamentKey: tournament.operationalId,
+      sessions: [sessionSummary('newer', tournament.operationalId)],
+    });
     await secondRefresh;
-    older.resolve([sessionSummary('older')]);
+    older.resolve({
+      tournamentKey: tournament.operationalId,
+      sessions: [sessionSummary('older', tournament.operationalId)],
+    });
     await firstRefresh;
 
     expect(service.sessions.map((session) => session.sessionId)).toEqual(['newer']);
   });
 
   test('an in-flight presence response cannot repopulate a replacement tournament', async () => {
-    const older = deferred<Array<{ roomId: string; connected: boolean }>>();
+    const older = deferred<{ tournamentKey: string; presence: Array<{ roomId: string; connected: boolean }> }>();
     const invoke = vi.fn().mockImplementation(() => older.promise);
     (global as any).window = {
       electron: { ipcRenderer: { invoke, sendMessage: () => undefined } },
     };
 
-    const service = new TournamentServerService(makeTestTournament());
+    const tournament = makeTestTournament();
+    const service = new TournamentServerService(tournament);
     const refresh = service.refreshPresence();
     service.reset();
-    older.resolve([{ roomId: 'old-room', connected: true }]);
+    older.resolve({ tournamentKey: tournament.operationalId, presence: [{ roomId: 'old-room', connected: true }] });
     await refresh;
 
     expect(service.roomPresence).toEqual([]);

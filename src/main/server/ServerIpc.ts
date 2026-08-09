@@ -13,12 +13,14 @@ import TournamentServer from './TournamentServer';
 import {
   IHelpRequest,
   IMatchSubmission,
-  IRoomPresence,
   IRoomPlayerAddRequest,
   IServerStatus,
   ISessionSummary,
   ISubmissionVerdict,
   ITournamentSnapshot,
+  ITournamentServerHelpRequestsPayload,
+  ITournamentServerPresencePayload,
+  ITournamentServerSessionsPayload,
   defaultServerPort,
 } from './ServerTypes';
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
@@ -59,16 +61,18 @@ function handleFinalSubmission(submission: IMatchSubmission) {
   sendToRenderer(IpcMainToRend.TournamentServerMatchSubmitted, submission);
 }
 
-function handleSessionsChanged(sessions: ISessionSummary[]) {
-  sendToRenderer(IpcMainToRend.TournamentServerSessionsChanged, sessions);
+function handleSessionsChanged(sessions: ISessionSummary[], tournamentKey?: string) {
+  const payload: ITournamentServerSessionsPayload = { tournamentKey, sessions };
+  sendToRenderer(IpcMainToRend.TournamentServerSessionsChanged, payload);
 }
 
 function handleSessionStarted(sessionId: string, scheduledMatchId: string, tournamentKey?: string) {
   sendToRenderer(IpcMainToRend.TournamentServerSessionStarted, { sessionId, scheduledMatchId, tournamentKey });
 }
 
-function handleHelpRequestsChanged(requests: IHelpRequest[]) {
-  sendToRenderer(IpcMainToRend.TournamentServerHelpRequestsChanged, requests);
+function handleHelpRequestsChanged(requests: IHelpRequest[], tournamentKey?: string) {
+  const payload: ITournamentServerHelpRequestsPayload = { tournamentKey, requests };
+  sendToRenderer(IpcMainToRend.TournamentServerHelpRequestsChanged, payload);
 }
 
 function handleRoomPlayerAdd(request: IRoomPlayerAddRequest) {
@@ -123,19 +127,33 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
 
   ipcMain.handle(IpcBidirectional.TournamentServerGetStatus, () => (server ? server.getStatus() : offlineStatus()));
 
-  ipcMain.handle(IpcBidirectional.TournamentServerGetSessions, () => (server ? server.getSessionSummaries() : []));
+  ipcMain.handle(IpcBidirectional.TournamentServerGetSessions, () => {
+    const payload: ITournamentServerSessionsPayload = {
+      tournamentKey: server?.getStatus().tournamentKey,
+      sessions: server?.getSessionSummaries() ?? [],
+    };
+    return payload;
+  });
 
   ipcMain.handle(IpcBidirectional.TournamentServerGetPendingSubmissions, () =>
     server ? server.getPendingSubmissions() : [],
   );
 
-  ipcMain.handle(IpcBidirectional.TournamentServerGetRoomPresence, () =>
-    server ? server.getRoomPresence() : ([] as IRoomPresence[]),
-  );
+  ipcMain.handle(IpcBidirectional.TournamentServerGetRoomPresence, () => {
+    const payload: ITournamentServerPresencePayload = {
+      tournamentKey: server?.getStatus().tournamentKey,
+      presence: server?.getRoomPresence() ?? [],
+    };
+    return payload;
+  });
 
-  ipcMain.handle(IpcBidirectional.TournamentServerGetHelpRequests, () =>
-    server ? server.getHelpRequests() : ([] as IHelpRequest[]),
-  );
+  ipcMain.handle(IpcBidirectional.TournamentServerGetHelpRequests, () => {
+    const payload: ITournamentServerHelpRequestsPayload = {
+      tournamentKey: server?.getStatus().tournamentKey,
+      requests: server?.getHelpRequests() ?? [],
+    };
+    return payload;
+  });
 
   ipcMain.handle(IpcBidirectional.TournamentServerGetQbsheetOrigin, () => readAppPreferences().qbsheetOrigin ?? '');
 

@@ -286,7 +286,8 @@ describe('a reload while the server is unreachable', () => {
     cleanup();
 
     render(<AssignedRoomApp identity={{ ...identity, roomId: 'room-118' }} />);
-    await settle();
+    // Wait for the room page to settle before asserting that the foreign game was not adopted.
+    await waitFor(() => expect(screen.getByText('Ninety Six')).toBeTruthy());
     expect(screen.queryByLabelText('Ninety Six score')).toBeNull();
   });
 });

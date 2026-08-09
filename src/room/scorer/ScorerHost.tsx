@@ -89,6 +89,9 @@ export interface IScorerHostProps {
   /** Room-level warnings about the connection, credentials or assignment. */
   // eslint-disable-next-line react/require-default-props
   alerts?: IScorerAlert[];
+  /** True when the room's active-game index could not be persisted for a reload. */
+  // eslint-disable-next-line react/require-default-props
+  activeGameRecordWriteFailed?: boolean;
   /** Facts for the connection detail. Only claims the room can actually prove. */
   // eslint-disable-next-line react/require-default-props
   recovery?: Omit<IScorerRecoveryStatus, 'localSaveOk' | 'localSavedAt'>;
@@ -127,6 +130,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     onSyncRosterPlayer,
     onRecoverFromServer,
     alerts,
+    activeGameRecordWriteFailed = false,
     recovery,
   } = props;
 
@@ -148,7 +152,15 @@ export default function ScorerHost(props: IScorerHostProps) {
    */
   const [recovered] = useState(() => loadGame(gameKey));
   const activeSetup = recovered?.setup ?? setup;
-  const events = useGameEvents(gameKey, format, activeSetup, recovered?.events ?? [], procedure);
+  const recoveredSavedAt = recovered ? new Date(recovered.updatedAt).getTime() : null;
+  const events = useGameEvents(
+    gameKey,
+    format,
+    activeSetup,
+    recovered?.events ?? [],
+    procedure,
+    Number.isFinite(recoveredSavedAt) ? recoveredSavedAt : null,
+  );
   const [serverRecoveryNotice, setServerRecoveryNotice] = useState('');
 
   /**
@@ -232,8 +244,8 @@ export default function ScorerHost(props: IScorerHostProps) {
       alerts={alerts}
       recovery={{
         ...(recovery ?? {}),
-        localSaveOk: events.saved,
-        localSavedAt: events.savedAt,
+        localSaveOk: events.saved && !activeGameRecordWriteFailed,
+        localSavedAt: activeGameRecordWriteFailed ? null : events.savedAt,
       }}
     />
   );

@@ -16,7 +16,13 @@
  */
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import TournamentServerService from '../renderer/Services/TournamentServerService';
-import { IServerStatus, ISessionSummary, SessionDisplayState, SessionStatus } from '../main/server/ServerTypes';
+import {
+  IHelpRequest,
+  IServerStatus,
+  ISessionSummary,
+  SessionDisplayState,
+  SessionStatus,
+} from '../main/server/ServerTypes';
 import Tournament from '../renderer/DataModel/Tournament';
 import { IpcBidirectional, IpcMainToRend } from '../IPCChannels';
 import { makeTestTournament } from './TestFixtures';
@@ -63,6 +69,20 @@ function sessionFor(tournamentKey: string): ISessionSummary {
   };
 }
 
+function helpRequestFor(id = 'help-live'): IHelpRequest {
+  const timestamp = new Date().toISOString();
+  return {
+    id,
+    roomId: 'room-201',
+    roomName: 'Room 201',
+    category: 'other',
+    message: 'Please check the room.',
+    status: 'open',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 /** A service on a blank document, exactly as a freshly reloaded renderer starts. */
 function blankRenderer(): TournamentServerService {
   const service = new TournamentServerService(new Tournament());
@@ -93,7 +113,10 @@ describe('a renderer that restarted underneath a running server', () => {
     const service = blankRenderer();
     listeners.get(IpcMainToRend.TournamentServerStatusChanged)?.(statusFor('tourn-live', true));
 
-    listeners.get(IpcMainToRend.TournamentServerSessionsChanged)?.([sessionFor('tourn-live')]);
+    listeners.get(IpcMainToRend.TournamentServerSessionsChanged)?.({
+      tournamentKey: 'tourn-live',
+      sessions: [sessionFor('tourn-live')],
+    });
 
     expect(service.sessions).toEqual([]);
   });
@@ -118,10 +141,19 @@ describe('opening the tournament the server is serving', () => {
     const reopened = makeTestTournament();
     reopened.operationalId = 'tourn-live';
     invokeResults.set(IpcBidirectional.TournamentServerGetStatus, statusFor('tourn-live', true));
-    invokeResults.set(IpcBidirectional.TournamentServerGetSessions, [sessionFor('tourn-live')]);
+    invokeResults.set(IpcBidirectional.TournamentServerGetSessions, {
+      tournamentKey: 'tourn-live',
+      sessions: [sessionFor('tourn-live')],
+    });
     invokeResults.set(IpcBidirectional.TournamentServerGetPendingSubmissions, []);
-    invokeResults.set(IpcBidirectional.TournamentServerGetRoomPresence, []);
-    invokeResults.set(IpcBidirectional.TournamentServerGetHelpRequests, []);
+    invokeResults.set(IpcBidirectional.TournamentServerGetRoomPresence, {
+      tournamentKey: 'tourn-live',
+      presence: [],
+    });
+    invokeResults.set(IpcBidirectional.TournamentServerGetHelpRequests, {
+      tournamentKey: 'tourn-live',
+      requests: [],
+    });
 
     service.setTournament(reopened);
 
@@ -173,12 +205,32 @@ describe('polling', () => {
     const key = open.operationalId;
     invokeResults.set(IpcBidirectional.TournamentServerGetStatus, statusFor(key, true));
     invokeResults.set(IpcBidirectional.TournamentServerGetPendingSubmissions, []);
-    invokeResults.set(IpcBidirectional.TournamentServerGetRoomPresence, []);
-    invokeResults.set(IpcBidirectional.TournamentServerGetHelpRequests, []);
+    invokeResults.set(IpcBidirectional.TournamentServerGetRoomPresence, {
+      tournamentKey: key,
+      presence: [],
+    });
+    invokeResults.set(IpcBidirectional.TournamentServerGetHelpRequests, {
+      tournamentKey: key,
+      requests: [],
+    });
 
     await service.refreshStatus();
 
     expect(service.status.running).toBe(true);
     expect(service.survivingServer).toBeNull();
+  });
+
+  test('a foreign or unscoped help-request event is ignored', () => {
+    const open = makeTestTournament();
+    open.operationalId = 'tourn-live';
+    const service = new TournamentServerService(open);
+    service.dataChangedReactCallback = () => undefined;
+    service.addIpcListeners();
+
+    const listener = listeners.get(IpcMainToRend.TournamentServerHelpRequestsChanged);
+    listener?.({ tournamentKey: 'tourn-other', requests: [helpRequestFor()] });
+    listener?.({ requests: [helpRequestFor('help-unscoped')] });
+
+    expect(service.helpRequests).toEqual([]);
   });
 });

@@ -80,6 +80,12 @@ export function describeAge(at: number | null | undefined, now: number): string 
   return `${hours} hr ago`;
 }
 
+function serverSnapshotValue(recovery: IScorerRecoveryStatus, now: number): string {
+  if (recovery.automaticDelivery === false) return 'Not applicable';
+  if (recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined) return 'Not yet sent';
+  return describeAge(recovery.serverSnapshotAt, now);
+}
+
 export function connectionLabel(connection: RoomConnectionState): string {
   if (connection === RoomConnectionState.Connected) return 'Connected';
   if (connection === RoomConnectionState.Offline) return 'Offline';
@@ -215,11 +221,7 @@ export function ConnectionDetailDialog(props: {
         />
         <DetailRow
           label="Server snapshot"
-          value={
-            recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined
-              ? 'Not yet sent'
-              : describeAge(recovery.serverSnapshotAt, now)
-          }
+          value={serverSnapshotValue(recovery, now)}
           problem={
             recovery.automaticDelivery !== false &&
             (recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined)

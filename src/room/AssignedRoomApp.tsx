@@ -200,6 +200,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [repairedIdentity, setRepairedIdentity] = useState<IRoomIdentity | null>(null);
   /** When the server last accepted a live snapshot of the game on screen. Null means never. */
   const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null);
+  /** A repair dialog must explain why a backup is not available instead of failing silently. */
+  const [backupError, setBackupError] = useState('');
+  /** False when the active-game index was accepted; true means a reload cannot find this game. */
+  const [activeGameRecordWriteFailed, setActiveGameRecordWriteFailed] = useState(false);
 
   const outbox = useResultOutbox();
   const baseIdentity = repairedIdentity ?? identity;
@@ -298,13 +302,13 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const rememberActiveGame = useCallback(
     (active: IActiveScoring) => {
       const { scoringFormat } = active.frozen;
-      if (!scoringFormat) return;
+      if (!scoringFormat) return false;
       // Rewriting the record — to stamp a confirmed tournament key, say — must not restart the
       // clock that ages an abandoned game out.
       const existing = readActiveGame({ roomId: roomIdForRecord });
       const startedAt =
         existing?.sessionId === active.credentials.sessionId ? existing.startedAt : new Date().toISOString();
-      writeActiveGame({
+      const written = writeActiveGame({
         roomId: roomIdForRecord,
         tournamentKey: active.frozen.tournamentKey,
         scheduledMatchId: active.matchup.scheduledMatchId,
@@ -320,16 +324,24 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         roomProcedure: active.frozen.procedure,
         startedAt,
       });
+      setActiveGameRecordWriteFailed(!written);
+      return written;
     },
     [roomIdForRecord],
   );
   const rememberActiveGameRef = useRef(rememberActiveGame);
   rememberActiveGameRef.current = rememberActiveGame;
 
+  /** Reconcile the server's tournament identity wherever it is confirmed. */
   const reconcileTournamentKey = useCallback((confirmedKey: string | undefined) => {
     if (confirmedKey === undefined) return;
+    verifiedTournamentKeyRef.current = confirmedKey;
     const active = scoringRef.current;
-    if (!active) return;
+    if (!active) {
+      setTournamentConflict(false);
+      return;
+    }
+    if (!active.frozen.scoringFormat) return;
     if (active.frozen.tournamentKey === undefined) {
       const stamped = { ...active, frozen: { ...active.frozen, tournamentKey: confirmedKey } };
       setScoring(stamped);
@@ -457,6 +469,8 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
           setPersistFailure(false);
           setConflictNotice('');
           setLastSnapshotAt(null);
+          setBackupError('');
+          latestQbjRef.current = null;
           serverHasFinalRef.current = false;
           if (finished) clearActiveGame(finished.credentials.sessionId);
         } else {
@@ -504,7 +518,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       ]);
       if (cancelled || !tournamentResult.ok) return;
       // Known as soon as the server says so, whatever becomes of the cached kit below.
-      verifiedTournamentKeyRef.current = tournamentResult.value.tournamentKey;
+      reconcileTournamentKey(tournamentResult.value.tournamentKey);
       /*
        * The server is serving a different tournament than the one this game started under.
        *
@@ -513,7 +527,6 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
        * worse than one that arrives on a USB stick, so this stops automatic synchronization and
        * says so, and the QBJ remains downloadable.
        */
-      reconcileTournamentKey(tournamentResult.value.tournamentKey);
       if (!roundsResult.ok || !teamsResult.ok) return;
       const kit = buildScoringKit({
         tournamentKey: tournamentResult.value.tournamentKey,
@@ -622,6 +635,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     setDeliveryFailed(false);
     setPersistFailure(false);
     setLastSnapshotAt(null);
+    setBackupError('');
+    setActiveGameRecordWriteFailed(false);
+    latestQbjRef.current = null;
     serverHasFinalRef.current = false;
     const started: IActiveScoring = {
       matchup: current,
@@ -835,6 +851,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       const activeCredentials = credentialsRef.current;
       setQuestionsPlayed(questionsHeard);
       latestQbjRef.current = qbj;
+      setBackupError('');
       if (activeCredentials) touchActiveGame(activeCredentials.sessionId);
       if (!activeCredentials || tournamentConflict) return;
       const result = await putSnapshot(activeCredentials, qbj);
@@ -847,14 +864,22 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const handleDownloadBackup = useCallback(() => {
     const qbj = latestQbjRef.current;
     const active = scoringRef.current;
-    if (!qbj || !active) return;
-    downloadCurrentQbj(qbj, {
+    if (!active) {
+      setBackupError('There is no active game to download yet.');
+      return;
+    }
+    if (!qbj) {
+      setBackupError('The QBJ backup is not ready yet. Wait for the first scoring update and try again.');
+      return;
+    }
+    const downloaded = downloadCurrentQbj(qbj, {
       roundName: active.frozen.roundName,
       roundNumber: active.frozen.roundNumber,
       roomName: active.frozen.roomName,
       leftTeam: active.matchup.leftTeam.name,
       rightTeam: active.matchup.rightTeam.name,
     });
+    setBackupError(downloaded ? '' : 'This browser could not start the QBJ download.');
   }, []);
 
   /**
@@ -929,7 +954,15 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       tone: 'warning',
       title: 'Room connection changed — keep scoring.',
       body: 'Tournament control can no longer authenticate this Chromebook. This game is still saved on this device. If the connection is not restored by the end of the game, download the QBJ and give it to tournament control.',
-      actions: [{ label: 'Repair connection', onSelect: () => setRepairOpen(true) }],
+      actions: [
+        {
+          label: 'Repair connection',
+          onSelect: () => {
+            setBackupError('');
+            setRepairOpen(true);
+          },
+        },
+      ],
       offerDownload: true,
     });
   }
@@ -955,9 +988,11 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       onRepaired={(repaired) => {
         setRepairedIdentity(repaired);
         setAuthProblem(false);
+        setBackupError('');
         setRepairOpen(false);
       }}
       onDownloadBackup={handleDownloadBackup}
+      downloadError={backupError}
       onClose={() => setRepairOpen(false)}
     />
   ) : null;
@@ -1001,6 +1036,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
           onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
           onProgress={handleScorerProgress}
           onRecoverFromServer={recoverFromServer}
+          activeGameRecordWriteFailed={activeGameRecordWriteFailed}
           onRequestControl={handleRequestHelp}
           controlRequestPending={helpRequest !== null && helpRequest.status === 'open'}
           alerts={scorerAlerts}
