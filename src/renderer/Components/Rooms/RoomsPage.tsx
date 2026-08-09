@@ -1107,10 +1107,25 @@ export default function RoomsPage({
                 </Button>
                 <Button
                   size="small"
-                  onClick={() => {
-                    service
-                      .exportQbsheetGamePackages(tournament.releasedRoundNumber ?? undefined)
-                      .catch(() => undefined);
+                  onClick={async () => {
+                    try {
+                      const exported = await service.exportQbsheetGamePackages(
+                        tournament.releasedRoundNumber ?? undefined,
+                      );
+                      if (exported) {
+                        manager.makeToast(
+                          service.lastExportWarning || 'Room scoring files exported.',
+                          service.lastExportWarning ? 'warning' : 'success',
+                        );
+                      } else {
+                        manager.makeToast(
+                          service.lastError || 'The room scoring files could not be exported.',
+                          'error',
+                        );
+                      }
+                    } catch {
+                      manager.makeToast('The room scoring files could not be exported.', 'error');
+                    }
                   }}
                   disabled={tournament.releasedRoundNumber === null}
                 >

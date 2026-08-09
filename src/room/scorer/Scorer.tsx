@@ -40,7 +40,7 @@ import BonusPrompt from './BonusPrompt';
 import RecentRail from './RecentRail';
 import GameMenu, { IGameMenuItem } from './GameMenu';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
-import StartingLineupPrompt from './StartingLineupPrompt';
+import StartingLineupPrompt, { restrictiveSubstitutionWindows } from './StartingLineupPrompt';
 import PreSubmitReview, { HalftimeCheck } from './PreSubmitReview';
 import { AdjustDialog, ForfeitDialog, LightningDialog, NotesDialog } from './GameDialogs';
 import {
@@ -552,7 +552,7 @@ export default function Scorer(props: IScorerProps) {
   const lineupChangeReason =
     phase.kind === 'complete'
       ? 'This game is complete. Use scoresheet review to correct historical lineup information.'
-      : 'This procedure allows lineup changes at halftime, timeouts, and phase checkpoints.';
+      : `This procedure allows lineup changes ${restrictiveSubstitutionWindows}.`;
 
   const timeoutDurationMs = (procedure?.timeoutDurationSeconds ?? 0) * 1000;
   const timeoutRemainingMs =
@@ -985,7 +985,7 @@ export default function Scorer(props: IScorerProps) {
                         said depends on whether there is a delivery path at all.
                       */}
                       {!submitResult.ok && connection === RoomConnectionState.Offline && (
-                        <strong>Result saved on this Chromebook</strong>
+                        <strong>Result saved on this device</strong>
                       )}
                       <p>{submitResult.message}</p>
                       {!submitResult.ok && (

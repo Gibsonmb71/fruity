@@ -96,6 +96,13 @@ function syncBonus(bonus: IEditableBonus, parts: IEditableBonus['parts']): IEdit
   };
 }
 
+function clampBounceback(format: IScorekeeperFormat, bonus: IEditableBonus): IEditableBonus {
+  if (!format.bonus.bounceBack) return bonus;
+  const options = bouncebackOptions(format.bonus, bonus.controlledPoints);
+  if (options.includes(bonus.bouncebackPoints)) return bonus;
+  return { ...bonus, bouncebackPoints: options[0] ?? 0 };
+}
+
 /** Which team, if any, this proposed cycle says converted the tossup. */
 function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): 'left' | 'right' | undefined {
   return conversion(model, format)?.team;
@@ -114,7 +121,9 @@ export default function QuestionEditor(props: {
   const [model, setModel] = useState<IEditableQuestion>(() => ({
     ...initial,
     attempts: initial.attempts.map((attempt) => ({ ...attempt })),
-    bonus: initial.bonus ? { ...initial.bonus, parts: initial.bonus.parts?.map((part) => ({ ...part })) } : undefined,
+    bonus: initial.bonus
+      ? clampBounceback(format, { ...initial.bonus, parts: initial.bonus.parts?.map((part) => ({ ...part })) })
+      : undefined,
   }));
   const [errors, setErrors] = useState<string[]>([]);
   const [bonusDrafts, setBonusDrafts] = useState<IBonusDrafts>({ parts: {} });
@@ -173,7 +182,7 @@ export default function QuestionEditor(props: {
     setBonusDrafts({ parts: {} });
     setModel((current) => {
       const existing = current.bonus ?? { team: 'left' as const, controlledPoints: 0, bouncebackPoints: 0 };
-      return { ...current, bonus: { ...existing, ...next } };
+      return { ...current, bonus: clampBounceback(format, { ...existing, ...next }) };
     });
   };
 
@@ -194,19 +203,23 @@ export default function QuestionEditor(props: {
       const parts = current.bonus.parts.map((part, partIndex) =>
         partIndex === index ? { ...part, [field]: parsed } : part,
       );
-      return { ...current, bonus: syncBonus(current.bonus, parts) };
+      return { ...current, bonus: clampBounceback(format, syncBonus(current.bonus, parts)) };
     });
   };
 
   const save = () => {
     // A field somebody emptied and never refilled is not a zero. Say so rather than saving one.
-    const draftErrors = Object.entries({
-      controlled: bonusDrafts.controlled,
-      bounceback: bonusDrafts.bounceback,
-      ...Object.fromEntries(Object.entries(bonusDrafts.parts).map(([key, value]) => [`part-${key}`, value])),
-    })
+    const draftErrors = [
+      ['bonus points', bonusDrafts.controlled],
+      ['bonus bounceback points', bonusDrafts.bounceback],
+      ...Object.entries(bonusDrafts.parts).map(([key, value]) => {
+        const [index, field] = key.split('-');
+        const fieldLabel = field === 'controlledPoints' ? 'controlled points' : 'bounceback points';
+        return [`bonus part ${Number(index) + 1} ${fieldLabel}`, value];
+      }),
+    ]
       .filter(([, value]) => value !== undefined && (value.trim() === '' || !Number.isFinite(Number(value))))
-      .map(([field]) => `Enter a valid number for ${field.replace(/-/g, ' ')}.`);
+      .map(([field]) => `Enter a valid number for ${field}.`);
     const nextErrors = [...draftErrors, ...validateEditableQuestion(format, game, model)];
     setErrors(nextErrors);
     if (nextErrors.length === 0 && onSave(model)) onCancel();
@@ -434,7 +447,9 @@ export default function QuestionEditor(props: {
                   }
                   setShowParts(true);
                   setModel((current) =>
-                    current.bonus ? { ...current, bonus: syncBonus(current.bonus, defaultParts(format)) } : current,
+                    current.bonus
+                      ? { ...current, bonus: clampBounceback(format, syncBonus(current.bonus, defaultParts(format))) }
+                      : current,
                   );
                 }}
               >
@@ -474,7 +489,12 @@ export default function QuestionEditor(props: {
         The margin of the scoresheet. Real, kept, and not what a scorekeeper correcting a buzz is
         looking for — so it waits to be opened rather than taking the top half of the dialog.
       */}
-      <button type="button" className="scorer-text-action" onClick={() => setShowMore((current) => !current)}>
+      <button
+        type="button"
+        className="scorer-text-action"
+        aria-expanded={showMore}
+        onClick={() => setShowMore((current) => !current)}
+      >
         {showMore ? 'Less…' : 'More…'}
       </button>
       {showMore && (

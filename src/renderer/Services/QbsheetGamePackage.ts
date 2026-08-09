@@ -23,7 +23,7 @@ export type IQbsheetPackageRoster = IGamePackageTeam;
 export type IQbsheetGamePackage = IGamePackage;
 
 export type QbsheetGamePackageExport =
-  | { ok: true; roundNumber: number; roundName: string; packages: IQbsheetGamePackage[] }
+  | { ok: true; roundNumber: number; roundName: string; packages: IQbsheetGamePackage[]; problems: string[] }
   | { ok: false; error: string };
 
 function revisionEntries(tournament: Tournament) {
@@ -102,6 +102,7 @@ export function exportQbsheetGamePackages(
 
   const revision = roundAssignmentRevision(revisionEntries(tournament), roundNumber);
   const packages: IQbsheetGamePackage[] = [];
+  const problems: string[] = [];
   for (const scheduled of tournament.scheduledMatches.filter(
     (candidate) =>
       candidate.roundNumber === roundNumber &&
@@ -109,10 +110,14 @@ export function exportQbsheetGamePackages(
       candidate.isPlayable(),
   )) {
     const built = packageFor(tournament, scheduled, revision);
-    if (!built.ok) return built;
+    if (!built.ok) {
+      problems.push(built.error);
+      continue;
+    }
     packages.push(built.value);
   }
-  return { ok: true, roundNumber, roundName: round.displayName(), packages };
+  if (packages.length === 0 && problems.length > 0) return { ok: false, error: problems.join(' ') };
+  return { ok: true, roundNumber, roundName: round.displayName(), packages, problems };
 }
 
 function safeFilePart(value: string): string {

@@ -33,6 +33,8 @@ export interface IStartingLineupPromptProps {
   onConfirm: (lineups: Partial<Record<LeftOrRight, string[]>>) => void;
 }
 
+export const restrictiveSubstitutionWindows = 'at halftime, timeouts, and phase checkpoints';
+
 /**
  * When the players not chosen here can come on.
  *
@@ -43,7 +45,7 @@ export interface IStartingLineupPromptProps {
 export function substitutionSentence(procedure: IRoomProcedure | undefined): string {
   return substitutionPolicy(procedure) === 'any-boundary'
     ? 'The rest start on the bench and can come on between any two tossups.'
-    : 'The rest start on the bench and can come on at halftime, at a timeout, or at a phase checkpoint.';
+    : `The rest start on the bench and can come on ${restrictiveSubstitutionWindows}.`;
 }
 
 function TeamStarters(props: {

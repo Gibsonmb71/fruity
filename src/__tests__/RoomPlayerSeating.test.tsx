@@ -28,6 +28,7 @@ import {
   saveSeating,
   takeSeat,
 } from '../room/scorer/PlayerSeating';
+import { installDialogMethods, installLocalStorage } from './RoomScorerTestHarness';
 
 const leftTeam = {
   name: 'Ninety Six',
@@ -89,39 +90,6 @@ function openPlayers() {
 
 function savedEvents(): ScoreEvent[] {
   return loadGame(gameKey)?.events ?? [];
-}
-
-function installLocalStorage() {
-  let store: Record<string, string> = {};
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => store[key] ?? null,
-      setItem: (key: string, value: string) => {
-        store[key] = String(value);
-      },
-      removeItem: (key: string) => {
-        delete store[key];
-      },
-      clear: () => {
-        store = {};
-      },
-    },
-  });
-}
-
-function installDialogMethods() {
-  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
-    HTMLDialogElement.prototype.showModal = function showModal() {
-      this.open = true;
-    };
-  }
-  if (typeof HTMLDialogElement.prototype.close !== 'function') {
-    HTMLDialogElement.prototype.close = function close() {
-      this.open = false;
-      this.dispatchEvent(new Event('close'));
-    };
-  }
 }
 
 beforeEach(() => {

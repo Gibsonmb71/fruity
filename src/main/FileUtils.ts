@@ -497,6 +497,18 @@ export function handleExportQbsheetGamePackages(
     return { ok: false, error: 'The export request was invalid.' };
   }
 
+  const files: IQbsheetPackageFileRequest[] = [];
+  for (const file of candidate.files) {
+    if (typeof file !== 'object' || file === null) return { ok: false, error: 'The export request was invalid.' };
+    const directory = safeQbsheetExportPart(file.directory);
+    const filename = safeQbsheetExportPart(file.filename);
+    if (!directory || !filename || !filename.toLowerCase().endsWith('.qbg') || typeof file.contents !== 'string') {
+      return { ok: false, error: 'The export request contained an unsafe file name.' };
+    }
+    if (file.contents.length > 2 * 1024 * 1024) return { ok: false, error: 'A game package was too large to export.' };
+    files.push({ directory, filename, contents: file.contents });
+  }
+
   const chosen = dialog.showOpenDialogSync(window, {
     title: 'Choose where to export room scoring files',
     properties: ['openDirectory', 'createDirectory'],
@@ -507,15 +519,8 @@ export function handleExportQbsheetGamePackages(
     const exportDirectory = path.join(chosen[0], folderName);
     fs.mkdirSync(exportDirectory, { recursive: true });
     let count = 0;
-    for (const file of candidate.files) {
-      if (typeof file !== 'object' || file === null) return { ok: false, error: 'The export request was invalid.' };
-      const directory = safeQbsheetExportPart(file.directory);
-      const filename = safeQbsheetExportPart(file.filename);
-      if (!directory || !filename || !filename.toLowerCase().endsWith('.qbg') || typeof file.contents !== 'string') {
-        return { ok: false, error: 'The export request contained an unsafe file name.' };
-      }
-      if (file.contents.length > 2 * 1024 * 1024)
-        return { ok: false, error: 'A game package was too large to export.' };
+    for (const file of files) {
+      const { directory, filename } = file;
       const roomDirectory = path.join(exportDirectory, directory);
       fs.mkdirSync(roomDirectory, { recursive: true });
       let outputPath = path.join(roomDirectory, filename);

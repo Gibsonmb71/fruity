@@ -21,6 +21,7 @@ import { ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import { readActiveGame, writeActiveGame } from '../room/ActiveGameRecord';
+import { installDialogMethods, installLocalStorage } from './RoomScorerTestHarness';
 
 const identity = { roomId: 'room-204', token: 'room-token', deviceId: 'device-1' };
 const sessionId = 'session-1';
@@ -81,6 +82,7 @@ let network: INetwork;
 let fetchCalls: string[];
 let replaced: string[];
 let assigned: string[];
+let storageHarness: ReturnType<typeof installLocalStorage>;
 
 function jsonResponse(status: number, body: unknown) {
   return {
@@ -152,40 +154,6 @@ function installLocation() {
   });
 }
 
-function installLocalStorage(failWrites = false) {
-  let store: Record<string, string> = {};
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => store[key] ?? null,
-      setItem: (key: string, value: string) => {
-        if (failWrites) throw new Error('QuotaExceededError');
-        store[key] = String(value);
-      },
-      removeItem: (key: string) => {
-        delete store[key];
-      },
-      clear: () => {
-        store = {};
-      },
-    },
-  });
-}
-
-function installDialogMethods() {
-  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
-    HTMLDialogElement.prototype.showModal = function showModal() {
-      this.open = true;
-    };
-  }
-  if (typeof HTMLDialogElement.prototype.close !== 'function') {
-    HTMLDialogElement.prototype.close = function close() {
-      this.open = false;
-      this.dispatchEvent(new Event('close'));
-    };
-  }
-}
-
 beforeEach(() => {
   network = {
     offline: false,
@@ -197,7 +165,7 @@ beforeEach(() => {
   };
   installFetch();
   installLocation();
-  installLocalStorage();
+  storageHarness = installLocalStorage();
   installDialogMethods();
   window.localStorage.setItem('yellowfruit.room.scorer.v1', JSON.stringify({ choice: 'first-party' }));
 });
@@ -318,7 +286,8 @@ describe('a reload while the server is unreachable', () => {
     cleanup();
 
     render(<AssignedRoomApp identity={{ ...identity, roomId: 'room-118' }} />);
-    await waitFor(() => expect(screen.queryByLabelText('Ninety Six score')).toBeNull());
+    await settle();
+    expect(screen.queryByLabelText('Ninety Six score')).toBeNull();
   });
 });
 
@@ -343,7 +312,7 @@ describe('when the connection comes back', () => {
 describe('a browser that cannot save', () => {
   test('scoring still works, and the warning says the game is only on screen', async () => {
     await startGame();
-    installLocalStorage(true);
+    storageHarness.setFailWrites(true);
     buzz('Sarah Mitchell', 1);
 
     await waitFor(() => expect(screen.getByText(/Local save failed/)).toBeTruthy());

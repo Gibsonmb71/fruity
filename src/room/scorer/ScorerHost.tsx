@@ -166,8 +166,10 @@ export default function ScorerHost(props: IScorerHostProps) {
     if (recovered !== null || eventCount > 0) return undefined;
     attemptedServerRecovery.current = true;
     let cancelled = false;
+    let completed = false;
     onRecoverFromServer()
       .then((qbj) => {
+        completed = true;
         if (cancelled || qbj === null) return undefined;
         // Anything scored while the request was in flight is newer than what came back.
         if (events.events.length > 0) return undefined;
@@ -183,9 +185,12 @@ export default function ScorerHost(props: IScorerHostProps) {
         setServerRecoveryNotice('Recovered this game from the copy tournament control was holding.');
         return undefined;
       })
-      .catch(() => undefined);
+      .catch(() => {
+        completed = true;
+      });
     return () => {
       cancelled = true;
+      if (!completed) attemptedServerRecovery.current = false;
     };
     // `events.events` is read inside the callback deliberately and must not re-run this effect;
     // `attemptedServerRecovery` already makes it once-per-game.

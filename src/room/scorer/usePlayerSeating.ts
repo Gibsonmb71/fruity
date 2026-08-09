@@ -11,7 +11,6 @@ import {
   emptySeating,
   loadSeating,
   moveWithin,
-  orderBySeating,
   PlayerSeating,
   saveSeating,
   takeSeat,
@@ -19,8 +18,6 @@ import {
 
 export interface IPlayerSeatingApi {
   seating: PlayerSeating;
-  /** Sort any list of players into the room's preferred order. */
-  order: <T>(side: LeftOrRight, items: readonly T[], nameOf: (item: T) => string) => T[];
   /** Move one player up or down among the ones currently visible on that side. */
   move: (
     side: LeftOrRight,
@@ -44,12 +41,6 @@ export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
     [gameKey],
   );
 
-  const order = useCallback(
-    <T>(side: LeftOrRight, items: readonly T[], nameOf: (item: T) => string) =>
-      orderBySeating(items, seating[side], nameOf),
-    [seating],
-  );
-
   const move = useCallback(
     (
       side: LeftOrRight,
@@ -71,5 +62,5 @@ export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
     [commit, seating],
   );
 
-  return useMemo(() => ({ seating, order, move, substitute }), [seating, order, move, substitute]);
+  return useMemo(() => ({ seating, move, substitute }), [seating, move, substitute]);
 }

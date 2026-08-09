@@ -97,8 +97,9 @@ export default class MatchImportService {
       const resultFingerprint = sourceMetadata?.resultFingerprint ?? qbsheetResultFingerprint(objFromFile);
       const resultStart = results.length;
       snakeCaseToCamelCase(objFromFile);
+      const wholeQbj = Boolean((objFromFile as IQbjWholeFile).objects);
 
-      if ((objFromFile as IQbjWholeFile).objects) {
+      if (wholeQbj) {
         results = results.concat(this.importMatchesFromWholeQbj(objFromFile as IQbjWholeFile, filePath, phase, round));
       } else {
         const oneResult = this.importSingleMatchFile(objFromFile as IModaqMatch, filePath, phase, round);
@@ -106,7 +107,7 @@ export default class MatchImportService {
       }
       for (const result of results.slice(resultStart)) {
         if (sourceMetadata) result.sourceMetadata = sourceMetadata;
-        result.resultFingerprint = resultFingerprint;
+        if (!wholeQbj || result.resultFingerprint === undefined) result.resultFingerprint = resultFingerprint;
       }
     }
 
@@ -189,6 +190,7 @@ export default class MatchImportService {
         continue; // just ignore this match; this isn't plausible and I don't know how I would explain it to a user
       }
       this.importSingleMatchObj(matchAndRound.match, phaseToUse, roundToUse, singleResult, parser);
+      singleResult.resultFingerprint = qbsheetResultFingerprint(matchAndRound.match);
       importResults.push(singleResult);
     }
     return importResults;

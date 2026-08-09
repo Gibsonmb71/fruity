@@ -241,6 +241,17 @@ describe('QBSheet CORS', () => {
     expect(res.headers.get('vary')).toContain('Origin');
   });
 
+  test('a disallowed origin receives no allow-origin header on a simple request', async () => {
+    server.setAllowedQbsheetOrigins(['https://scores.example']);
+
+    const res = await fetch(`${baseUrl}/api/v1/status`, {
+      headers: { Origin: 'https://not-approved.example' },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   test('a disallowed preflight is refused, while an approved preflight exposes room headers', async () => {
     server.setAllowedQbsheetOrigins(['https://scores.example']);
 

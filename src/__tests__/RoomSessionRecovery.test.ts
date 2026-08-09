@@ -135,7 +135,17 @@ async function startGame(room: string, token: string, matchId: string) {
     headers: { [roomTokenHeader]: token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ scheduledMatchId: matchId }),
   });
+  if (!response.ok) throw new Error(`Could not start test session: ${response.status}`);
   return (await response.json()) as { sessionId: string; token: string };
+}
+
+async function putSnapshot(sessionId: string, token: string, payload: object) {
+  const response = await fetch(`${baseUrl}/api/v1/sessions/${sessionId}/snapshot`, {
+    method: 'PUT',
+    headers: { [sessionTokenHeader]: token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Could not write test snapshot: ${response.status}`);
 }
 
 function recover(sessionId: string, token: string) {
@@ -145,11 +155,7 @@ function recover(sessionId: string, token: string) {
 describe('recovering a session from the server', () => {
   test('the owning room gets its own game back, events and all', async () => {
     const credentials = await startGame(roomId, roomToken, scheduledMatchId);
-    await fetch(`${baseUrl}/api/v1/sessions/${credentials.sessionId}/snapshot`, {
-      method: 'PUT',
-      headers: { [sessionTokenHeader]: credentials.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify(liveSnapshot()),
-    });
+    await putSnapshot(credentials.sessionId, credentials.token, liveSnapshot());
 
     const response = await recover(credentials.sessionId, credentials.token);
     expect(response.status).toBe(200);
@@ -225,11 +231,7 @@ describe('what a recovered payload can be turned back into', () => {
   test('a snapshot from another scorer is not reconstructed into invented events', async () => {
     const credentials = await startGame(roomId, roomToken, scheduledMatchId);
     // A plain MODAQ-shaped QBJ: real, importable, and carrying no first-party event history.
-    await fetch(`${baseUrl}/api/v1/sessions/${credentials.sessionId}/snapshot`, {
-      method: 'PUT',
-      headers: { [sessionTokenHeader]: credentials.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify(plainQbj(4)),
-    });
+    await putSnapshot(credentials.sessionId, credentials.token, plainQbj(4));
 
     const body = (await (await recover(credentials.sessionId, credentials.token)).json()) as ISessionRecoveryResponse;
     expect(body.latestQbj).not.toBeNull();
@@ -238,11 +240,7 @@ describe('what a recovered payload can be turned back into', () => {
 
   test('a payload for different teams is refused rather than opened against this game', async () => {
     const credentials = await startGame(roomId, roomToken, scheduledMatchId);
-    await fetch(`${baseUrl}/api/v1/sessions/${credentials.sessionId}/snapshot`, {
-      method: 'PUT',
-      headers: { [sessionTokenHeader]: credentials.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify(liveSnapshot()),
-    });
+    await putSnapshot(credentials.sessionId, credentials.token, liveSnapshot());
 
     const body = (await (await recover(credentials.sessionId, credentials.token)).json()) as ISessionRecoveryResponse;
     const wrongTeams: IGameSetup = {

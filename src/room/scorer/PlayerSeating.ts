@@ -131,7 +131,7 @@ export function clearSeating(gameKey: string, storage: ISeatingStorage | null = 
 export function orderBySeating<T>(items: readonly T[], preferred: readonly string[], nameOf: (item: T) => string): T[] {
   const rank = new Map(preferred.map((name, index) => [name, index]));
   return items
-    .map((item, index) => ({ item, index, rank: rank.get(nameOf(item)) ?? Infinity }))
+    .map((item, index) => ({ item, index, rank: rank.get(nameOf(item)) ?? Number.MAX_SAFE_INTEGER }))
     .sort((left, right) => left.rank - right.rank || left.index - right.index)
     .map((entry) => entry.item);
 }
@@ -167,8 +167,8 @@ export function applyOrder(
   const moved = new Set(reordered);
   // Start from the order the room currently sees, so unmentioned names keep their relative places.
   const base = orderBySeating(rosterNames, preferred, (name) => name);
-  const remaining = reordered.slice();
-  return base.map((name) => (moved.has(name) ? (remaining.shift() as string) : name));
+  const remaining = reordered.filter((name) => base.includes(name));
+  return base.map((name) => (moved.has(name) ? remaining.shift() ?? name : name));
 }
 
 /**

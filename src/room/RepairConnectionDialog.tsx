@@ -20,7 +20,7 @@
  * schedule. So the mismatch is surfaced and nothing is changed: the game stays intact and a human
  * decides, which for a genuinely mis-paired browser means downloading the QBJ and handing it over.
  */
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { IRoomJoinDescriptor } from '../main/server/ServerTypes';
 import { getJoinRooms, getOrCreateDeviceId, IRoomIdentity, joinRoom, rememberRoomIdentity } from './api';
 
@@ -41,6 +41,10 @@ export default function RepairConnectionDialog(props: IRepairConnectionDialogPro
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [mismatch, setMismatch] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const codeInputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +59,41 @@ export default function RepairConnectionDialog(props: IRepairConnectionDialogPro
     };
   }, []);
 
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    codeInputRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const outsideDialog = !dialog.contains(document.activeElement);
+      if (outsideDialog || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, []);
+
   const thisRoom = rooms.find((room) => room.id === roomId);
 
   const submit = async (event: FormEvent) => {
@@ -62,29 +101,34 @@ export default function RepairConnectionDialog(props: IRepairConnectionDialogPro
     setError('');
     setMismatch(null);
     setBusy(true);
-    const result = await joinRoom({ code, roomId });
-    setBusy(false);
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    try {
+      const result = await joinRoom({ code, roomId });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (result.value.roomId !== roomId) {
+        // Never silently migrate a game to another assignment. See the file comment.
+        setMismatch(result.value.roomName);
+        return;
+      }
+      const identity: IRoomIdentity = {
+        roomId: result.value.roomId,
+        token: result.value.accessToken,
+        deviceId: getOrCreateDeviceId(),
+      };
+      rememberRoomIdentity(identity);
+      onRepaired(identity);
+    } catch {
+      setError('Could not reach tournament control. Try again.');
+    } finally {
+      setBusy(false);
     }
-    if (result.value.roomId !== roomId) {
-      // Never silently migrate a game to another assignment. See the file comment.
-      setMismatch(result.value.roomName);
-      return;
-    }
-    const identity: IRoomIdentity = {
-      roomId: result.value.roomId,
-      token: result.value.accessToken,
-      deviceId: getOrCreateDeviceId(),
-    };
-    rememberRoomIdentity(identity);
-    onRepaired(identity);
   };
 
   return (
     <div className="room-repair-backdrop" role="dialog" aria-modal="true" aria-label="Repair room connection">
-      <div className="room-repair">
+      <div ref={dialogRef} className="room-repair">
         <h2 className="room-repair-title">Repair this room&apos;s connection</h2>
         <p className="room-muted">
           {gameInProgress
@@ -97,6 +141,7 @@ export default function RepairConnectionDialog(props: IRepairConnectionDialogPro
             <label className="room-field-label" htmlFor="room-repair-code">
               Pairing code
               <input
+                ref={codeInputRef}
                 id="room-repair-code"
                 value={code}
                 onChange={(changeEvent) => setCode(changeEvent.target.value)}

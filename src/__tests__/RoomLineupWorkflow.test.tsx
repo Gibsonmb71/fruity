@@ -24,6 +24,7 @@ import { IRoomProcedure, roomProcedureVersion } from '../renderer/Services/RoomP
 import { substitutionSentence } from '../room/scorer/StartingLineupPrompt';
 import { loadGame } from '../room/scorer/GameSession';
 import { ScoreEvent } from '../room/scoring/ScoreEvents';
+import { chooseStarters, installDialogMethods, installLocalStorage } from './RoomScorerTestHarness';
 
 const leftTeam = {
   name: 'Ninety Six',
@@ -70,12 +71,6 @@ function substitutions(): Extract<ScoreEvent, { type: 'substitution' }>[] {
   );
 }
 
-function chooseStarters(names: string[]) {
-  const prompt = screen.getByLabelText('Starting lineups');
-  for (const name of names) fireEvent.click(within(prompt).getByLabelText(name));
-  fireEvent.click(within(prompt).getByText('Start game'));
-}
-
 function openPlayers() {
   fireEvent.click(screen.getByRole('button', { name: 'Players' }));
 }
@@ -85,39 +80,6 @@ function buzz(player: string, index: number) {
     .getAllByRole('button')
     .filter((button) => button.getAttribute('aria-label')?.startsWith(player));
   fireEvent.click(buttons[index]);
-}
-
-function installLocalStorage() {
-  let store: Record<string, string> = {};
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => store[key] ?? null,
-      setItem: (key: string, value: string) => {
-        store[key] = String(value);
-      },
-      removeItem: (key: string) => {
-        delete store[key];
-      },
-      clear: () => {
-        store = {};
-      },
-    },
-  });
-}
-
-function installDialogMethods() {
-  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
-    HTMLDialogElement.prototype.showModal = function showModal() {
-      this.open = true;
-    };
-  }
-  if (typeof HTMLDialogElement.prototype.close !== 'function') {
-    HTMLDialogElement.prototype.close = function close() {
-      this.open = false;
-      this.dispatchEvent(new Event('close'));
-    };
-  }
 }
 
 beforeEach(() => {
@@ -214,7 +176,9 @@ describe('one player for another', () => {
     fireEvent.click(within(lineup).getByText('Confirm'));
 
     // What is stored is still the whole lineup, which is what makes TUH exact.
-    const [, change] = substitutions().filter((event) => event.team === 'left');
+    const leftChanges = substitutions().filter((event) => event.team === 'left');
+    expect(leftChanges).toHaveLength(2);
+    const change = leftChanges[1];
     expect(change.questionNumber).toBe(2);
     expect(change.activePlayers.slice().sort()).toEqual(['Jordan Hall', 'Michael Smith']);
   });

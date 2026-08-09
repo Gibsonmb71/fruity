@@ -206,7 +206,9 @@ describe('the same history under different rules', () => {
 
   test('a format with no power scores the same buzzes differently', () => {
     expect(acf.answerTypes.some((answerType) => answerType.value === 15)).toBe(false);
-    expect(game.left.points).not.toBe(210);
+    expect(game.left.points).toBe(145);
+    expect(game.right.points).toBe(95);
+    expect(game.questions.find((question) => question.questionNumber === 11)?.buzzes).toHaveLength(1);
   });
 
   test('the overtime minimum comes from the rules, not from a constant', () => {

@@ -19,6 +19,7 @@ import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules
 import AnswerType from '../renderer/DataModel/AnswerType';
 import ScorerHost from '../room/scorer/ScorerHost';
 import { RoomConnectionState } from '../room/RoomLifecycle';
+import { installDialogMethods, installLocalStorage } from './RoomScorerTestHarness';
 
 const leftTeam = { name: 'Ninety Six', players: [{ name: 'Sarah Mitchell' }, { name: 'James Robinson' }] };
 const rightTeam = { name: 'Greenwood', players: [{ name: 'Emma Turner' }, { name: 'Jordan Lee' }] };
@@ -61,39 +62,6 @@ function openEditor() {
   fireEvent.click(screen.getByText('Game'));
   fireEvent.click(screen.getByText('Full scoresheet review'));
   fireEvent.click(screen.getByText('Edit question'));
-}
-
-function installLocalStorage() {
-  let store: Record<string, string> = {};
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => store[key] ?? null,
-      setItem: (key: string, value: string) => {
-        store[key] = String(value);
-      },
-      removeItem: (key: string) => {
-        delete store[key];
-      },
-      clear: () => {
-        store = {};
-      },
-    },
-  });
-}
-
-function installDialogMethods() {
-  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
-    HTMLDialogElement.prototype.showModal = function showModal() {
-      this.open = true;
-    };
-  }
-  if (typeof HTMLDialogElement.prototype.close !== 'function') {
-    HTMLDialogElement.prototype.close = function close() {
-      this.open = false;
-      this.dispatchEvent(new Event('close'));
-    };
-  }
 }
 
 beforeEach(() => {

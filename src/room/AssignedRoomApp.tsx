@@ -96,7 +96,7 @@ interface IFrozenGameContext {
   roundName: string;
   roundNumber?: number;
   packetName?: string;
-  scoringFormat: IScorekeeperFormat;
+  scoringFormat: IScorekeeperFormat | null;
   procedure?: IRoomProcedure;
   /** The tournament the server had confirmed when this game started, if it had confirmed one. */
   tournamentKey?: string;
@@ -125,6 +125,10 @@ function scoringFromActiveGame(record: IActiveRoomGame): IActiveScoring {
       tournamentKey: record.tournamentKey,
     },
   };
+}
+
+function usableScoringFormat(format: IScorekeeperFormat | null | undefined): IScorekeeperFormat | null {
+  return format !== null && format !== undefined && scorekeeperFormatProblems(format).length === 0 ? format : null;
 }
 
 function toModaqPlayers(left: IRoomTeam, right: IRoomTeam): IPlayer[] {
@@ -293,6 +297,8 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const roomIdForRecord = activeIdentity.roomId;
   const rememberActiveGame = useCallback(
     (active: IActiveScoring) => {
+      const { scoringFormat } = active.frozen;
+      if (!scoringFormat) return;
       // Rewriting the record — to stamp a confirmed tournament key, say — must not restart the
       // clock that ages an abandoned game out.
       const existing = readActiveGame({ roomId: roomIdForRecord });
@@ -310,7 +316,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         roundName: active.frozen.roundName,
         packetName: active.frozen.packetName,
         matchup: active.matchup,
-        scoringFormat: active.frozen.scoringFormat,
+        scoringFormat,
         roomProcedure: active.frozen.procedure,
         startedAt,
       });
@@ -319,6 +325,20 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   );
   const rememberActiveGameRef = useRef(rememberActiveGame);
   rememberActiveGameRef.current = rememberActiveGame;
+
+  const reconcileTournamentKey = useCallback((confirmedKey: string | undefined) => {
+    if (confirmedKey === undefined) return;
+    const active = scoringRef.current;
+    if (!active) return;
+    if (active.frozen.tournamentKey === undefined) {
+      const stamped = { ...active, frozen: { ...active.frozen, tournamentKey: confirmedKey } };
+      setScoring(stamped);
+      rememberActiveGameRef.current(stamped);
+      setTournamentConflict(false);
+      return;
+    }
+    setTournamentConflict(active.frozen.tournamentKey !== confirmedKey);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -358,19 +378,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
        * first key the server confirms — Start can win the race against the first `/tournament`
        * response — and any later disagreement stops synchronization rather than being reconciled.
        */
-      const active = scoringRef.current;
-      const servedKey = result.value.tournamentKey;
-      if (active && servedKey !== undefined) {
-        if (active.frozen.tournamentKey === undefined) {
-          const stamped = { ...active, frozen: { ...active.frozen, tournamentKey: servedKey } };
-          setScoring(stamped);
-          rememberActiveGameRef.current(stamped);
-        } else if (active.frozen.tournamentKey !== servedKey) {
-          setTournamentConflict(true);
-        } else {
-          setTournamentConflict(false);
-        }
-      }
+      reconcileTournamentKey(result.value.tournamentKey);
 
       setAssignment(result.value);
       setPresence(result.value.presence ?? null);
@@ -397,12 +405,12 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
             packetName: current.packetName,
             // A resumed session with no usable scoring format has nothing to render, so this stays
             // null and the existing "scoring unavailable" path handles it.
-            scoringFormat: result.value.scoringFormat as IScorekeeperFormat,
+            scoringFormat: usableScoringFormat(result.value.scoringFormat),
             procedure: result.value.roomProcedure,
             tournamentKey: verifiedTournamentKeyRef.current,
           },
         };
-        if (resumed.frozen.scoringFormat) rememberActiveGameRef.current(resumed);
+        rememberActiveGameRef.current(resumed);
         setScoring(resumed);
       }
 
@@ -472,7 +480,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       cancelled = true;
       clearInterval(handle);
     };
-  }, [activeIdentity]);
+  }, [activeIdentity, reconcileTournamentKey]);
 
   const kitTournamentName = assignment?.tournamentName;
   const kitRoomId = assignment?.roomId;
@@ -505,28 +513,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
        * worse than one that arrives on a USB stick, so this stops automatic synchronization and
        * says so, and the QBJ remains downloadable.
        */
-      const active = scoringRef.current;
-      const confirmed = tournamentResult.value.tournamentKey;
-      if (active && confirmed !== undefined && active.frozen.tournamentKey === undefined) {
-        /*
-         * The game started before the server had told this page which tournament it was — a race
-         * between Start and the first `getTournament`. Adopting the first confirmation makes the
-         * game comparable from here on; without it a later switch would be undetectable, because
-         * "no key" matches everything.
-         */
-        const stamped = { ...active, frozen: { ...active.frozen, tournamentKey: confirmed } };
-        setScoring(stamped);
-        rememberActiveGameRef.current(stamped);
-      } else if (
-        active &&
-        active.frozen.tournamentKey !== undefined &&
-        confirmed !== undefined &&
-        confirmed !== active.frozen.tournamentKey
-      ) {
-        setTournamentConflict(true);
-      } else {
-        setTournamentConflict(false);
-      }
+      reconcileTournamentKey(tournamentResult.value.tournamentKey);
       if (!roundsResult.ok || !teamsResult.ok) return;
       const kit = buildScoringKit({
         tournamentKey: tournamentResult.value.tournamentKey,
@@ -553,7 +540,16 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       cancelled = true;
       clearInterval(handle);
     };
-  }, [kitTournamentName, kitRoomId, kitRoomName, kitTimedRounds, kitRulesUsable, connection, scorerChoice]);
+  }, [
+    kitTournamentName,
+    kitRoomId,
+    kitRoomName,
+    kitTimedRounds,
+    kitRulesUsable,
+    connection,
+    scorerChoice,
+    reconcileTournamentKey,
+  ]);
 
   // A different room, or a different tournament, and the confirmed key no longer describes what
   // this page is scoring. Dropped rather than carried until a refresh happens to replace it.
@@ -607,6 +603,11 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const handleStart = async () => {
     const current = assignment?.current;
     if (!current || !assignment) return;
+    const scoringFormat = scorerChoice === 'first-party' ? usableScoringFormat(assignment.scoringFormat) : null;
+    if (scorerChoice === 'first-party' && scoringFormat === null) {
+      setStartError('This game has no usable scoring format yet. Wait for the room assignment to refresh.');
+      return;
+    }
     setStartError('');
     setSubmittedSummary('');
     setStarting(true);
@@ -631,14 +632,14 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         roundName: current.roundName,
         roundNumber: current.roundNumber,
         packetName: current.packetName,
-        scoringFormat: assignment.scoringFormat as IScorekeeperFormat,
+        scoringFormat,
         procedure: assignment.roomProcedure,
         tournamentKey: verifiedTournamentKeyRef.current,
       },
     };
     // The moment the session is authoritative is the moment a reload has to be able to find it
     // again, so this is written before the scorer is even on screen.
-    if (started.frozen.scoringFormat) rememberActiveGame(started);
+    rememberActiveGame(started);
     setScoring(started);
   };
 

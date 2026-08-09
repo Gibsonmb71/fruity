@@ -18,6 +18,7 @@ import ScorerHost from '../room/scorer/ScorerHost';
 import { IRoomProcedure } from '../renderer/Services/RoomProcedure';
 import { IRoomTeam } from '../main/server/ServerTypes';
 import { RoomConnectionState } from '../room/RoomLifecycle';
+import { chooseStarters, installDialogMethods, installLocalStorage } from './RoomScorerTestHarness';
 
 const leftTeam = {
   name: 'Ninety Six',
@@ -143,53 +144,6 @@ function addMissingPlayer(teamLabel: string, name: string) {
   fireEvent.click(within(lineup).getByText('Add missing player\u2026'));
   fireEvent.change(within(lineup).getByLabelText('Player name'), { target: { value: name } });
   fireEvent.click(within(lineup).getByText('Add to roster'));
-}
-
-function chooseStarters(names: string[]) {
-  const prompt = screen.getByLabelText('Starting lineups');
-  for (const name of names) fireEvent.click(within(prompt).getByLabelText(name));
-  fireEvent.click(within(prompt).getByText('Start game'));
-}
-
-/**
- * The jsdom this repo resolves does not provide localStorage, and the scorer saves through it.
- *
- * Shimmed rather than worked around, because the recovery test below is only meaningful if saving
- * actually happens. What the real storage does when it is full, corrupt or hostile is covered
- * properly in RoomGameSession.test.ts, which injects its own.
- */
-function installLocalStorage() {
-  let store: Record<string, string> = {};
-  Object.defineProperty(window, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => store[key] ?? null,
-      setItem: (key: string, value: string) => {
-        store[key] = String(value);
-      },
-      removeItem: (key: string) => {
-        delete store[key];
-      },
-      clear: () => {
-        store = {};
-      },
-    },
-  });
-}
-
-/** jsdom exposes `<dialog>` but not the modal methods browsers provide. */
-function installDialogMethods() {
-  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
-    HTMLDialogElement.prototype.showModal = function showModal() {
-      this.open = true;
-    };
-  }
-  if (typeof HTMLDialogElement.prototype.close !== 'function') {
-    HTMLDialogElement.prototype.close = function close() {
-      this.open = false;
-      this.dispatchEvent(new Event('close'));
-    };
-  }
 }
 
 beforeEach(() => {
@@ -738,7 +692,7 @@ describe('the game menu', () => {
     expect(points.value).toBe('');
     fireEvent.click(screen.getByText('Save correction'));
 
-    expect(screen.getByText('Enter a valid number for controlled.')).toBeTruthy();
+    expect(screen.getByText('Enter a valid number for bonus points.')).toBeTruthy();
   });
 
   test('the order of two attempts is changed by one unambiguous control', () => {

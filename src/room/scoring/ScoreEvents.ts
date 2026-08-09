@@ -1,2 +1,30 @@
 /** Compatibility import for Fruity's room host; QBSheet owns the event model. */
-export * from 'qbsheet';
+export { bonusEventPoints, otherTeam, usesTossupOpportunity } from 'qbsheet';
+export type {
+  IAdjustmentEvent,
+  IBeginOvertimeEvent,
+  IBeginSuddenDeathEvent,
+  IBonusEvent,
+  IBonusPartResult,
+  IEndGameEarlyEvent,
+  IEndRegulationEvent,
+  IForfeitEvent,
+  IHalfBreakEvent,
+  IHalfResumeEvent,
+  ILightningEvent,
+  INoteEvent,
+  IProtestEvent,
+  IQuestionVoidEvent,
+  IRosterAddEvent,
+  ISubstitutionEvent,
+  ITimeoutEvent,
+  ITimeoutResumeEvent,
+  ITimeoutStartEvent,
+  ITossupBuzzEvent,
+  ITossupDeadEvent,
+  ITossupNoPenaltyEvent,
+  CycleScoreEvent,
+  ProtestStatus,
+  ProtestSubject,
+  ScoreEvent,
+} from 'qbsheet';

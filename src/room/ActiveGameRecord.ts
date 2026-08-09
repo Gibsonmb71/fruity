@@ -116,7 +116,9 @@ function validMatchup(value: unknown): value is IRoomMatchup {
   if (typeof value !== 'object' || value === null) return false;
   const matchup = value as Record<string, unknown>;
   if (typeof matchup.scheduledMatchId !== 'string') return false;
+  if (typeof matchup.roundNumber !== 'number' || !Number.isFinite(matchup.roundNumber)) return false;
   if (typeof matchup.roundName !== 'string') return false;
+  if (typeof matchup.status !== 'string') return false;
   return validTeam(matchup.leftTeam) && validTeam(matchup.rightTeam);
 }
 
@@ -226,7 +228,7 @@ export function writeActiveGame(
   now: Date = new Date(),
   storage: IStorageLike | null = browserStorage(),
 ): boolean {
-  if (!storage || record.roomId === '' || record.sessionId === '') return false;
+  if (!storage || record.roomId === '' || record.sessionId === '' || record.sessionToken === '') return false;
   const stored: IActiveRoomGame = {
     ...record,
     version: activeRoomGameVersion,

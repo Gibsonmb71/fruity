@@ -173,8 +173,8 @@ export default function ScorerBanners(props: {
   );
 }
 
-function DetailRow(props: { label: string; value: string; problem?: boolean }) {
-  const { label, value, problem = false } = props;
+function DetailRow(props: { label: string; value: string; problem: boolean }) {
+  const { label, value, problem } = props;
   return (
     <div className={problem ? 'scorer-detail-row is-problem' : 'scorer-detail-row'}>
       <span className="scorer-detail-label">{label}</span>
@@ -182,8 +182,6 @@ function DetailRow(props: { label: string; value: string; problem?: boolean }) {
     </div>
   );
 }
-
-DetailRow.defaultProps = { problem: false };
 
 /** How the finished result is travelling, said only where it is actually known. */
 function deliveryValue(recovery: IScorerRecoveryStatus): string {
@@ -222,9 +220,12 @@ export function ConnectionDetailDialog(props: {
               ? 'Not yet sent'
               : describeAge(recovery.serverSnapshotAt, now)
           }
-          problem={recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined}
+          problem={
+            recovery.automaticDelivery !== false &&
+            (recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined)
+          }
         />
-        <DetailRow label="Automatic delivery" value={deliveryValue(recovery)} />
+        <DetailRow label="Automatic delivery" value={deliveryValue(recovery)} problem={false} />
       </div>
       {recovery.snapshotError && <p className="scorer-dialog-note">{recovery.snapshotError}</p>}
       <div className="scorer-complete-actions">

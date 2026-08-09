@@ -131,6 +131,9 @@ export default class TournamentServerService {
   /** Set when starting the server fails, so the Rooms page can show why */
   lastError: string = '';
 
+  /** Problems reported for the most recent partial room-package export, if any. */
+  lastExportWarning: string = '';
+
   /**
    * Round the director has explicitly opened, overriding the automatic choice.
    *
@@ -1083,6 +1086,7 @@ export default class TournamentServerService {
 
   /** Export the currently released/selected round as a folder of per-room portable game packages. */
   async exportQbsheetGamePackages(selectedRoundNumber?: number): Promise<boolean> {
+    this.lastExportWarning = '';
     const built = buildQbsheetGamePackages(this.tournament, selectedRoundNumber);
     if (!built.ok) {
       this.lastError = built.error;
@@ -1108,6 +1112,9 @@ export default class TournamentServerService {
         this.lastError = result?.error ?? 'The room scoring files could not be exported.';
         this.dataChangedReactCallback();
         return false;
+      }
+      if (built.problems.length > 0) {
+        this.lastExportWarning = `Some games were skipped: ${built.problems.join(' ')}`;
       }
       this.lastError = '';
       this.dataChangedReactCallback();
