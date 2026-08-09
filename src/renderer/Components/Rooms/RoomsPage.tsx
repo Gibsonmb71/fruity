@@ -1105,6 +1105,17 @@ export default function RoomsPage({
                 <Button size="small" variant="contained" onClick={() => setGeneratorOpen(true)}>
                   Generate Match Plan
                 </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    service
+                      .exportQbsheetGamePackages(tournament.releasedRoundNumber ?? undefined)
+                      .catch(() => undefined);
+                  }}
+                  disabled={tournament.releasedRoundNumber === null}
+                >
+                  Export room scoring files
+                </Button>
               </div>
             </div>
             {scheduleError !== '' && (
@@ -2024,6 +2035,8 @@ function ServerSettingsDialog({
   const [portText, setPortText] = useState(String(service.requestedPort));
   const [roomUrlText, setRoomUrlText] = useState(service.preferredRoomUrl ?? '');
   const [roomUrlError, setRoomUrlError] = useState('');
+  const [qbsheetOriginText, setQbsheetOriginText] = useState(service.qbsheetOrigin);
+  const [qbsheetOriginError, setQbsheetOriginError] = useState('');
   const [busy, setBusy] = useState(false);
   const [stopConfirmationOpen, setStopConfirmationOpen] = useState(false);
   useEffect(() => {
@@ -2031,10 +2044,18 @@ function ServerSettingsDialog({
       setPortText(String(service.requestedPort));
       setRoomUrlText(service.preferredRoomUrl ?? '');
       setRoomUrlError('');
+      setQbsheetOriginError('');
+      service
+        .refreshQbsheetOrigin()
+        .then((origin) => setQbsheetOriginText(origin))
+        .catch(() => undefined);
     }
-  }, [open, service.requestedPort, service.preferredRoomUrl]);
+  }, [open, service, service.requestedPort, service.preferredRoomUrl]);
   const applyRoomUrl = () => {
     setRoomUrlError(service.setPreferredRoomUrl(roomUrlText) ? '' : service.lastError);
+  };
+  const applyQbsheetOrigin = async () => {
+    setQbsheetOriginError((await service.setQbsheetOrigin(qbsheetOriginText)) ? '' : service.lastError);
   };
   const port = Number.parseInt(portText, 10);
   const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
@@ -2131,6 +2152,24 @@ function ServerSettingsDialog({
               roomUrlError !== ''
                 ? roomUrlError
                 : 'Used for room sheets, QR codes and room links. The numeric address stays visible as a fallback. YellowFruit does not set this name up for you.'
+            }
+          />
+          <TextField
+            fullWidth
+            size="small"
+            sx={{ mt: 2 }}
+            label="QBSheet origin (optional)"
+            placeholder="https://example.github.io"
+            value={qbsheetOriginText}
+            onChange={(event) => setQbsheetOriginText(event.target.value)}
+            onBlur={() => {
+              applyQbsheetOrigin().catch(() => undefined);
+            }}
+            error={qbsheetOriginError !== ''}
+            helperText={
+              qbsheetOriginError !== ''
+                ? qbsheetOriginError
+                : 'Allows this static site to call the local server. Enter the origin only, without a GitHub Pages repository path.'
             }
           />
           {service.lastError !== '' && (

@@ -103,6 +103,7 @@ function toMatchup(snapshot: ITournamentSnapshot, assignment: IAssignmentDescrip
     scheduledMatchId: assignment.scheduledMatchId,
     roundNumber: assignment.roundNumber,
     roundName: assignment.roundName,
+    roundRevision: assignment.roundRevision,
     packetName: assignment.packetName,
     leftTeam: findTeam(snapshot, assignment.leftTeam),
     rightTeam: findTeam(snapshot, assignment.rightTeam),
@@ -258,6 +259,7 @@ export function buildAssignmentResponse(
       snapshot.releasedRoundNumber === undefined ? snapshot.currentRoundNumber : snapshot.releasedRoundNumber,
     holdNewRoomStarts: snapshot.holdNewRoomStarts,
     holdMessage: snapshot.holdMessage,
+    resultHandoffInstruction: snapshot.resultHandoffInstruction,
   };
 }
 

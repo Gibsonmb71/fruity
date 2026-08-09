@@ -50,6 +50,8 @@ export interface IYftFileScheduledMatch {
   roomId?: string;
   status: ScheduledMatchStatus;
   resultMatchId?: string;
+  /** Fingerprint of the accepted portable result, when it came from QBSheet. */
+  resultFingerprint?: string;
   /** Set when the pairing was generated rather than entered by hand */
   generated?: boolean;
   roomAssignmentLocked?: boolean;
@@ -109,6 +111,9 @@ export class ScheduledMatch {
    * detectable: a scheduled match that already has one must never gain a second.
    */
   resultMatchId?: string;
+
+  /** Fingerprint of the accepted portable result, used to recognize a later backup QBJ. */
+  resultFingerprint?: string;
 
   /** True when a pairing generator produced this, false when a director entered it by hand */
   generated: boolean = false;
@@ -190,6 +195,7 @@ export class ScheduledMatch {
       roomId: this.roomId,
       status: this.status,
       resultMatchId: this.resultMatchId,
+      resultFingerprint: this.resultFingerprint,
       generated: this.generated || undefined,
       roomAssignmentLocked: this.roomAssignmentLocked || undefined,
       roomAssignmentSource: this.roomAssignmentSource || undefined,
@@ -222,6 +228,9 @@ export class ScheduledMatch {
     if (typeof data.poolName === 'string') scheduled.poolName = data.poolName;
     if (typeof data.roomId === 'string') scheduled.roomId = data.roomId;
     if (typeof data.resultMatchId === 'string') scheduled.resultMatchId = data.resultMatchId;
+    if (typeof data.resultFingerprint === 'string' && data.resultFingerprint !== '') {
+      scheduled.resultFingerprint = data.resultFingerprint;
+    }
     scheduled.generated = data.generated === true;
     if (data.roomAssignmentLocked === true) scheduled.roomAssignmentLocked = true;
     if (data.roomAssignmentSource === 'auto' || data.roomAssignmentSource === 'manual') {

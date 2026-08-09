@@ -74,6 +74,30 @@ function ScheduledLinkOffer({ result }: { result: MatchImportResult }) {
       </Alert>
     );
   }
+  if (outcome?.kind === 'backup') {
+    return (
+      <Alert severity="success" sx={{ mt: 1 }}>
+        Backup copy matches the accepted server result. YellowFruit will keep the existing Match and will not add a
+        duplicate.
+      </Alert>
+    );
+  }
+  if (outcome?.kind === 'conflict') {
+    return (
+      <Alert severity="error" sx={{ mt: 1 }}>
+        RESULT COPIES DO NOT MATCH. The accepted server result is preserved; review this uploaded QBJ separately before
+        deciding what to do.
+      </Alert>
+    );
+  }
+  if (outcome?.kind === 'stale') {
+    return (
+      <Alert severity="warning" sx={{ mt: 1 }}>
+        This QBJ was scored against assignment revision {outcome.sourceRevision}, but the current assignment revision is{' '}
+        {outcome.currentRevision}. It needs director review and will not be linked automatically.
+      </Alert>
+    );
+  }
   if (outcome?.kind === 'ambiguous') {
     return (
       <Alert severity="info" sx={{ mt: 1 }}>

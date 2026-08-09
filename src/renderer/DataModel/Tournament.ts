@@ -96,6 +96,8 @@ interface ITournamentExtraData {
   holdNewRoomStarts?: boolean;
   /** Optional operator-facing explanation for the room-start hold. */
   holdMessage?: string;
+  /** Optional human instruction for handing the finished portable QBJ to tournament control. */
+  resultHandoffInstruction?: string;
   /** Full phases whose advancement checkpoint has already been confirmed */
   rebracketedPhaseCodes?: string[];
   /** Public audience/display settings. Browser slideshow position is intentionally not persisted. */
@@ -208,6 +210,9 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
 
   holdMessage: string = '';
 
+  /** Optional text copied into QBSheet game packages and shown after a game ends. */
+  resultHandoffInstruction: string = '';
+
   /** Explicit confirmation history for phase boundaries; never inferred from generated schedules. */
   rebracketedPhaseCodes: string[] = [];
 
@@ -274,6 +279,7 @@ class Tournament implements IQbjTournament, IYftDataModelObject {
       autoReleaseNextRound: this.autoReleaseNextRound || undefined,
       holdNewRoomStarts: this.holdNewRoomStarts || undefined,
       holdMessage: this.holdMessage || undefined,
+      resultHandoffInstruction: this.resultHandoffInstruction || undefined,
       rebracketedPhaseCodes: this.rebracketedPhaseCodes.length > 0 ? this.rebracketedPhaseCodes : undefined,
       liveDisplay: this.liveDisplaySettings,
     };

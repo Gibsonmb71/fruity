@@ -122,6 +122,27 @@ export default class MatchImportResultsManager {
       if (!res.proceedWithImport || !res.match) continue;
 
       const state = this.linkState.get(res);
+      if (state?.outcome.kind === 'backup') {
+        // The accepted Match is already authoritative. The downloaded file is confirmation and
+        // must not become a second Match.
+        continue;
+      }
+      if (state?.outcome.kind === 'conflict') {
+        this.importProblems.push(
+          `${getFileNameFromPath(
+            res.filePath,
+          )}: RESULT COPIES DO NOT MATCH; review the server result and uploaded QBJ separately.`,
+        );
+        continue;
+      }
+      if (state?.outcome.kind === 'stale') {
+        this.importProblems.push(
+          `${getFileNameFromPath(res.filePath)}: This QBJ was scored against assignment revision ${
+            state.outcome.sourceRevision
+          }, but the current revision is ${state.outcome.currentRevision}.`,
+        );
+        continue;
+      }
       const suggestion = state?.outcome.kind === 'candidate' ? state.outcome.suggestion : undefined;
       if (state?.choice === 'scheduled' && suggestion && this.tournament) {
         // The scheduled path owns the whole commit — validation, transitions, linkage and the

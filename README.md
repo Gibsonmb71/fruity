@@ -62,6 +62,30 @@ The desktop application remains the tournament authority. A room submission does
 
 Room browsers can also report when they are ready, request help from tournament control, and continue showing their assigned game during temporary connection problems.
 
+### QBSheet browser scorer
+
+The first-party browser scorer also has a static, offline-first distribution in the separate
+`gbyo/qbsheet` repository. Fruity remains the tournament authority and can provide either
+of the following workflows:
+
+* **Connected** — configure QBSheet's HTTP(S) origin in Tournament-day settings, start
+  the Local Tournament Server, and let the scorekeeper pair normally. The origin is a CORS allowlist
+  entry only; room and session tokens still authenticate every room operation.
+* **File-based** — from Match Plan, release the round and choose **Export room scoring files**. Fruity
+  writes one `.qbg` GamePackage per playable room assignment. The package contains the roster, scoring
+  format, procedure, room, and assignment revision, but no room credentials or server URL.
+
+QBSheet scores locally in either mode and always produces a portable QBJ. Connected
+games can send a result to Fruity automatically, but the scorekeeper still downloads and hands over
+the QBJ as an independent backup. Fruity can import that QBJ later: an identical result is treated
+as confirmation, while a differing result or an older assignment revision is held for director
+review. Google Drive, a network folder, USB storage, or email may carry the files; none is a protocol
+dependency.
+
+QBSheet's configured value is an origin such as `https://example.github.io`, not a
+GitHub Pages repository path. A Pages deployment at `https://example.github.io/qbsheet/`
+therefore uses `https://example.github.io` as its CORS origin.
+
 ## Match Plan
 
 **Format** defines the structure of the tournament — stages, pools, rounds, carryovers, and rebracketing.

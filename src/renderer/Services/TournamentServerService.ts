@@ -31,6 +31,14 @@ import {
   defaultServerPort,
 } from '../../main/server/ServerTypes';
 import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveTypes';
+import { roundAssignmentRevision } from '../../shared/RoundAssignmentRevision';
+import { normalizeQbsheetOrigin } from '../../shared/QbsheetOrigin';
+import { readQbsheetSourceMetadata } from './QbsheetQbjMetadata';
+import {
+  exportQbsheetGamePackages as buildQbsheetGamePackages,
+  qbsheetGamePackageFileName,
+  qbsheetGamePackageFolderName,
+} from './QbsheetGamePackage';
 
 /** One remote submission waiting on the statskeeper's decision */
 export interface IInboxItem {
@@ -105,6 +113,9 @@ export default class TournamentServerService {
 
   /** Port the user wants to use next time they start the server */
   requestedPort: number = defaultServerPort;
+
+  /** Origin allowed to call the local server from the static QBSheet site. */
+  qbsheetOrigin = '';
 
   sessions: ISessionSummary[] = [];
 
@@ -481,6 +492,17 @@ export default class TournamentServerService {
         if (round.packet.name !== '') packetNames.set(round.number, round.packet.name);
       }
     }
+    const revisionEntries = this.tournament.scheduledMatches.map((match) => ({
+      scheduledMatchId: match.id,
+      roundNumber: match.roundNumber,
+      leftTeam: match.leftTeamName,
+      rightTeam: match.rightTeamName,
+      roomId: match.roomId,
+      status: match.status,
+    }));
+    const roundRevisions = new Map(
+      rounds.map((round) => [round.number, roundAssignmentRevision(revisionEntries, round.number)]),
+    );
 
     return {
       name: this.tournament.name || 'Untitled tournament',
@@ -509,6 +531,7 @@ export default class TournamentServerService {
           roomId: match.roomId as string,
           roundNumber: match.roundNumber,
           roundName: roundNames.get(match.roundNumber) ?? String(match.roundNumber),
+          roundRevision: roundRevisions.get(match.roundNumber),
           packetName: packetNames.get(match.roundNumber),
           leftTeam: match.leftTeamName,
           rightTeam: match.rightTeamName,
@@ -520,6 +543,7 @@ export default class TournamentServerService {
       releasedRoundNumber: this.tournament.releasedRoundNumber,
       holdNewRoomStarts: this.tournament.holdNewRoomStarts,
       holdMessage: this.tournament.holdMessage || undefined,
+      resultHandoffInstruction: this.tournament.resultHandoffInstruction || undefined,
       recoveryKey: this.recoveryKey(),
     };
   }
@@ -1007,6 +1031,94 @@ export default class TournamentServerService {
     this.dataChangedReactCallback();
   }
 
+  /** Refresh the persisted cross-origin allowlist setting when the settings dialog opens. */
+  async refreshQbsheetOrigin(): Promise<string> {
+    if (typeof window === 'undefined' || !window.electron) return this.qbsheetOrigin;
+    try {
+      const value = (await window.electron.ipcRenderer.invoke(
+        IpcBidirectional.TournamentServerGetQbsheetOrigin,
+      )) as unknown;
+      this.qbsheetOrigin = typeof value === 'string' ? value : '';
+      this.dataChangedReactCallback();
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+    }
+    return this.qbsheetOrigin;
+  }
+
+  /** Persist and apply the approved static scorekeeper origin. */
+  async setQbsheetOrigin(value: string): Promise<boolean> {
+    const trimmed = value.trim();
+    if (trimmed !== '' && normalizeQbsheetOrigin(trimmed) === null) {
+      this.lastError = 'Use an http:// or https:// origin with no path, for example https://example.github.io.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    if (typeof window === 'undefined' || !window.electron) {
+      this.lastError = 'The desktop server bridge is unavailable.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    try {
+      const result = (await window.electron.ipcRenderer.invoke(
+        IpcBidirectional.TournamentServerSetQbsheetOrigin,
+        trimmed,
+      )) as { ok?: boolean; error?: string; preferences?: { qbsheetOrigin?: string } };
+      if (!result?.ok) {
+        this.lastError = result?.error ?? 'The QBSheet origin could not be saved.';
+        this.dataChangedReactCallback();
+        return false;
+      }
+      this.qbsheetOrigin = result.preferences?.qbsheetOrigin ?? '';
+      this.lastError = '';
+      this.dataChangedReactCallback();
+      return true;
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+      return false;
+    }
+  }
+
+  /** Export the currently released/selected round as a folder of per-room portable game packages. */
+  async exportQbsheetGamePackages(selectedRoundNumber?: number): Promise<boolean> {
+    const built = buildQbsheetGamePackages(this.tournament, selectedRoundNumber);
+    if (!built.ok) {
+      this.lastError = built.error;
+      this.dataChangedReactCallback();
+      return false;
+    }
+    if (typeof window === 'undefined' || !window.electron) {
+      this.lastError = 'The desktop server bridge is unavailable.';
+      this.dataChangedReactCallback();
+      return false;
+    }
+    try {
+      const result = (await window.electron.ipcRenderer.invoke(IpcBidirectional.ExportQbsheetGamePackages, {
+        folderName: qbsheetGamePackageFolderName(built.roundName),
+        files: built.packages.map((packageValue) => ({
+          directory: packageValue.room?.name ?? 'Unassigned room',
+          filename: qbsheetGamePackageFileName(packageValue),
+          contents: JSON.stringify(packageValue, null, 2),
+        })),
+      })) as { ok?: boolean; cancelled?: boolean; error?: string; count?: number };
+      if (result?.cancelled) return false;
+      if (!result?.ok) {
+        this.lastError = result?.error ?? 'The room scoring files could not be exported.';
+        this.dataChangedReactCallback();
+        return false;
+      }
+      this.lastError = '';
+      this.dataChangedReactCallback();
+      return true;
+    } catch (error: unknown) {
+      this.lastError = errorMessage(error);
+      this.dataChangedReactCallback();
+      return false;
+    }
+  }
+
   /**
    * Validate a remote submission and put it in the Match Inbox.
    *
@@ -1016,6 +1128,7 @@ export default class TournamentServerService {
   handleSubmission(submission: IMatchSubmission) {
     if (submission.tournamentKey && submission.tournamentKey !== this.recoveryKey()) return;
     const scheduled = this.findScheduledMatch(submission.scheduledMatchId);
+    const sourceMetadata = readQbsheetSourceMetadata(submission.qbj);
 
     // A result that names a scheduled game is never allowed to fall back to the generic/manual
     // import path when that game has been deleted or replaced. Keep it visible as a fatal inbox
@@ -1032,6 +1145,23 @@ export default class TournamentServerService {
     // payloads and surface the collision instead: two results for one game means something went
     // wrong in the room and a human has to decide which is right.
     if (scheduled?.isAccepted()) {
+      const incomingFingerprint = sourceMetadata?.resultFingerprint;
+      if (
+        incomingFingerprint !== undefined &&
+        scheduled.resultFingerprint !== undefined &&
+        incomingFingerprint !== scheduled.resultFingerprint
+      ) {
+        this.conflicts = [
+          {
+            submission,
+            existingMatchId: scheduled.resultMatchId ?? '(unknown)',
+            noticedAt: new Date().toISOString(),
+          },
+          ...this.conflicts.filter((c) => c.submission.sessionId !== submission.sessionId),
+        ];
+        this.dataChangedReactCallback();
+        return;
+      }
       // A Submitted recovery record can be replayed after the YFT commit raced the server's
       // recovery write. The accepted scheduled link is proof that this exact session's result is
       // already durable in the tournament; acknowledge it without creating a second inbox item.
@@ -1286,6 +1416,7 @@ export default class TournamentServerService {
       ? {
           status: scheduled.status,
           resultMatchId: scheduled.resultMatchId,
+          resultFingerprint: scheduled.resultFingerprint,
           roomNameAtPlay: scheduled.roomNameAtPlay,
           quarantined: scheduled.quarantined,
           operationalIssue: scheduled.operationalIssue,
@@ -1297,6 +1428,9 @@ export default class TournamentServerService {
       // indistinguishable from a manually imported one.
       if (status === ImportResultStatus.ErrNonFatal) match.statsValidity = StatsValidity.omit;
       match.importedFile = importResult.filePath;
+      if (scheduled) {
+        scheduled.resultFingerprint = importResult.sourceMetadata?.resultFingerprint ?? importResult.resultFingerprint;
+      }
       Tournament.validateHaveTeamsPlayedInRound(match, round, phase, false);
       if (scheduled) {
         scheduled.resultMatchId = match.id;
@@ -1319,6 +1453,7 @@ export default class TournamentServerService {
       if (scheduled && previousScheduled) {
         scheduled.status = previousScheduled.status;
         scheduled.resultMatchId = previousScheduled.resultMatchId;
+        scheduled.resultFingerprint = previousScheduled.resultFingerprint;
         scheduled.roomNameAtPlay = previousScheduled.roomNameAtPlay;
         scheduled.quarantined = previousScheduled.quarantined;
         scheduled.operationalIssue = previousScheduled.operationalIssue;

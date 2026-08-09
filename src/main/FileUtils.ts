@@ -461,6 +461,83 @@ export function handleExportQbjFile(event: IpcMainEvent, filePath: string, fileC
   });
 }
 
+interface IQbsheetPackageFileRequest {
+  directory: string;
+  filename: string;
+  contents: string;
+}
+
+interface IQbsheetPackageExportRequest {
+  folderName: string;
+  files: IQbsheetPackageFileRequest[];
+}
+
+function safeQbsheetExportPart(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > 180) return null;
+  const trimmed = value.trim();
+  if (trimmed === '.' || trimmed === '..' || trimmed.includes('/') || trimmed.includes('\\')) return null;
+  const withoutControls = Array.from(trimmed)
+    .filter((character) => character.charCodeAt(0) >= 32)
+    .join('');
+  const safe = withoutControls.replace(/[\\/:*?"<>|]+/g, '-').replace(/[. ]+$/g, '');
+  return safe === '' || safe === '.' || safe === '..' ? null : safe;
+}
+
+/** Choose a folder and write one portable .qbg per assigned room, without overwriting an existing export. */
+export function handleExportQbsheetGamePackages(
+  event: IpcMainInvokeEvent,
+  request: unknown,
+): { ok: true; count: number; directory: string } | { ok: false; cancelled?: boolean; error?: string } {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return { ok: false, error: 'The YellowFruit window is no longer available.' };
+  if (typeof request !== 'object' || request === null) return { ok: false, error: 'The export request was invalid.' };
+  const candidate = request as Partial<IQbsheetPackageExportRequest>;
+  const folderName = safeQbsheetExportPart(candidate.folderName);
+  if (!folderName || !Array.isArray(candidate.files) || candidate.files.length > 1000) {
+    return { ok: false, error: 'The export request was invalid.' };
+  }
+
+  const chosen = dialog.showOpenDialogSync(window, {
+    title: 'Choose where to export room scoring files',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (!chosen || chosen.length === 0) return { ok: false, cancelled: true };
+
+  try {
+    const exportDirectory = path.join(chosen[0], folderName);
+    fs.mkdirSync(exportDirectory, { recursive: true });
+    let count = 0;
+    for (const file of candidate.files) {
+      if (typeof file !== 'object' || file === null) return { ok: false, error: 'The export request was invalid.' };
+      const directory = safeQbsheetExportPart(file.directory);
+      const filename = safeQbsheetExportPart(file.filename);
+      if (!directory || !filename || !filename.toLowerCase().endsWith('.qbg') || typeof file.contents !== 'string') {
+        return { ok: false, error: 'The export request contained an unsafe file name.' };
+      }
+      if (file.contents.length > 2 * 1024 * 1024)
+        return { ok: false, error: 'A game package was too large to export.' };
+      const roomDirectory = path.join(exportDirectory, directory);
+      fs.mkdirSync(roomDirectory, { recursive: true });
+      let outputPath = path.join(roomDirectory, filename);
+      const extension = path.extname(filename);
+      const stem = filename.slice(0, -extension.length);
+      for (let suffix = 2; fs.existsSync(outputPath); suffix += 1) {
+        outputPath = path.join(roomDirectory, `${stem} (${suffix})${extension}`);
+      }
+      fs.writeFileSync(outputPath, file.contents, { encoding: 'utf8', flag: 'wx' });
+      count += 1;
+    }
+    return { ok: true, count, directory: exportDirectory };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'The room scoring files could not be written.';
+    dialog.showMessageBoxSync(window, {
+      title: 'YellowFruit',
+      message: `Could not export room scoring files:\n\n${message}`,
+    });
+    return { ok: false, error: message };
+  }
+}
+
 /** Tell renderer to export SQBS file(s) to the given path */
 export function launchSqbsExportWorkflow(mainWindow: BrowserWindow) {
   mainWindow.webContents.send(IpcBidirectional.SqbsExport);

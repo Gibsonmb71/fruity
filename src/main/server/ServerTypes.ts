@@ -136,6 +136,8 @@ export interface ITournamentSnapshot {
   holdNewRoomStarts?: boolean;
   /** Optional director-facing explanation shown to scorekeepers while the hold is active. */
   holdMessage?: string;
+  /** Optional text shown after QBSheet downloads its result. */
+  resultHandoffInstruction?: string;
   /**
    * Stable tournament identity used to scope app-data recovery state.
    *
@@ -204,6 +206,8 @@ export interface IAssignmentDescriptor {
    * "Finals" for a named one. Already says the word, so nothing downstream prefixes it.
    */
   roundName: string;
+  /** Stable identity of this round's assignment set; changes when pairings or rooms are redrawn. */
+  roundRevision?: number;
   /**
    * What the room should be reading from, when the round names a packet.
    *
@@ -376,6 +380,8 @@ export interface IRoomMatchup {
   roundNumber: number;
   /** The round's complete display name, e.g. "Round 4" or "Finals". Shown as it stands. */
   roundName: string;
+  /** Stable identity of this round's assignment set. */
+  roundRevision?: number;
   /** The packet this round uses, when one is named. Identity only; see `IAssignmentDescriptor`. */
   packetName?: string;
   leftTeam: IRoomTeam;
@@ -460,6 +466,8 @@ export interface IRoomAssignmentResponse {
   /** Whether new starts are paused. Existing sessions continue to work. */
   holdNewRoomStarts?: boolean;
   holdMessage?: string;
+  /** Optional text shown after QBSheet downloads its result. */
+  resultHandoffInstruction?: string;
   /** Aggregate room presence, useful to the room and to reconnecting pages. */
   presence?: IRoomPresence;
   /** Open request for this room, if any. */

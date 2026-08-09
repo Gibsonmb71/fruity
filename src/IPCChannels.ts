@@ -118,8 +118,14 @@ export enum IpcBidirectional {
   TournamentServerGetRoomPresence = 'TournamentServerGetRoomPresence',
   /** Ask for open/resolved/cancelled operational help requests */
   TournamentServerGetHelpRequests = 'TournamentServerGetHelpRequests',
+  /** Read the configured static QBSheet CORS origin. */
+  TournamentServerGetQbsheetOrigin = 'TournamentServerGetQbsheetOrigin',
+  /** Persist and apply the static QBSheet CORS origin. */
+  TournamentServerSetQbsheetOrigin = 'TournamentServerSetQbsheetOrigin',
   /** Resolve or cancel one operational help request from tournament control */
   TournamentServerUpdateHelpRequest = 'TournamentServerUpdateHelpRequest',
+  /** Choose a folder and write one QBSheet .qbg per exported room assignment. */
+  ExportQbsheetGamePackages = 'ExportQbsheetGamePackages',
   /** Ask where redundant .yft copies are written, and how the last one went */
   GetSecondaryBackupHealth = 'GetSecondaryBackupHealth',
   /** Open the folder picker for redundant .yft copies. Replies with the resulting health. */
@@ -169,7 +175,10 @@ export const rendererListenableEvents = [
   IpcBidirectional.TournamentServerGetPendingSubmissions,
   IpcBidirectional.TournamentServerGetRoomPresence,
   IpcBidirectional.TournamentServerGetHelpRequests,
+  IpcBidirectional.TournamentServerGetQbsheetOrigin,
+  IpcBidirectional.TournamentServerSetQbsheetOrigin,
   IpcBidirectional.TournamentServerUpdateHelpRequest,
+  IpcBidirectional.ExportQbsheetGamePackages,
   IpcBidirectional.GetSecondaryBackupHealth,
   IpcBidirectional.ChooseSecondaryBackupFolder,
   IpcBidirectional.ClearSecondaryBackupFolder,

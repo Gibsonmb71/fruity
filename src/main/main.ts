@@ -43,6 +43,7 @@ import {
   chooseSecondaryBackupFolder,
   clearSecondaryBackupFolder,
   retrySecondaryBackup,
+  handleExportQbsheetGamePackages,
 } from './FileUtils';
 import { IpcBidirectional, IpcRendToMain } from '../IPCChannels';
 import { FileSwitchActions, statReportProtocol } from '../SharedUtils';
@@ -256,6 +257,7 @@ app
     );
     ipcMain.handle(IpcBidirectional.ClearSecondaryBackupFolder, async () => clearSecondaryBackupFolder());
     ipcMain.handle(IpcBidirectional.RetrySecondaryBackup, async () => retrySecondaryBackup());
+    ipcMain.handle(IpcBidirectional.ExportQbsheetGamePackages, handleExportQbsheetGamePackages);
     // Registers handlers only. The tournament server binds a port only when the user starts it.
     registerTournamentServerIpc(() => mainWindow);
 

@@ -209,6 +209,8 @@ export default class FileParser {
       this.tourn.autoReleaseNextRound = yfExtraData.autoReleaseNextRound === true;
       this.tourn.holdNewRoomStarts = yfExtraData.holdNewRoomStarts === true;
       this.tourn.holdMessage = typeof yfExtraData.holdMessage === 'string' ? yfExtraData.holdMessage : '';
+      this.tourn.resultHandoffInstruction =
+        typeof yfExtraData.resultHandoffInstruction === 'string' ? yfExtraData.resultHandoffInstruction : '';
       this.tourn.rebracketedPhaseCodes = Array.isArray(yfExtraData.rebracketedPhaseCodes)
         ? yfExtraData.rebracketedPhaseCodes.filter((code): code is string => typeof code === 'string')
         : [];

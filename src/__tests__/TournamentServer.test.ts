@@ -228,6 +228,45 @@ describe('health endpoint', () => {
   });
 });
 
+describe('QBSheet CORS', () => {
+  test('an approved static origin receives an exact allow-origin header', async () => {
+    server.setAllowedQbsheetOrigins(['https://scores.example/']);
+
+    const res = await fetch(`${baseUrl}/api/v1/status`, {
+      headers: { Origin: 'https://scores.example' },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://scores.example');
+    expect(res.headers.get('vary')).toContain('Origin');
+  });
+
+  test('a disallowed preflight is refused, while an approved preflight exposes room headers', async () => {
+    server.setAllowedQbsheetOrigins(['https://scores.example']);
+
+    const approved = await fetch(`${baseUrl}/api/v1/join`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://scores.example',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'x-yf-room-token',
+      },
+    });
+    expect(approved.status).toBe(204);
+    expect(approved.headers.get('access-control-allow-origin')).toBe('https://scores.example');
+    expect(approved.headers.get('access-control-allow-headers')).toContain('x-yf-room-token');
+
+    const refused = await fetch(`${baseUrl}/api/v1/join`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://not-approved.example',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    expect(refused.status).toBe(403);
+  });
+});
+
 describe('read-only tournament endpoints', () => {
   test('GET /connect is a credential-free connectivity check', async () => {
     const res = await fetch(`${baseUrl}/connect`);
