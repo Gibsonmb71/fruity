@@ -257,6 +257,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
    * moment the room or the tournament changes.
    */
   const verifiedTournamentKeyRef = useRef<string | undefined>(undefined);
+  const verifiedTournamentContextRef = useRef<{ tournamentName: string; roomId: string } | null>(null);
 
   /**
    * The game as it last stood, kept only so a backup can be downloaded from outside the scorer.
@@ -567,7 +568,12 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   // A different room, or a different tournament, and the confirmed key no longer describes what
   // this page is scoring. Dropped rather than carried until a refresh happens to replace it.
   useEffect(() => {
-    verifiedTournamentKeyRef.current = undefined;
+    if (kitTournamentName === undefined || kitRoomId === undefined) return;
+    const previous = verifiedTournamentContextRef.current;
+    if (previous !== null && (previous.tournamentName !== kitTournamentName || previous.roomId !== kitRoomId)) {
+      verifiedTournamentKeyRef.current = undefined;
+    }
+    verifiedTournamentContextRef.current = { tournamentName: kitTournamentName, roomId: kitRoomId };
   }, [kitTournamentName, kitRoomId]);
 
   useEffect(() => {

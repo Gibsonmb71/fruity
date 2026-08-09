@@ -165,7 +165,7 @@ export default function registerTournamentServerIpc(getWindow: () => BrowserWind
         return { ok: false, error: 'Enter an http:// or https:// origin with no path.' };
       }
       const saved = await updateAppPreferences({ qbsheetOrigin: origin ?? undefined });
-      if (saved.ok) getServer().setAllowedQbsheetOrigins(origin ? [origin] : []);
+      getServer().setAllowedQbsheetOrigins(origin ? [origin] : []);
       return saved;
     },
   );

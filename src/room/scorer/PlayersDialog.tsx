@@ -284,7 +284,7 @@ function TeamLineup(props: {
       <li key={player.name} className="scorer-lineup-entry">
         {/* The seat number, matching the column this player occupies on the scoring screen. */}
         <span className="scorer-lineup-seat" aria-hidden="true">
-          {active ? seat + 1 : '\u2014'}
+          {active ? seat + 1 : '—'}
         </span>
         <span className="scorer-lineup-name">{player.name}</span>
         <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
@@ -452,7 +452,10 @@ function TeamLineup(props: {
           side={side}
           maximumActive={maximumActive}
           seatOrder={seatOrder}
-          onApply={(activePlayers) => onSubstitute(side, activePlayers)}
+          onApply={(activePlayers) => {
+            onSubstitute(side, activePlayers);
+            setMode({ kind: 'idle' });
+          }}
           onCancel={() => setMode({ kind: 'idle' })}
         />
       )}
