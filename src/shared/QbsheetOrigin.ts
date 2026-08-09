@@ -1,5 +1,6 @@
 /** Normalize the configured QBSheet origin, without accepting a path or credentials. */
-// eslint-disable-next-line import/prefer-default-export
+export const defaultQbsheetOrigin = 'https://qbsheet.com';
+
 export function normalizeQbsheetOrigin(value: unknown): string | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   let parsed: URL;

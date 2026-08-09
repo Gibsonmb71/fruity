@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { writeFileAtomically } from './AtomicFile';
+import { defaultQbsheetOrigin } from '../shared/QbsheetOrigin';
 
 export interface IAppPreferences {
   /** Where redundant .yft copies are written, or undefined when the feature is off. */
@@ -35,15 +36,15 @@ let cached: IAppPreferences | null = null;
 /** Serialize preference replacements so rapid changes cannot finish out of order. */
 let preferenceWritePromise: Promise<void> = Promise.resolve();
 
-/** Read the preferences, treating a missing or damaged file as "no preferences set". */
+/** Read the preferences, defaulting QBSheet to its production deployment. */
 export function readAppPreferences(): IAppPreferences {
   if (cached) return { ...cached };
-  let value: IAppPreferences = {};
+  const value: IAppPreferences = { qbsheetOrigin: defaultQbsheetOrigin };
   try {
     const raw = fs.readFileSync(preferencesPath(), { encoding: 'utf8' });
     const parsed = JSON.parse(raw) as Partial<IAppPreferences>;
     if (typeof parsed?.secondaryBackupFolder === 'string' && parsed.secondaryBackupFolder !== '') {
-      value = { secondaryBackupFolder: parsed.secondaryBackupFolder };
+      value.secondaryBackupFolder = parsed.secondaryBackupFolder;
     }
     const legacyOrigin = (parsed as Partial<IAppPreferences> & { standaloneScorekeeperOrigin?: unknown })
       ?.standaloneScorekeeperOrigin;
