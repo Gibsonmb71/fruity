@@ -10,7 +10,8 @@ body:
         only way to explain the bug, say so and leave it out — a maintainer will follow up privately.
 
         If this is a security problem in the tournament server, pairing, or session handling, close this form and
-        report it privately instead. See [CONTRIBUTING.md](https://github.com/gbyo/fruity/blob/master/CONTRIBUTING.md#security).
+        use [Report a security vulnerability](https://github.com/gbyo/fruity/security/advisories/new) instead. That
+        form is private to maintainers.
 
   - type: checkboxes
     id: prerequisites

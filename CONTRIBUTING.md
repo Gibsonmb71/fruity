@@ -194,8 +194,11 @@ Extra care applies to anything that crosses a boundary:
 
 ## Security
 
-Do not open a public issue for a vulnerability in the tournament server, pairing, or session handling. Report it
-privately to the maintainers first — a running tournament is a live LAN service with real devices attached to it.
+Do not open a public issue for a vulnerability in the tournament server, pairing, or session handling. A running
+tournament is a live LAN service with real devices attached to it.
+
+Use **Report a security vulnerability** in the new-issue chooser, or the **Security** tab → **Report a
+vulnerability**. Both open GitHub's private reporting form, which is visible only to maintainers.
 
 ## License
 
