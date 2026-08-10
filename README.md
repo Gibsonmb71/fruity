@@ -87,6 +87,7 @@ The formats and the protocol are specified in the QBSheet repository rather than
 | [`docs/QBTCP.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md) | **QBTCP**, the Quiz Bowl Tournament Control Protocol — an application-layer HTTP/JSON protocol between scoresheets and tournament-control software. Discovery, pairing, assignment delivery, progress, results, recovery, CORS/LAN, security model. |
 | [`docs/QBJ_ASSIGNMENT_PROFILE.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md) | Which QBJ fields an assignment uses, the small `_qbtcp` extension, graceful degradation, privacy rules, filename conventions. |
 | [`docs/QBG_MIGRATION.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBG_MIGRATION.md) | Retiring the legacy `.qbg` package, and the `/api/v1` → `/qbtcp/v1` route mapping. |
+| [`docs/TEST_FILE_GENERATION.md`](https://github.com/gbyo/qbsheet/blob/main/docs/TEST_FILE_GENERATION.md) | How developers and coding agents generate realistic QBJ, YFT, SQBS, QBG, recovery, and report fixtures. |
 
 Fruity is one QBTCP implementation and QBSheet is another; neither defines the protocol. Fruity
 serves the canonical `/qbtcp/v1` routes and keeps its existing `/api/v1` routes as deprecated
