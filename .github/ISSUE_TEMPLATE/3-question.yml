@@ -1,0 +1,32 @@
+name: Question
+description: Ask how something in Fruity works. ❓
+labels: ['question']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Setup, packaging, and test conventions are covered in
+        [CONTRIBUTING.md](https://github.com/gbyo/fruity/blob/master/CONTRIBUTING.md), and the feature tour is in the
+        [README](https://github.com/gbyo/fruity/blob/master/README.md). Ask here for anything they do not answer.
+
+        **Do not paste room access tokens, session tokens, or pairing codes.** This issue is public.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What you have tried
+      description: What you have already read or attempted, and what you are ultimately trying to accomplish.
+
+  - type: input
+    id: version
+    attributes:
+      label: Fruity version
+      description: Optional. From **Help → About**, or the commit you built from.
+      placeholder: 4.0.18, or commit fd61f8c8

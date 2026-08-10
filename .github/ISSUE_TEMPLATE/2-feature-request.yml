@@ -1,0 +1,66 @@
+name: Feature request
+description: Suggest something Fruity should be able to do. 🎉
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fruity is built for running tournaments, so the most useful requests describe a real tournament-day
+        problem rather than a specific UI. Say what you were trying to do and what got in the way.
+
+        Changes to the QBTCP protocol or the QBSheet browser scorer itself belong in
+        [`gbyo/qbsheet`](https://github.com/gbyo/qbsheet/issues).
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Tournament setup (teams, rules, stages, pools, rounds)
+        - Match Plan and scheduling
+        - Tournament Control
+        - Browser room scoring
+        - Public pairings or Live Display
+        - Reports and exports (HTML, QBJ, SQBS, .yft)
+        - Statistics or scoring math
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do today, and what makes it hard, slow, or error-prone?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like Fruity to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you handle it now
+      description: Current workaround, if any — including anything you do outside Fruity (spreadsheets, paper, another app).
+
+  - type: input
+    id: format
+    attributes:
+      label: Tournament context
+      description: Optional, but helps a lot. Circuit, field size, format, and how many rooms.
+      placeholder: High school, 24 teams, 2 prelim pools then playoff bracket, 12 rooms.
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to help?
+      options:
+        - label: I would be willing to test this before release.
+          required: false
+        - label: I would be willing to work on this.
+          required: false

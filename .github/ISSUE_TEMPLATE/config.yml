@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: QBTCP protocol or the QBSheet browser scorer
+    url: https://github.com/gbyo/qbsheet/issues
+    about: The protocol specs and the standalone browser scorer live in gbyo/qbsheet. File there instead.
+  - name: A bug that also happens in stock YellowFruit
+    url: https://github.com/ANadig/YellowFruit/issues
+    about: Fruity is a fork. Statkeeping bugs unrelated to fork features are worth reporting upstream too.
+  - name: Security vulnerability
+    url: https://github.com/gbyo/fruity/blob/master/CONTRIBUTING.md#security
+    about: Do not open a public issue for a vulnerability in the tournament server, pairing, or session handling.
