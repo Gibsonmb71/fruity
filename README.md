@@ -219,6 +219,8 @@ Fruity is based on [YellowFruit](https://github.com/ANadig/YellowFruit) by Andre
 
 Bug reports, testing, and contributions are welcome. (please do send them)
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks to run before a pull request, test conventions, and the rules around protocol and file-format changes.
+
 Please use [GitHub Issues](https://github.com/Gibsonmb71/fruity/issues) for bugs and feature requests.
 
 If reporting an issue involving browser room scoring, do not post room access tokens or other tournament credentials publicly.
