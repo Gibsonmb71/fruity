@@ -94,7 +94,7 @@
     "electron-updater": "^6.3.0",
     "modaq": "^1.41.1",
     "octokit": "^5.0.3",
-    "qbsheet": "git+https://github.com/gbyo/qbsheet.git#016742bb36dc240c8d43ea8ed5fa22f2c0c54751",
+    "qbsheet": "git+https://github.com/gbyo/qbsheet.git#e2cf6a9414d38099e590854324ff8dbea35db22c",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

@@ -34,11 +34,7 @@ import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveT
 import { roundAssignmentRevision } from '../../shared/RoundAssignmentRevision';
 import { normalizeQbsheetOrigin } from '../../shared/QbsheetOrigin';
 import { readQbsheetSourceMetadata } from './QbsheetQbjMetadata';
-import {
-  exportQbsheetGamePackages as buildQbsheetGamePackages,
-  qbsheetGamePackageFileName,
-  qbsheetGamePackageFolderName,
-} from './QbsheetGamePackage';
+import { exportQbjAssignments, qbjAssignmentFileName, qbjAssignmentFolderName } from './QbjAssignment';
 
 /** One remote submission waiting on the statskeeper's decision */
 export interface IInboxItem {
@@ -1093,7 +1089,8 @@ export default class TournamentServerService {
   /** Export the currently released/selected round as a folder of per-room portable game packages. */
   async exportQbsheetGamePackages(selectedRoundNumber?: number): Promise<boolean> {
     this.lastExportWarning = '';
-    const built = buildQbsheetGamePackages(this.tournament, selectedRoundNumber);
+    // QBJ, not .qbg. The legacy package is import-only from here on; nothing writes a new one.
+    const built = exportQbjAssignments(this.tournament, selectedRoundNumber);
     if (!built.ok) {
       this.lastError = built.error;
       this.dataChangedReactCallback();
@@ -1106,11 +1103,11 @@ export default class TournamentServerService {
     }
     try {
       const result = (await window.electron.ipcRenderer.invoke(IpcBidirectional.ExportQbsheetGamePackages, {
-        folderName: qbsheetGamePackageFolderName(built.roundName),
-        files: built.packages.map((packageValue) => ({
-          directory: packageValue.room?.name ?? 'Unassigned room',
-          filename: qbsheetGamePackageFileName(packageValue),
-          contents: JSON.stringify(packageValue, null, 2),
+        folderName: qbjAssignmentFolderName(built.roundName),
+        files: built.assignments.map((assignment) => ({
+          directory: assignment.roomName ?? 'Unassigned room',
+          filename: qbjAssignmentFileName(assignment),
+          contents: JSON.stringify(assignment.document, null, 2),
         })),
       })) as { ok?: boolean; cancelled?: boolean; error?: string; count?: number };
       if (result?.cancelled) return false;
