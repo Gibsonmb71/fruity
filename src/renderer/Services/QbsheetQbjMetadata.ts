@@ -65,8 +65,13 @@ function roundNumberForMatch(objects: Record<string, unknown>[], matchId: string
 
   for (const round of rounds) {
     if (!refersToMatch(round.matches)) continue;
-    const parsed = Number.parseInt(String(round.name), 10);
-    if (Number.isFinite(parsed)) return parsed;
+    // The whole name has to be a positive integer. `parseInt` would read "3A" as 3 and
+    // "1 Tiebreak" as 1, and a result filed against the wrong round is worse than one that falls
+    // back to matching on teams.
+    const name = String(round.name ?? '').trim();
+    if (!/^\d+$/.test(name)) continue;
+    const parsed = Number.parseInt(name, 10);
+    if (parsed > 0) return parsed;
   }
   return undefined;
 }

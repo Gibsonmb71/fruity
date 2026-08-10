@@ -720,9 +720,12 @@ export default class Router {
     // Session-scoped translations. The session token authorizes these, exactly as before.
     if (head === 'sessions' && segments.length >= 2) {
       if (segments.length === 2) return ['sessions', second];
-      if (third === 'progress') return ['sessions', second, 'snapshot'];
-      if (third === 'result') return ['sessions', second, 'final'];
-      if (third === 'recovery') return ['sessions', second, 'recovery'];
+      // Exactly three, so a trailing segment is a 404 rather than something silently ignored.
+      if (segments.length === 3) {
+        if (third === 'progress') return ['sessions', second, 'snapshot'];
+        if (third === 'result') return ['sessions', second, 'final'];
+        if (third === 'recovery') return ['sessions', second, 'recovery'];
+      }
       sendError(res, 404, 'No such endpoint.');
       return null;
     }

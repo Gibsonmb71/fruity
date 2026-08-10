@@ -51,8 +51,17 @@ function teamId(name: string): string {
   return `Team_${name}`;
 }
 
-function registrationId(name: string): string {
-  return `Registration_${name}`;
+/**
+ * The registration, preferring the real one the snapshot carries.
+ *
+ * Derivation is a fallback, not the rule: a registration is an *organization*, and an organization
+ * that fields an A and a B team registers once. `Registration_${teamName}` would name a
+ * registration that does not exist, and a result carrying it would point at nothing. The derived
+ * form is kept only for a snapshot written before this field existed, where a plausible id is
+ * better than none.
+ */
+function registrationOf(team: IRoomTeam): { id: string; name: string } {
+  return team.registration ?? { id: `Registration_${team.name}`, name: team.name };
 }
 
 function teamObjects(team: IRoomTeam): { team: QbjObject; registration: QbjObject } {
@@ -71,8 +80,7 @@ function teamObjects(team: IRoomTeam): { team: QbjObject; registration: QbjObjec
     },
     registration: {
       type: 'Registration',
-      id: registrationId(team.name),
-      name: team.name,
+      ...registrationOf(team),
       teams: [{ $ref: teamId(team.name) }],
     },
   };
@@ -136,10 +144,13 @@ export function buildQbtcpAssignmentDocument(input: IQbtcpAssignmentInput): IQbt
     matches: [{ $ref: matchup.scheduledMatchId }],
   };
 
+  // The real phase where the snapshot knows it. A playoff game that claimed the prelim phase would
+  // be filed under the wrong bracket coming back. The name is omitted rather than invented when the
+  // snapshot cannot say, which is the same thing the renderer's builder does.
   const phase: QbjObject = {
     type: 'Phase',
-    id: 'Phase_1',
-    name: 'Prelims',
+    id: matchup.phaseName ? `Phase_${matchup.phaseName}` : 'Phase_1',
+    ...(matchup.phaseName ? { name: matchup.phaseName } : {}),
     rounds: [round],
   };
 

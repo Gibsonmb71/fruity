@@ -78,6 +78,16 @@ export interface IRoomTeam {
   /** Team name, exactly as YellowFruit knows it. Used to match the match back on import. */
   name: string;
   players: IRoomPlayer[];
+  /**
+   * The organization this team registered under, so a QBTCP assignment carries the same
+   * `Registration` identity a file assignment does.
+   *
+   * Not derivable from the team name: an organization fields "Ninety Six A" and "Ninety Six B" under
+   * one registration called "Ninety Six", so `Registration_${teamName}` would name a registration
+   * that does not exist. Optional because a team that has vanished mid-tournament is still served
+   * with an empty roster rather than crashing a room.
+   */
+  registration?: { id: string; name: string };
 }
 
 /** One round a room is allowed to pick */
@@ -225,6 +235,12 @@ export interface IAssignmentDescriptor {
    * it before a game is scored on questions the other rooms have already played.
    */
   packetName?: string;
+  /**
+   * The phase this round belongs to, so an assignment served over the network carries the same
+   * `Phase` identity a file assignment does. A playoff game that claimed the prelim phase would be
+   * filed under the wrong bracket on the way back.
+   */
+  phaseName?: string;
   leftTeam: string;
   rightTeam: string;
   status: ScheduledMatchStatus;
@@ -393,6 +409,8 @@ export interface IRoomMatchup {
   roundRevision?: number;
   /** The packet this round uses, when one is named. Identity only; see `IAssignmentDescriptor`. */
   packetName?: string;
+  /** The phase this round belongs to. See `IAssignmentDescriptor`. */
+  phaseName?: string;
   leftTeam: IRoomTeam;
   rightTeam: IRoomTeam;
   status: ScheduledMatchStatus;

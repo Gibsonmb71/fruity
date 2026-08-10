@@ -166,10 +166,12 @@ export function buildQbjAssignment(
     matches: [{ $ref: scheduled.id }],
   };
 
+  // Omitted rather than invented when the round belongs to no phase, so the file and network
+  // builders degrade the same way. A made-up phase name is a bracket claim nobody made.
   const phaseObject: QbjObject = {
     type: QbjTypeNames.Phase,
     id: phase ? phase.id : 'Phase_1',
-    name: phase ? phase.name : 'Playoffs',
+    ...(phase ? { name: phase.name } : {}),
     rounds: [roundObject],
   };
 
@@ -255,7 +257,14 @@ export function exportQbjAssignments(tournament: Tournament, selectedRoundNumber
     assignments.push(built.value);
   }
 
-  if (assignments.length === 0 && problems.length > 0) return { ok: false, error: problems.join(' ') };
+  if (assignments.length === 0) {
+    // Writing a folder with nothing in it reads as a successful export and sends a director looking
+    // for files that were never going to exist.
+    return {
+      ok: false,
+      error: problems.length > 0 ? problems.join(' ') : `${round.displayName()} has no room-assigned games to export.`,
+    };
+  }
   return { ok: true, roundNumber, roundName: round.displayName(), assignments, problems };
 }
 

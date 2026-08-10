@@ -71,6 +71,12 @@ function assignmentText(tournament: Tournament): string {
   return JSON.stringify(exported.assignments[0].document);
 }
 
+/** The round revision the exported document actually carries. */
+function revisionOf(serialized: string): number {
+  const match = JSON.parse(serialized).objects.find((entry: { type?: string }) => entry.type === 'Match');
+  return match[qbtcpExtensionKey].round_revision;
+}
+
 /** Open an assignment through QBSheet's parser, which is the only reader on that side. */
 function openAssignment(text: string) {
   const opened = openGameText(text);
@@ -175,16 +181,14 @@ describe('Fruity writes an assignment QBJ', () => {
 
   test('a rebracket changes the revision, so a result scored against the old draw is detectable', () => {
     const { tournament, scheduled } = contractTournament();
-    const before = JSON.parse(assignmentText(tournament)).objects.find(
-      (entry: { type?: string }) => entry.type === 'Match',
-    )[qbtcpExtensionKey].round_revision;
+    const before = revisionOf(assignmentText(tournament));
+    // Exporting the same unchanged tournament twice must not move the revision, or every re-export
+    // would make the previous download look stale.
+    expect(revisionOf(assignmentText(tournament))).toBe(before);
 
     [, , scheduled.rightTeamName] = testTeamNames;
-    const after = JSON.parse(assignmentText(tournament)).objects.find(
-      (entry: { type?: string }) => entry.type === 'Match',
-    )[qbtcpExtensionKey].round_revision;
 
-    expect(after).not.toBe(before);
+    expect(revisionOf(assignmentText(tournament))).not.toBe(before);
   });
 });
 
@@ -308,7 +312,8 @@ describe('the round trip back into Fruity', () => {
 
   test('the identity Fruity reads back is the identity it wrote', () => {
     const { tournament, scheduled } = contractTournament();
-    const resultText = scoreAndExport(openAssignment(assignmentText(tournament)));
+    const assignment = assignmentText(tournament);
+    const resultText = scoreAndExport(openAssignment(assignment));
 
     const metadata = readQbsheetSourceMetadata(JSON.parse(resultText));
 
@@ -318,7 +323,8 @@ describe('the round trip back into Fruity', () => {
       scheduledMatchId: scheduled.id,
       roundNumber: 1,
     });
-    expect(metadata?.roundRevision).toEqual(expect.any(Number));
+    // The exact revision the assignment carried, so a stale result stays detectable.
+    expect(metadata?.roundRevision).toBe(revisionOf(assignment));
   });
 
   test('only one Match is created, and the round holds only it', () => {
@@ -403,13 +409,13 @@ describe('the round trip back into Fruity', () => {
 describe('a file assignment and a QBTCP assignment are the same document', () => {
   test('the same bytes over either route produce the same definition', () => {
     const { tournament, scheduled } = contractTournament();
-    const revision = 1;
 
     // What Fruity would write to disk.
     const onDisk = exportQbjAssignments(tournament, 1);
     if (!onDisk.ok) throw new Error(onDisk.error);
+    const revision = revisionOf(JSON.stringify(onDisk.assignments[0].document));
 
-    // What the QBTCP assignment endpoint serves: the same builder, no second model.
+    // The same builder the endpoint uses, given the revision the file actually carries.
     const overWire = buildQbjAssignment(tournament, scheduled, revision);
     expect(overWire.ok).toBe(true);
     if (!overWire.ok) return;
@@ -417,11 +423,72 @@ describe('a file assignment and a QBTCP assignment are the same document', () =>
     const fromFile = openAssignment(JSON.stringify(onDisk.assignments[0].document));
     const fromNetwork = openAssignment(JSON.stringify(overWire.value.document));
 
-    // Identity, teams, rules and room all agree; only the revision may differ, and here it does not.
+    // Identity, teams, rules and room all agree.
     expect(fromNetwork.qbjIdentity).toEqual(fromFile.qbjIdentity);
     expect(fromNetwork.left).toEqual(fromFile.left);
     expect(fromNetwork.right).toEqual(fromFile.right);
     expect(fromNetwork.scorekeeperFormat).toEqual(fromFile.scorekeeperFormat);
     expect(fromNetwork.room).toEqual(fromFile.room);
+
+    // And so does the operational block, which is where the revision and the room id live.
+    const extensionOf = (document: object) =>
+      (document as { objects: Record<string, unknown>[] }).objects.find((entry) => entry.type === 'Match')?.[
+        qbtcpExtensionKey
+      ];
+    expect(extensionOf(overWire.value.document)).toEqual(extensionOf(onDisk.assignments[0].document));
+  });
+});
+
+describe('exporting a round with nothing in it', () => {
+  test('is a refusal, not an empty success', () => {
+    const { tournament } = contractTournament();
+    tournament.scheduledMatches = [];
+
+    const exported = exportQbjAssignments(tournament, 1);
+
+    // An empty folder reads as a completed export and sends a director looking for files that were
+    // never going to exist.
+    expect(exported.ok).toBe(false);
+    if (exported.ok) return;
+    expect(exported.error).toContain('no room-assigned games');
+  });
+
+  test('a round whose games all failed still reports why', () => {
+    const { tournament, scheduled } = contractTournament();
+    scheduled.roomId = undefined;
+
+    const exported = exportQbjAssignments(tournament, 1);
+
+    expect(exported.ok).toBe(false);
+    if (exported.ok) return;
+    expect(exported.error).toContain('no room assignment');
+  });
+});
+
+describe('reading a round number out of a result', () => {
+  /** A result document whose round is named however the test needs. */
+  function resultWithRoundName(name: string): string {
+    const { tournament } = contractTournament();
+    const document = JSON.parse(assignmentText(tournament));
+    const round = document.objects.find((entry: { type?: string }) => entry.type === 'Tournament').phases[0].rounds[0];
+    round.name = name;
+    return JSON.stringify(document);
+  }
+
+  test('a plain number is read', () => {
+    expect(readQbsheetSourceMetadata(JSON.parse(resultWithRoundName('4')))?.roundNumber).toBe(4);
+  });
+
+  test('a name that merely starts with a number is not', () => {
+    // `parseInt` would read these as 3 and 1, filing a result against a round nobody played.
+    for (const name of ['3A', '1 Tiebreak', '2-B']) {
+      expect(readQbsheetSourceMetadata(JSON.parse(resultWithRoundName(name)))).toBeNull();
+    }
+  });
+
+  test('zero and negative round names are refused', () => {
+    for (const name of ['0', '-2']) {
+      expect(readQbsheetSourceMetadata(JSON.parse(resultWithRoundName(name)))).toBeNull();
+    }
   });
 });
