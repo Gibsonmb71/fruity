@@ -72,8 +72,26 @@ of the following workflows:
   the Local Tournament Server, and let the scorekeeper pair normally. The origin is a CORS allowlist
   entry only; room and session tokens still authenticate every room operation.
 * **File-based** — from Match Plan, release the round and choose **Export room scoring files**. Fruity
-  writes one `.qbg` GamePackage per playable room assignment. The package contains the roster, scoring
-  format, procedure, room, and assignment revision, but no room credentials or server URL.
+  writes one `*.assignment.qbj` per playable room assignment: an official QBJ document holding one
+  unplayed scheduled match, its two teams and rosters, and the tournament's scoring rules — but no
+  room credentials, no server URL, and no other room's game.
+
+Both workflows carry the **same** document. The assignment served over the network is the one Fruity
+could have written to disk, and QBSheet parses both with one reader, so the connected and offline
+paths cannot drift apart.
+
+The formats and the protocol are specified in the QBSheet repository rather than restated here:
+
+| Specification | Covers |
+| --- | --- |
+| [`docs/QBTCP.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md) | **QBTCP**, the Quiz Bowl Tournament Control Protocol — an application-layer HTTP/JSON protocol between scoresheets and tournament-control software. Discovery, pairing, assignment delivery, progress, results, recovery, CORS/LAN, security model. |
+| [`docs/QBJ_ASSIGNMENT_PROFILE.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md) | Which QBJ fields an assignment uses, the small `_qbtcp` extension, graceful degradation, privacy rules, filename conventions. |
+| [`docs/QBG_MIGRATION.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBG_MIGRATION.md) | Retiring the legacy `.qbg` package, and the `/api/v1` → `/qbtcp/v1` route mapping. |
+
+Fruity is one QBTCP implementation and QBSheet is another; neither defines the protocol. Fruity
+serves the canonical `/qbtcp/v1` routes and keeps its existing `/api/v1` routes as deprecated
+aliases onto the same handlers, so scoresheets deployed before the migration keep working. Fruity no
+longer writes `.qbg` files; it still imports them.
 
 QBSheet scores locally in either mode and always produces a portable QBJ. Connected
 games can send a result to Fruity automatically, but the scorekeeper still downloads and hands over

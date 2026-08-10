@@ -483,7 +483,7 @@ export default class TournamentServerService {
     );
     const teams = this.tournament.getListOfAllTeams().map((team) => ({
       name: team.name,
-      players: team.players.filter((p) => p.name !== '').map((p) => ({ name: p.name })),
+      players: team.players.filter((p) => p.name !== '').map((p) => ({ name: p.name, id: p.id })),
     }));
     const roundNames = new Map(rounds.map((round) => [round.number, round.name]));
     // Packet identity only, and only where a director actually named one. A round with no packet

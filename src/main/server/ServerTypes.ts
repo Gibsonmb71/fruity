@@ -53,6 +53,15 @@ export const staleRoomThresholdMs = 60 * 1000;
 /** One player on a team roster, as a room needs it */
 export interface IRoomPlayer {
   name: string;
+  /**
+   * The player's QBJ id, so a QBTCP assignment can carry the identity a file assignment carries.
+   *
+   * Optional because a team that has vanished from the tournament is still served with an empty
+   * roster rather than crashing a room mid-tournament, and because a snapshot written by an older
+   * renderer will not have it. A result that comes back without player ids still resolves on name,
+   * which is how the importer has always matched players.
+   */
+  id?: string;
 }
 
 /** Narrow, authenticated request forwarded from a playing room to the authoritative renderer. */
