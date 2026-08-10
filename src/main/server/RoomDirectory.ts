@@ -105,6 +105,7 @@ function toMatchup(snapshot: ITournamentSnapshot, assignment: IAssignmentDescrip
     roundName: assignment.roundName,
     roundRevision: assignment.roundRevision,
     packetName: assignment.packetName,
+    phaseName: assignment.phaseName,
     leftTeam: findTeam(snapshot, assignment.leftTeam),
     rightTeam: findTeam(snapshot, assignment.rightTeam),
     status: assignment.status,

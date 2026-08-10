@@ -502,7 +502,11 @@ export function handleExportQbsheetGamePackages(
     if (typeof file !== 'object' || file === null) return { ok: false, error: 'The export request was invalid.' };
     const directory = safeQbsheetExportPart(file.directory);
     const filename = safeQbsheetExportPart(file.filename);
-    if (!directory || !filename || !filename.toLowerCase().endsWith('.qbg') || typeof file.contents !== 'string') {
+    // `.qbj` is what an assignment is now. `.qbg` stays accepted so a build that still holds a
+    // renderer from before the migration cannot be left unable to export anything at all.
+    const lowered = filename?.toLowerCase() ?? '';
+    const hasExportExtension = lowered.endsWith('.qbj') || lowered.endsWith('.qbg');
+    if (!directory || !filename || !hasExportExtension || typeof file.contents !== 'string') {
       return { ok: false, error: 'The export request contained an unsafe file name.' };
     }
     if (file.contents.length > 2 * 1024 * 1024) return { ok: false, error: 'A game package was too large to export.' };

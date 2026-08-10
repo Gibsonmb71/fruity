@@ -1,5 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'http';
+import { qbjMimeType, qbjSerializationVersion, qbtcpPrefix } from 'qbsheet';
 import SessionStore, { SessionWriteError, SessionWriteResult } from './SessionStore';
+import { buildQbtcpAssignmentDocument } from './QbtcpAssignment';
 import normalizeQbjMatch from '../../renderer/Services/QbjMatchNormalizer';
 import {
   authorizeRoom,
@@ -398,7 +400,10 @@ export default class Router {
     const method = req.method ?? 'GET';
 
     const cors = this.applyCors(req, res);
-    if (method === 'OPTIONS' && pathname.startsWith(apiPrefix)) {
+    // Both surfaces are the same API to a browser: a preflight for the canonical path has to be
+    // answered as fully as one for the legacy path, including the private-network handshake.
+    const isApiPath = pathname.startsWith(apiPrefix) || pathname.startsWith(qbtcpPrefix);
+    if (method === 'OPTIONS' && isApiPath) {
       if (cors.origin !== undefined && !cors.allowed) {
         sendError(res, 403, 'This browser origin is not approved for QBSheet.');
         return;
@@ -414,14 +419,23 @@ export default class Router {
       return;
     }
 
-    if (!pathname.startsWith(apiPrefix)) {
+    if (!isApiPath) {
       // Anything that isn't the API is the browser room application.
       this.host.serveStatic(req, res, pathname);
       return;
     }
 
-    const route = pathname.slice(apiPrefix.length);
-    const segments = route.split('/').filter((s) => s !== '');
+    const isQbtcp = pathname.startsWith(qbtcpPrefix);
+    const prefix = isQbtcp ? qbtcpPrefix : apiPrefix;
+    const route = pathname.slice(prefix.length);
+    let segments = route.split('/').filter((s) => s !== '');
+
+    if (isQbtcp) {
+      const translated = await this.dispatchQbtcp(req, res, segments, method);
+      // Null means the request was answered here: discovery, the QBJ assignment body, or a refusal.
+      if (translated === null) return;
+      segments = translated;
+    }
 
     // GET /api/v1/public/snapshot
     if (segments.length === 2 && segments[0] === 'public' && segments[1] === 'snapshot') {
@@ -647,6 +661,154 @@ export default class Router {
     }
 
     sendError(res, 404, 'No such endpoint.');
+  }
+
+  /**
+   * Serve the QBTCP surface by translating it onto the handlers that already exist.
+   *
+   * # Why translation and not a second router
+   *
+   * `/qbtcp/v1` and `/api/v1` are the same operations under different names. Giving the canonical
+   * paths their own handlers would mean two implementations of pairing, of presence, of session
+   * writes -- and the deployed clients on the legacy paths would be the ones running the copy that
+   * stops getting fixed. So this maps a canonical path onto the legacy segments and falls through
+   * to exactly one implementation.
+   *
+   * Two endpoints are answered here rather than translated, because they have no legacy equivalent:
+   * discovery, and the assignment itself, whose body is a QBJ document rather than the legacy
+   * response shape.
+   *
+   * # The room id leaves the path
+   *
+   * A room token scopes to exactly one room, so the canonical routes resolve the room from the
+   * credential instead of from a path segment. That removes the impression that a different room
+   * can be reached by editing a URL, and it means an unauthorized caller learns nothing about which
+   * room ids exist.
+   *
+   * @returns the legacy segments to continue with, or null when the request has been answered
+   */
+  private async dispatchQbtcp(
+    req: IncomingMessage,
+    res: ServerResponse,
+    segments: string[],
+    method: string,
+  ): Promise<string[] | null> {
+    // GET /qbtcp/v1 -- discovery. Unauthenticated, and says nothing about the schedule.
+    if (segments.length === 0) {
+      if (method !== 'GET' && method !== 'HEAD') {
+        sendError(res, 405, `${method} is not allowed for this endpoint.`);
+        return null;
+      }
+      const snapshot = this.host.getSnapshot();
+      sendJson(res, 200, {
+        protocol: 'QBTCP',
+        version: 1,
+        capabilities: ['pairing', 'assignment', 'progress', 'result', 'recovery', 'help', 'presence'],
+        qbj_version: qbjSerializationVersion,
+        name: snapshot.name,
+      });
+      return null;
+    }
+
+    const [head, second, third] = segments;
+
+    // Unauthenticated translations.
+    if (segments.length === 1 && head === 'tournament') return ['tournament'];
+    if (segments.length === 1 && head === 'rooms') return ['join', 'rooms'];
+    if (segments.length === 1 && head === 'pair') return ['join'];
+
+    // Session-scoped translations. The session token authorizes these, exactly as before.
+    if (head === 'sessions' && segments.length >= 2) {
+      if (segments.length === 2) return ['sessions', second];
+      // Exactly three, so a trailing segment is a 404 rather than something silently ignored.
+      if (segments.length === 3) {
+        if (third === 'progress') return ['sessions', second, 'snapshot'];
+        if (third === 'result') return ['sessions', second, 'final'];
+        if (third === 'recovery') return ['sessions', second, 'recovery'];
+      }
+      sendError(res, 404, 'No such endpoint.');
+      return null;
+    }
+
+    // Everything below is room-scoped, and the room comes from the token.
+    const room = this.roomFromToken(req);
+    if (!room) {
+      sendError(res, 403, 'This room link is not valid for the tournament that is currently open.');
+      return null;
+    }
+
+    if (segments.length === 1 && head === 'assignment') {
+      if (method !== 'GET') {
+        sendError(res, 405, `${method} is not allowed for this endpoint.`);
+        return null;
+      }
+      this.sendQbtcpAssignment(req, res, room.id);
+      return null;
+    }
+    // The operational state that is deliberately not in the QBJ body.
+    if (segments.length === 2 && head === 'assignment' && second === 'status') {
+      return ['rooms', room.id, 'assignment'];
+    }
+    if (segments.length === 1 && head === 'sessions') return ['rooms', room.id, 'sessions'];
+    if (segments.length === 1 && head === 'presence') return ['rooms', room.id, 'presence'];
+    if (segments.length === 1 && head === 'help') return ['rooms', room.id, 'help'];
+    if (segments.length === 2 && head === 'help') return ['rooms', room.id, 'help', second];
+    if (segments.length === 2 && head === 'roster' && second === 'players') return ['rooms', room.id, 'players'];
+
+    sendError(res, 404, 'No such endpoint.');
+    return null;
+  }
+
+  /** The room this request's token authorizes, or null. Never says which room ids exist. */
+  private roomFromToken(req: IncomingMessage) {
+    const token = headerToken(req, roomTokenHeader);
+    if (!token) return null;
+    const snapshot = this.host.getSnapshot();
+    for (const room of snapshot.rooms) {
+      if (authorizeRoom(snapshot, room.id, token).ok) return room;
+    }
+    return null;
+  }
+
+  /**
+   * The assignment, as a QBJ document.
+   *
+   * This is the architectural commitment of QBTCP v1: what a room receives over the network is the
+   * same document tournament control could have written to disk as `*.assignment.qbj`, parsed on
+   * the other side by the same reader a file goes through. Session state, blocked reasons and the
+   * room's previous and next games are not in here -- they are not the game, and putting them in
+   * would mean inventing QBJ fields for them. They stay on `/qbtcp/v1/assignment/status`.
+   */
+  private sendQbtcpAssignment(req: IncomingMessage, res: ServerResponse, roomId: string) {
+    const room = this.authorizeRoomOrRefuse(req, res, roomId);
+    if (!room) return;
+
+    const snapshot = this.host.getSnapshot();
+    this.host.onRoomCheckIn?.(roomId, headerToken(req, deviceIdHeader), headerToken(req, operatorNameHeader));
+    const response = buildAssignmentResponse(snapshot, room);
+
+    if (!response.current || !snapshot.scoringFormat) {
+      // Nothing to score is not an error. An empty QBJ document would be a lie about the schedule.
+      res.writeHead(204, { 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
+
+    const document = buildQbtcpAssignmentDocument({
+      snapshot,
+      matchup: response.current,
+      roomId: room.id,
+      roomName: room.name,
+      format: snapshot.scoringFormat,
+    });
+
+    const body = JSON.stringify(document);
+    res.writeHead(200, {
+      'Content-Type': qbjMimeType,
+      'Content-Length': Buffer.byteLength(body),
+      'Cache-Control': 'no-store',
+    });
+    res.end(body);
   }
 
   // eslint-disable-next-line class-methods-use-this

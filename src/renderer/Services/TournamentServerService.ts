@@ -34,11 +34,7 @@ import { IPublicLiveSnapshot, IPublicPairingsSnapshot } from '../../shared/LiveT
 import { roundAssignmentRevision } from '../../shared/RoundAssignmentRevision';
 import { normalizeQbsheetOrigin } from '../../shared/QbsheetOrigin';
 import { readQbsheetSourceMetadata } from './QbsheetQbjMetadata';
-import {
-  exportQbsheetGamePackages as buildQbsheetGamePackages,
-  qbsheetGamePackageFileName,
-  qbsheetGamePackageFolderName,
-} from './QbsheetGamePackage';
+import { exportQbjAssignments, qbjAssignmentFileName, qbjAssignmentFolderName } from './QbjAssignment';
 
 /** One remote submission waiting on the statskeeper's decision */
 export interface IInboxItem {
@@ -485,11 +481,22 @@ export default class TournamentServerService {
     const rounds = this.tournament.phases.flatMap((phase) =>
       phase.rounds.map((round) => ({ number: round.number, name: round.displayName() })),
     );
-    const teams = this.tournament.getListOfAllTeams().map((team) => ({
-      name: team.name,
-      players: team.players.filter((p) => p.name !== '').map((p) => ({ name: p.name })),
-    }));
+    const teams = this.tournament.getListOfAllTeams().map((team) => {
+      // The organization, not the team. A registration is shared by "Ninety Six A" and "Ninety Six
+      // B", so it cannot be derived from a team name on the far side of the wire.
+      const registration = this.tournament.registrations.find((candidate) => candidate.teams.includes(team));
+      return {
+        name: team.name,
+        players: team.players.filter((p) => p.name !== '').map((p) => ({ name: p.name, id: p.id })),
+        ...(registration ? { registration: { id: registration.id, name: registration.name } } : {}),
+      };
+    });
     const roundNames = new Map(rounds.map((round) => [round.number, round.name]));
+    // Which phase owns each round, so a served assignment keeps the bracket it belongs to.
+    const phaseNames = new Map<number, string>();
+    for (const phase of this.tournament.phases) {
+      for (const round of phase.rounds) phaseNames.set(round.number, phase.name);
+    }
     // Packet identity only, and only where a director actually named one. A round with no packet
     // name says nothing rather than guessing "Packet 4" from "Round 4".
     const packetNames = new Map<number, string>();
@@ -539,6 +546,7 @@ export default class TournamentServerService {
           roundName: roundNames.get(match.roundNumber) ?? String(match.roundNumber),
           roundRevision: roundRevisions.get(match.roundNumber),
           packetName: packetNames.get(match.roundNumber),
+          phaseName: phaseNames.get(match.roundNumber),
           leftTeam: match.leftTeamName,
           rightTeam: match.rightTeamName,
           status: match.status,
@@ -1093,7 +1101,8 @@ export default class TournamentServerService {
   /** Export the currently released/selected round as a folder of per-room portable game packages. */
   async exportQbsheetGamePackages(selectedRoundNumber?: number): Promise<boolean> {
     this.lastExportWarning = '';
-    const built = buildQbsheetGamePackages(this.tournament, selectedRoundNumber);
+    // QBJ, not .qbg. The legacy package is import-only from here on; nothing writes a new one.
+    const built = exportQbjAssignments(this.tournament, selectedRoundNumber);
     if (!built.ok) {
       this.lastError = built.error;
       this.dataChangedReactCallback();
@@ -1106,11 +1115,11 @@ export default class TournamentServerService {
     }
     try {
       const result = (await window.electron.ipcRenderer.invoke(IpcBidirectional.ExportQbsheetGamePackages, {
-        folderName: qbsheetGamePackageFolderName(built.roundName),
-        files: built.packages.map((packageValue) => ({
-          directory: packageValue.room?.name ?? 'Unassigned room',
-          filename: qbsheetGamePackageFileName(packageValue),
-          contents: JSON.stringify(packageValue, null, 2),
+        folderName: qbjAssignmentFolderName(built.roundName),
+        files: built.assignments.map((assignment) => ({
+          directory: assignment.roomName ?? 'Unassigned room',
+          filename: qbjAssignmentFileName(assignment),
+          contents: JSON.stringify(assignment.document, null, 2),
         })),
       })) as { ok?: boolean; cancelled?: boolean; error?: string; count?: number };
       if (result?.cancelled) return false;
